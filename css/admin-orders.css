@@ -1,0 +1,206 @@
+/*
+    css/admin-orders.css
+
+    Styles pour la page admin "Commandes" (simple-shop-orders.html.twig),
+    implémentée comme un treegrid ARIA (voir
+    https://www.w3.org/WAI/ARIA/apg/patterns/treegrid/examples/treegrid-1/) :
+    chaque commande est une ligne de niveau 1, chaque ligne enfant (adresse
+    de livraison, facture, puis un article par ligne de commande) une ligne
+    enfant de niveau 2, repliée/dépliée via aria-expanded + la classe
+    `.hidden` (posée en JavaScript uniquement : sans JS, toutes les lignes
+    enfants restent visibles en permanence).
+
+    Trois "formes" de lignes enfants (toutes partagent la classe
+    `.simple-shop-item-row`, voir le twig) :
+      1. Ligne "Adresse de livraison" : <th scope="row"> (libellé) +
+         <td colspan="5"> contenant un bloc <address>.
+      2. Ligne "Facture" : <th scope="row"> (libellé) + <td colspan="5">
+         contenant un lien de téléchargement + le formulaire de statut
+         e-reporting (.simple-shop-invoice-status-form).
+      3. Ligne d'article : une seule <td colspan="6" data-label="Article">
+         (pas de <th>), texte descriptif de la ligne de commande.
+
+    Deux parties :
+      1. Base + responsive "tableau -> cartes" sur petits écrans (technique
+         data-label, sans JS).
+      2. Treegrid : triangle de dépliement, masquage des lignes enfants,
+         focus visible (roving tabindex géré en JS), mise en valeur des
+         lignes enfants (fond gris).
+
+    `.sr-only` : seule classe utilitaire tolérée dans ce plugin (voir note
+    dans le template) — masque visuellement un élément tout en le laissant
+    accessible aux lecteurs d'écran.
+*/
+
+.sr-only {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border: 0;
+}
+
+.simple-shop-orders-table {
+    width: 100%;
+    border-collapse: collapse;
+}
+
+.simple-shop-order-status-form,
+.simple-shop-invoice-status-form {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    align-items: center;
+}
+
+/* Le formulaire de statut e-reporting suit le lien de téléchargement de
+   facture : un peu d'espace au-dessus pour ne pas les coller visuellement. */
+.simple-shop-invoice-status-form {
+    margin-top: 0.5rem;
+}
+
+/* Bloc <address> (adresse de livraison) : pas de style italique/marge
+   particulière imposée par le navigateur, on garde une présentation sobre
+   cohérente avec le reste du tableau. */
+.simple-shop-orders-table address {
+    font-style: normal;
+    margin: 0;
+}
+
+/* --------------------------------------------------------------------- */
+/* Treegrid : lignes de commande / lignes enfants                        */
+/* --------------------------------------------------------------------- */
+
+.simple-shop-orders-table tr[role="row"] {
+    outline: none;
+}
+
+.simple-shop-orders-table tr[role="row"]:focus,
+.simple-shop-orders-table td[role="gridcell"]:focus,
+.simple-shop-orders-table th[role="gridcell"]:focus {
+    outline: 2px solid #2a6ebb;
+    outline-offset: -2px;
+}
+
+/* Ligne enfant (niveau 2, quelle que soit sa forme) : masquée par défaut
+   UNIQUEMENT lorsque le JavaScript est actif (classe posée dynamiquement,
+   voir le <script> du template). Sans JS, aucune classe `.hidden` n'est
+   jamais ajoutée : toutes les lignes enfants restent visibles. */
+.simple-shop-orders-table .simple-shop-item-row.hidden {
+    display: none;
+}
+
+.simple-shop-orders-table .simple-shop-item-row td,
+.simple-shop-orders-table .simple-shop-item-row th {
+    background: #f7f7f7;
+}
+
+/* Le libellé (th) des lignes "Adresse de livraison" / "Facture" reste en
+   gras et non italique, contrairement au texte descriptif des lignes
+   d'articles (voir règle suivante). */
+.simple-shop-orders-table .simple-shop-item-row th[scope="row"] {
+    font-weight: bold;
+    font-style: normal;
+    text-align: left;
+    white-space: nowrap;
+}
+
+/* Texte descriptif d'une ligne d'article (seule cellule de la ligne,
+   colspan="6", pas de <th> associé) : mis en italique, contrairement aux
+   contenus des lignes "Adresse de livraison" / "Facture". */
+.simple-shop-orders-table .simple-shop-item-row td[data-label="Article"] {
+    font-style: italic;
+}
+
+/* Triangle de dépliement, affiché sur les lignes de commande (voir
+   `data-has-children="true"` dans le twig ; toutes les commandes en ont
+   désormais au moins deux : adresse de livraison + facture). */
+.simple-shop-disclosure {
+    display: inline-block;
+    width: 0.8em;
+    margin-right: 0.4em;
+    transition: transform 0.15s ease-in-out;
+    transform: rotate(0deg);
+}
+
+.simple-shop-disclosure::before {
+    content: "▶";
+    font-size: 0.75em;
+}
+
+.simple-shop-orders-table tr[aria-expanded="true"] .simple-shop-disclosure {
+    transform: rotate(90deg);
+}
+
+/* --------------------------------------------------------------------- */
+/* Responsive : tableau -> cartes empilées sur petits écrans (sans JS)    */
+/* --------------------------------------------------------------------- */
+
+@media (max-width: 768px) {
+    .simple-shop-orders-table thead {
+        display: none;
+    }
+
+    .simple-shop-orders-table,
+    .simple-shop-orders-table tbody,
+    .simple-shop-orders-table tr,
+    .simple-shop-orders-table td,
+    .simple-shop-orders-table th {
+        display: block;
+        width: 100%;
+    }
+
+    .simple-shop-orders-table td {
+        display: flex;
+        justify-content: space-between;
+        gap: 1rem;
+    }
+
+    .simple-shop-orders-table td::before {
+        content: attr(data-label);
+        font-weight: bold;
+        flex-shrink: 0;
+    }
+
+    /* "Statut" contient un formulaire (select + bouton) qui a besoin de
+       toute la largeur : pas de disposition label/valeur en ligne pour
+       cette colonne. */
+    .simple-shop-orders-table td[data-label="Statut"] {
+        display: block;
+    }
+
+    .simple-shop-orders-table td[data-label="Statut"]::before {
+        display: block;
+        font-weight: bold;
+    }
+
+    /* Lignes enfants "Adresse de livraison" / "Facture" (th libellé + td
+       colspan) : le libellé (th) sert déjà de titre, pas besoin de
+       dupliquer via ::before ni de disposition flex label/valeur en ligne.
+       Le th est affiché comme un petit titre au-dessus de son contenu. */
+    .simple-shop-orders-table .simple-shop-item-row th[scope="row"] {
+        font-size: 0.9em;
+        text-transform: uppercase;
+        letter-spacing: 0.03em;
+        color: #555;
+        margin-bottom: 0.25rem;
+    }
+
+    /* Ligne d'article : une seule cellule (colspan sur desktop), longue
+       phrase descriptive, et lignes "Adresse de livraison" / "Facture" :
+       plus lisibles en bloc (label au-dessus) qu'en ligne label/valeur
+       comme les colonnes courtes des commandes. */
+    .simple-shop-orders-table .simple-shop-item-row td {
+        display: block;
+    }
+
+    .simple-shop-orders-table .simple-shop-item-row td[data-label="Article"]::before {
+        display: block;
+        font-weight: bold;
+        margin-bottom: 0.25rem;
+    }
+}

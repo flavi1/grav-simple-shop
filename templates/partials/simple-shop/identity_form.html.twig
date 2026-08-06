@@ -1,0 +1,129 @@
+{#
+    partials/simple-shop/identity_form.html.twig
+
+    Partial factorisant les champs d'identité client (nom, e-mail, téléphone,
+    adresse) et les cases à cocher associées (newsletter, conservation des
+    données). Réutilisé par :
+      - templates/simple-shop/step1cart.html.twig : formulaire de commande
+        (ensemble complet des champs) ;
+      - templates/simple-shop/account.html.twig   : page « Modifier mes
+        informations personnelles » (ensemble complet des champs, sans le
+        champ `accept-cgv` qui reste géré séparément par step1cart).
+
+    NOTE : le choix "newsletter" est stocké dans la sous-clé `_persist`
+    (informations gérées principalement côté admin : newsletter, et à terme
+    `groups` pour les remises partenaires/clients réguliers), TOUJOURS
+    rechargée depuis le fichier de stockage par
+    CustomerManager::handleUserData() — voir CustomerManager.php. Le statut
+    "banni" n'est PAS géré via `_persist` mais via un registre séparé en clair
+    (`user://data/simple-shop/banned.list`, voir CustomerManager::isEmailBanned()).
+
+    Paramètres attendus :
+      - customer         (array)        Données client pour pré-remplissage
+                                          (défaut : {}).
+      - fields            (array)        Liste ordonnée des champs à afficher,
+                                          parmi : 'lastname', 'firstname',
+                                          'email', 'tel', 'address-line1',
+                                          'postal-code', 'address-line2',
+                                          'address-line3', 'newsletter',
+                                          'keep-data'.
+                                          (défaut : tous les champs)
+      - required          (array)        Liste des champs obligatoires parmi
+                                          ceux affichés (défaut : 'email',
+                                          'address-line1', 'postal-code',
+                                          'address-line2').
+      - autofocus_field   (string|null)  Nom du champ à mettre en autofocus
+                                          (défaut : null).
+#}
+{% set customer = customer|default({}) %}
+{% set persist = customer._persist|default({}) %}
+{% set fields = fields|default([
+    'lastname', 'firstname', 'email', 'tel',
+    'address-line1', 'postal-code', 'address-line2', 'address-line3',
+    'newsletter', 'keep-data'
+]) %}
+{% set required = required|default(['email', 'address-line1', 'postal-code', 'address-line2']) %}
+{% set autofocus_field = autofocus_field|default(null) %}
+
+{% if 'lastname' in fields or 'firstname' in fields %}
+    <div class="form-group-row">
+        {% if 'lastname' in fields %}
+            <div class="form-field">
+                <label for="lastname">Nom{% if 'lastname' in required %} *{% endif %}</label>
+                <input type="text" id="lastname" name="lastname" autocomplete="family-name" value="{{ customer.lastname|default('') }}" {% if 'lastname' in required %}required{% endif %} {% if autofocus_field == 'lastname' %}autofocus{% endif %}>
+            </div>
+        {% endif %}
+        {% if 'firstname' in fields %}
+            <div class="form-field">
+                <label for="firstname">Prénom{% if 'firstname' in required %} *{% endif %}</label>
+                <input type="text" id="firstname" name="firstname" autocomplete="given-name" value="{{ customer.firstname|default('') }}" {% if 'firstname' in required %}required{% endif %} {% if autofocus_field == 'firstname' %}autofocus{% endif %}>
+            </div>
+        {% endif %}
+    </div>
+{% endif %}
+
+{% if 'email' in fields %}
+    <div class="form-field">
+        <label for="email">Adresse E-mail{% if 'email' in required %} *{% endif %}</label>
+        <input type="email" id="email" name="email" autocomplete="email" value="{{ customer.email|default('') }}" placeholder="votre@email.com" {% if 'email' in required %}required{% endif %} {% if autofocus_field == 'email' %}autofocus{% endif %}>
+    </div>
+{% endif %}
+
+{% if 'tel' in fields %}
+    <div class="form-field">
+        <label for="tel">Numéro de téléphone{% if 'tel' in required %} *{% endif %}</label>
+        <input type="text" inputmode="tel" pattern="^\+?[0-9\s.\-]+$" id="tel" name="tel" autocomplete="tel" value="{{ customer.tel|default('') }}" {% if 'tel' in required %}required{% endif %} {% if autofocus_field == 'tel' %}autofocus{% endif %}>
+    </div>
+{% endif %}
+
+{% if 'address-line1' in fields %}
+    <div class="form-field">
+        <label for="address-line1">Adresse de livraison{% if 'address-line1' in required %} *{% endif %}</label>
+        <input type="text" id="address-line1" name="address-line1" autocomplete="shipping address-line1" value="{{ customer['address-line1']|default('') }}" {% if 'address-line1' in required %}required{% endif %} {% if autofocus_field == 'address-line1' %}autofocus{% endif %}>
+    </div>
+{% endif %}
+
+{% if 'postal-code' in fields or 'address-line2' in fields %}
+    <div class="form-group-row">
+        {% if 'postal-code' in fields %}
+            <div class="form-field">
+                <label for="postal-code">Code Postal{% if 'postal-code' in required %} *{% endif %}</label>
+                <input type="text" id="postal-code" name="postal-code" autocomplete="shipping postal-code" value="{{ customer['postal-code']|default('') }}" {% if 'postal-code' in required %}required{% endif %} {% if autofocus_field == 'postal-code' %}autofocus{% endif %}>
+            </div>
+        {% endif %}
+        {% if 'address-line2' in fields %}
+            <div class="form-field">
+                <label for="address-line2">Ville{% if 'address-line2' in required %} *{% endif %}</label>
+                <input type="text" id="address-line2" name="address-line2" autocomplete="shipping address-level2" value="{{ customer['address-line2']|default('') }}" {% if 'address-line2' in required %}required{% endif %} {% if autofocus_field == 'address-line2' %}autofocus{% endif %}>
+            </div>
+        {% endif %}
+    </div>
+{% endif %}
+
+{% if 'address-line3' in fields %}
+    <div class="form-field">
+        <label for="address-line3">Complément d'adresse{% if 'address-line3' in required %} *{% endif %}</label>
+        <input type="text" id="address-line3" name="address-line3" autocomplete="shipping address-line3" value="{{ customer['address-line3']|default('') }}" {% if 'address-line3' in required %}required{% endif %} {% if autofocus_field == 'address-line3' %}autofocus{% endif %}>
+    </div>
+{% endif %}
+
+{% if 'newsletter' in fields %}
+    <div class="form-field">
+        <label>
+            <input type="checkbox" id="newsletter" name="newsletter" {% if persist.newsletter|default(false) %}checked{% endif %}>
+            Je souhaite recevoir les actualités de la boutique
+        </label>
+    </div>
+{% endif %}
+
+{% if 'keep-data' in fields %}
+    <div class="form-field">
+        <label>
+            <input type="checkbox" id="keep-data" name="keep-data" aria-describedby="keepdata-description" {% if customer['keep-data'] %}checked{% endif %}>
+            Se souvenir de mes informations
+        </label>
+        <span id="keepdata-description" class="field-help">
+            Si vous cochez cette case nous gardons vos informations pour que vous n'ayez pas à les retaper la prochaine fois. Lisez nos <a href="/privacy" target="_blank" rel="noopener">règles de confidentialité</a>
+        </span>
+    </div>
+{% endif %}

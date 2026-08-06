@@ -1,0 +1,181 @@
+{# templates/step4payment.html.twig #}
+{% extends 'partials/base.html.twig' %}
+
+{% block content %}
+<div class="checkout-step payment-step">
+    
+    {% if sub_step == 'billing' %}
+        {# ========================================== #}
+        {# TEMPS 1 : RÉCAPITULATIF ET FACTURATION      #}
+        {# ========================================== #}
+        <h2>Vérification de vos informations</h2>
+
+        <div class="summary-box">
+            <h3>Vos informations de livraison <a href="{{ routes.step1 }}" class="edit-link">Modifier</a></h3>
+            <p>
+                <strong>{{ customer.firstname }} {{ customer.lastname }}</strong><br>
+                {{ customer['address-line1'] }}<br>
+                {{ customer['postal-code'] }} {{ customer['address-line2'] }}, {{ customer['address-line3'] }}<br>
+                Tél : {{ customer.tel }} | E-mail : {{ customer.email }}
+            </p>
+
+            <h3>Mode de livraison choisi <a href="{{ routes.step2 }}" class="edit-link">Modifier</a></h3>
+            <p>
+                <strong>{{ shipping.name }}</strong> ({{ shipping.description }}) — {{ shipping.price == 0 ? 'Gratuit' : shipping.price ~ ' €' }}
+            </p>
+            
+			<h3>Votre commande <a href="{{ routes.step1 }}" class="edit-link">Modifier</a></h3>
+			
+			<table class="cart-summary-table" style="width: 100%; border-collapse: collapse; margin-bottom: 1.5rem;">
+				<thead>
+					<tr style="border-bottom: 2px solid #ddd; text-align: left;">
+						<th>Article</th>
+						<th style="text-align: center;">Qté</th>
+						<th style="text-align: right;">Prix</th>
+					</tr>
+				</thead>
+				<tbody>
+					{% set subtotal = 0 %}
+					{% for route, item in cart %}
+					{% set item_total = item.price * item.quantity %}
+					{% set subtotal = subtotal + item_total %}
+						<tr style="border-bottom: 1px solid #eee;">
+							<td style="padding: 0.5rem 0;">
+								<strong>{{ item.title }}</strong>
+							</td>
+							<td style="text-align: center; padding: 0.5rem 0;">{{ item.quantity }}</td>
+							<td style="text-align: right; padding: 0.5rem 0;">{{ item_total|number_format(2, ',', ' ') }} €</td>
+						</tr>
+					{% endfor %}
+					
+					{# Lignes de totalisation #}
+					<tr style="font-size: 0.95rem;">
+						<td colspan="2" style="padding-top: 1rem; text-align: right; color: #666;">Sous-total :</td>
+						<td style="padding-top: 1rem; text-align: right; color: #666;">{{ subtotal|number_format(2, ',', ' ') }} €</td>
+					</tr>
+					<tr style="font-size: 0.95rem;">
+						<td colspan="2" style="padding: 0.25rem 0; text-align: right; color: #666;">Frais de port ({{ shipping.label }}) :</td>
+						<td style="padding: 0.25rem 0; text-align: right; color: #666;">{{ shipping.price == 0 ? 'Gratuit' : shipping.price|number_format(2, ',', ' ') ~ ' €' }}</td>
+					</tr>
+					<tr style="font-size: 1.2rem; font-weight: bold;">
+						<td colspan="2" style="padding-top: 0.5rem; text-align: right;">Total TTC :</td>
+						<td style="padding-top: 0.5rem; text-align: right; color: #e74c3c;">{{ (subtotal + shipping.price)|number_format(2, ',', ' ') }} €</td>
+					</tr>
+				</tbody>
+			</table>
+			
+        </div>
+
+        <form method="POST" action="{{ uri.route() }}" class="shop-form" style="margin-top: 2rem;">
+            <input type="hidden" name="action" value="submit_billing" />
+            {{ nonce_field('shop-payment-step', 'nonce')|raw }}
+
+            <h3>Adresse de facturation</h3>
+            <div class="form-group">
+                <label for="billing_name">Nom complet ou raison sociale</label>
+                <input type="text" id="billing_name" name="billing_name" value="{{ billing.name }}" required class="form-control" />
+            </div>
+            <div class="form-group">
+                <label for="billing_address_line1">Adresse</label>
+                <input type="text" id="billing_address_line1" name="billing_address_line1" value="{{ billing['address-line1'] }}" required class="form-control" />
+            </div>
+            <div class="form-row">
+                <div class="form-group">
+                    <label for="billing_postcode">Code postal</label>
+                    <input type="text" id="billing_postcode" name="billing_postal_code" value="{{ billing['postal-code'] }}" required class="form-control" />
+                </div>
+                <div class="form-group">
+                    <label for="billing_city">Ville</label>
+                    <input type="text" id="billing_city" name="billing_address_line2" value="{{ billing['address-line2'] }}" required class="form-control" />
+                </div>
+            </div>
+            <div class="form-group">
+                <label for="billing_complement">Complément d'adresse</label>
+                <input type="text" id="billing_complement" name="billing_address_line3" value="{{ billing['address-line3'] }}" class="form-control" />
+            </div>
+
+            <h3 style="margin-top: 2rem;">Mode de paiement</h3>
+            <div class="gateway-selector">
+                {% for key, gateway in gateways %}
+                    <label class="gateway-option">
+                        <input type="radio" name="payment_method" value="{{ key }}" {{ key == selected_gateway ? 'checked' : '' }} />
+                        <span>{{ gateway.getLabel() }}</span>
+                    </label>
+                {% else %}
+                    <p class="error-text">Aucun mode de paiement disponible.</p>
+                {% endfor %}
+            </div>
+
+            {% if gateways|length > 0 %}
+                <div class="form-actions" style="margin-top: 2rem;">
+                    <button type="submit" class="btn btn-primary">Je confirme ces informations</button>
+                </div>
+            {% endif %}
+        </form>
+
+    {% elseif sub_step == 'gateway_form' %}
+        {# ========================================== #}
+        {# TEMPS 2 : SAISIE BANCAIRE (GATEWAY)        #}
+        {# ========================================== #}
+        <h2>Finalisation du règlement</h2>
+        
+        <div class="gateway-wrapper">
+            {# Injection sécurisée du code HTML de la passerelle choisie #}
+            {{ gateway_html|raw }}
+        </div>
+
+        <div class="form-actions text-center" style="margin-top: 1.5rem;">
+            <form method="POST" action="{{ uri.route() }}">
+                <input type="hidden" name="action" value="back_to_billing" />
+                {{ nonce_field('shop-payment-step', 'nonce')|raw }}
+                <button type="submit" class="btn btn-secondary">Modifier mes choix et adresses</button>
+            </form>
+        </div>
+    {% endif %}
+</div>
+
+<style>
+.summary-box {
+    background: #f9f9f9;
+    border: 1px solid #eaeaea;
+    padding: 1.5rem;
+    border-radius: 4px;
+}
+.summary-box h3 {
+    font-size: 1.1rem;
+    margin-top: 0;
+    display: flex;
+    justify-content: space-between;
+}
+.edit-link {
+    font-size: 0.85rem;
+    font-weight: normal;
+    text-decoration: underline;
+}
+.form-row {
+    display: flex;
+    gap: 1rem;
+}
+.form-row .form-group {
+    flex: 1;
+}
+.gateway-selector {
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+}
+.gateway-option {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.75rem;
+    border: 1px solid #ddd;
+    border-radius: 4px;
+    cursor: pointer;
+}
+.gateway-option:hover {
+    background: #fafafa;
+}
+.error-text { color: #cc0000; }
+</style>
+{% endblock %}

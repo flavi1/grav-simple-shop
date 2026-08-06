@@ -1,0 +1,88 @@
+{% extends 'partials/base.html.twig' %}
+
+{% block content %}
+<section class="shop-delivery-page">
+
+    <h1 class="cart-title">Mode de Livraison (Étape 3/5)</h1>
+
+    <div class="delivery-layout">
+        {# Colonne Principale : Sélection du Transporteur #}
+        <div class="delivery-main">
+            {% if carriers is empty %}
+                <div class="delivery-error-box">
+                    <p>Désolé, aucun mode de livraison n'est disponible pour votre destination ou le gabarit de votre commande.</p>
+                    <p class="field-help">Veuillez vérifier votre adresse ou contacter notre service client.</p>
+                    <a href="{{ base_url_absolute ~ shop_routes.cart }}" class="btn btn-back">Modifier mes informations</a>
+                </div>
+            {% else %}
+                <h2>Choisissez votre mode de transport</h2>
+                
+                <form action="{{ base_url_absolute ~ grav.uri.path() }}" method="POST" class="delivery-form">
+                    {{ nonce_field('shop-delivery-action')|raw }}
+                    <input type="hidden" name="action" value="select_shipping">
+
+                    <div class="carriers-list">
+                        {% for key, carrier in carriers %}
+                            <label class="carrier-option {% if current_shipping.key == key %}is-selected{% endif %}">
+                                <span class="carrier-input-wrapper">
+                                    <input type="radio" name="shipping_method" value="{{ key }}" 
+                                           {% if current_shipping.key == key or (current_shipping is empty and loop.first) %}checked{% endif %} required>
+                                </span>
+                                <span class="carrier-details">
+                                    <strong class="carrier-name">{{ carrier.name }}</strong>
+                                    <span class="carrier-description field-help">{{ carrier.description }}</span>
+                                </span>
+                                <span class="carrier-price">
+                                    {% if carrier.price == 0 %}
+                                        <span class="price-free">Gratuit</span>
+                                    {% else %}
+                                        {{ carrier.price|number_format(2, ',', ' ') }} €
+                                    {% endif %}
+                                </span>
+                            </label>
+                        {% endfor %}
+                    </div>
+
+                    <div class="form-actions">
+                        <a href="{{ base_url_absolute ~ shop_routes.validation }}" class="btn-back-link">
+                            « Retour à la validation de l'e-mail
+                        </a>
+                        <button type="submit" class="btn btn-submit-delivery">
+                            Continuer vers le paiement
+                        </button>
+                    </div>
+                </form>
+            {% endif %}
+        </div>
+
+        {# Colonne Latérale : Synthèse du Panier & Coordonnées #}
+        <aside class="delivery-summary">
+            <div class="summary-card">
+                <h3>Résumé de la commande</h3>
+                <div class="summary-row">
+                    <span>Articles :</span>
+                    <strong>{{ cart_metrics.subtotal|number_format(2, ',', ' ') }} €</strong>
+                </div>
+                <div class="summary-row field-help">
+                    <span>Poids estimé :</span>
+                    <span>{{ (cart_metrics.weight / 1000)|number_format(2, ',', ' ') }} kg</span>
+                </div>
+                
+                <hr class="summary-separator">
+                
+                <h3>Adresse de livraison</h3>
+                <address class="customer-address-preview">
+                    <strong>{{ customer.firstname }} {{ customer.lastname }}</strong><br>
+                    {{ customer['address-line1'] }}<br>
+                    {% if customer['address-line3'] %}
+                        {{ customer['address-line3'] }}<br>
+                    {% endif %}
+                    {{ customer['postal-code'] }} {{ customer['address-line2'] }}<br>
+                    <span class="field-help">{{ customer.email }}</span>
+                </address>
+            </div>
+        </aside>
+    </div>
+
+</section>
+{% endblock %}

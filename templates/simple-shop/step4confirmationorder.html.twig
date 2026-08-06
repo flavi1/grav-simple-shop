@@ -1,0 +1,70 @@
+{% extends 'partials/base.html.twig' %}
+
+{% block content %}
+<div class="checkout-step confirmation-step" style="max-width: 800px; margin: 2rem auto; padding: 2rem; background: #fff; border: 1px solid #e1e1e1; border-radius: 6px;">
+    
+    <div style="text-align: center; margin-bottom: 2rem;">
+        <span style="font-size: 3rem; color: #2ecc71;">✔</span>
+        <h1 style="margin: 0.5rem 0 0; color: #2c3e50;">Merci pour votre commande !</h1>
+        <p style="color: #7f8c8d; font-size: 1.1rem;">Votre paiement a été validé avec succès.</p>
+    </div>
+
+    <div style="background: #fdfefe; border: 1px solid #eaeded; padding: 1.5rem; border-radius: 4px; margin-bottom: 2rem;">
+        <h2 style="font-size: 1.2rem; margin-top: 0; border-bottom: 1px solid #eaeaea; padding-bottom: 0.5rem;">Détails de la commande</h2>
+        <p><strong>Référence :</strong> <span style="font-family: monospace; background: #eaecee; padding: 0.2rem 0.4rem; border-radius: 3px;">{{ order_reference }}</span></p>
+        <p><strong>Date :</strong> {{ order_date }}</p>
+        <p><strong>Montant total payé :</strong> <span style="color: #e74c3c; font-weight: bold;">{{ order_total|number_format(2, ',', ' ') }} €</span></p>
+    </div>
+
+    <div style="display: flex; gap: 1.5rem; margin-bottom: 2rem; flex-wrap: wrap;">
+        <div style="flex: 1; min-width: 250px; background: #f9f9f9; padding: 1rem; border-radius: 4px; border: 1px solid #eee;">
+            <h3 style="font-size: 1rem; margin-top: 0;">Adresse de livraison</h3>
+            <p style="margin-bottom: 0; font-size: 0.95rem; line-height: 1.4;">
+                <strong>{{ customer.firstname }} {{ customer.lastname }}</strong><br>
+                {{ customer['address-line1'] }}<br>
+                {% if customer['address-line3'] %}{{ customer['address-line3'] }}<br>{% endif %}
+                {{ customer['postal-code'] }} {{ customer['address-line2'] }}<br>
+                Tél : {{ customer.tel }}
+            </p>
+        </div>
+
+        <div style="flex: 1; min-width: 250px; background: #f9f9f9; padding: 1rem; border-radius: 4px; border: 1px solid #eee;">
+            <h3 style="font-size: 1rem; margin-top: 0;">Mode de livraison</h3>
+            <p style="margin-bottom: 0; font-size: 0.95rem; line-height: 1.4;">
+                <strong>{{ shipping.name }}</strong><br>
+                {{ shipping.description }}<br>
+                Frais de port : {{ shipping.price == 0 ? 'Gratuit' : shipping.price|number_format(2, ',', ' ') ~ ' €' }}
+            </p>
+        </div>
+    </div>
+
+    <h3 style="font-size: 1.1rem; margin-bottom: 0.5rem;">Articles commandés</h3>
+    <table style="width: 100%; border-collapse: collapse; margin-bottom: 2rem;">
+        <thead>
+            <tr style="border-bottom: 2px solid #ddd; text-align: left; font-size: 0.9rem; color: #555;">
+                <th style="padding: 0.5rem;">Article</th>
+                <th style="text-align: center; padding: 0.5rem;">Qté</th>
+                <th style="text-align: right; padding: 0.5rem;">Prix unitaire</th>
+                <th style="text-align: right; padding: 0.5rem;">Total</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for item in order_items %}
+                <tr style="border-bottom: 1px solid #eee; font-size: 0.95rem;">
+                    <td style="padding: 0.75rem 0.5rem;">{{ item.title }}</td>
+                    <td style="text-align: center; padding: 0.75rem 0.5rem;">{{ item.quantity }}</td>
+                    <td style="text-align: right; padding: 0.75rem 0.5rem;">{{ item.price|number_format(2, ',', ' ') }} €</td>
+                    <td style="text-align: right; padding: 0.75rem 0.5rem; font-weight: bold;">{{ (item.price * item.quantity)|number_format(2, ',', ' ') }} €</td>
+                </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+
+    <div style="text-align: center; margin-top: 2rem;">
+        <a href="{{ base_url_absolute }}" class="btn btn-primary" style="padding: 0.75rem 1.5rem; background: #3498db; color: #fff; text-decoration: none; border-radius: 4px; font-weight: bold;">
+            Retour à la boutique
+        </a>
+    </div>
+
+</div>
+{% endblock %}

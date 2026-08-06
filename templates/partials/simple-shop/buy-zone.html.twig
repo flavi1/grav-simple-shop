@@ -1,0 +1,66 @@
+{# templates/partials/simple-shop/buy-zone.html.twig #}
+
+{% set shop_data = get_product_shop_data(product.route) %}
+
+{# On ne rend la buy-zone que si get_product_shop_data() renvoie bien les données valides #}
+{% if shop_data %}
+    {% set price = shop_data.product_price %}
+    {% set virtual_stock = shop_data.product_virtual_stock %}
+    {% set is_b2b = shop_data.is_b2b_price %}
+    
+    {% set is_future = product.header.publication_date and product.header.publication_date|date('Y-m-d') > "now"|date('Y-m-d') %}
+
+    <div class="product-purchase" style="margin-top: 1.5rem; padding: 1rem; background: #f5f5f5; border-radius: 4px;">
+        
+        {# 1. Statut de prévente / Date de publication #}
+        {% if is_future %}
+            <div style="font-size: 0.95rem; font-weight: bold; color: #0275d8; margin-bottom: 0.5rem;">
+                🚚 En prévente — Sortie officielle le {{ product.header.publication_date|date("d/m/Y") }}
+            </div>
+        {% endif %}
+
+        {# 2. Affichage du prix avec préfixes contextuels #}
+        {% if price > 0 %}
+            <div class="product-price" style="font-size: 1.4rem; font-weight: bold; margin-bottom: 0.5rem;">
+                {% if is_b2b %}
+                    <span style="font-size: 0.9rem; color: #2e7d32; display: block; font-weight: normal;">Tarif réservé : Prix libraire</span>
+                {% elseif is_future %}
+                    <span style="font-size: 0.9rem; color: #0275d8; display: block; font-weight: normal;">Tarif préférentiel : Prévente</span>
+                {% endif %}
+                {{ price|number_format(2, ',', ' ') }} €
+            </div>
+        {% endif %}
+
+        {# 3. Statut des stocks #}
+        <p class="product-stock" style="font-size: 0.9rem; color: #666; margin-bottom: 1rem;">
+            {% if virtual_stock == 0 %}
+                <span style="color: #d9534f; font-weight: bold;">Rupture de stock temporaire</span>
+            {% elseif virtual_stock == -1 %}
+                Disponible (Stock illimité)
+            {% else %}
+                Stock disponible : {{ virtual_stock }}
+            {% endif %}
+        </p>
+
+        {# 4. Formulaire d'ajout au panier #}
+        {% if price > 0 and virtual_stock != 0 %}
+            {% set buy_route = config.plugins['simple-shop'].routes.cart|default('/cart') %}
+            <form action="{{ base_url_absolute ~ buy_route }}" method="POST" class="simple-shop-add-form" style="display: flex; gap: 1rem;">
+                {{ nonce_field('shop-cart-action')|raw }}
+                
+                <input type="hidden" name="action" value="add_item">
+                <input type="hidden" name="product_route" value="{{ product.route }}">
+                <input type="hidden" name="quantity" value="1">
+
+                <button type="submit" class="btn-buy" style="padding: 0.75rem 1.5rem; background: #0275d8; color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: bold;">
+                    {% if is_future %}
+                        Précommander
+                    {% else %}
+                        Ajouter au panier
+                    {% endif %}
+                </button>
+            </form>
+        {% endif %}
+
+    </div>
+{% endif %}

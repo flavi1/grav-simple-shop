@@ -1,0 +1,37 @@
+{% extends 'partials/base.html.twig' %}
+
+{% block content %}
+<section class="shop-account-page">
+
+    <h1 class="account-title">Modifier mes informations personnelles</h1>
+
+    <div class="checkout-section">
+        <p class="checkout-notice">Mettez à jour vos informations de livraison et de contact ci-dessous.</p>
+
+        <form action="{{ uri.route() }}" method="POST" class="checkout-form">
+            {{ nonce_field('shop-account', 'nonce')|raw }}
+
+            {% include 'partials/simple-shop/identity_form.html.twig' with {
+                'customer': customer,
+                'fields': [
+                    'lastname', 'firstname', 'email', 'tel',
+                    'address-line1', 'postal-code', 'address-line2', 'address-line3',
+                    'newsletter', 'keep-data'
+                ],
+                'required': ['lastname', 'firstname', 'email', 'tel', 'address-line1', 'postal-code', 'address-line2']
+            } only %}
+
+            <button type="submit" class="btn btn-submit-checkout">
+                Enregistrer les modifications
+            </button>
+        </form>
+
+        {% if unsubscribe_url %}
+            <p class="account-unsubscribe">
+                <a href="{{ unsubscribe_url }}">Se désabonner de la newsletter</a>
+            </p>
+        {% endif %}
+    </div>
+
+</section>
+{% endblock %}

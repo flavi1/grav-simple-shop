@@ -1,0 +1,110 @@
+name: Simple Shop
+version: 1.0.0
+description: "Une mini boutique en ligne"
+icon: shopping-cart
+author:
+  name: Guillon Flavien
+homepage: https://github.com/flavi1/grav-simple-shop
+keywords: [stripe, checkout, payment, e-commerce]
+bugs: https://github.com/flavi1/grav-simple-shop/issues
+license: MIT
+
+dependencies:
+  - name: mvc
+    version: '>=0.1.0'
+
+form:
+  validation: strict
+  fields:
+    enabled:
+      type: toggle
+      label: Status
+      highlight: 1
+      default: 1
+      options:
+        1: PLUGIN_ADMIN.ENABLED
+        0: PLUGIN_ADMIN.DISABLED
+      validate:
+        type: bool
+
+    buy_route:
+      type: text
+      label: Route de base du tunnel d'achat
+      help: "L'URL relative qui déclenche le tunnel (ex: /buy)"
+      default: '/buy'
+
+    success_url:
+      type: text
+      label: URL de succès
+      help: "Page de retour après un paiement réussi (ex: /checkout-success)"
+      default: '/checkout-success'
+
+    cancel_url:
+      type: text
+      label: URL d'annulation
+      help: "Page de retour si l'utilisateur annule"
+      default: '/checkout-cancel'
+
+    newsletter_unsubscribe_secret:
+      type: text
+      label: Secret des liens de désabonnement newsletter
+      help: "Utilisé pour signer (HMAC) les liens de désabonnement à la newsletter envoyés par e-mail, afin qu'ils restent valides sans session ni connexion préalable. Laissez vide pour utiliser automatiquement le salt système (system.security.salt) ou, à défaut, l'e-mail de l'auteur du site — recommandé de définir une valeur dédiée pour plus de robustesse."
+      default: ''
+
+    seller_email:
+      type: email
+      label: E-mail de notification des commandes (vendeur)
+      help: "Adresse e-mail recevant une notification à chaque nouvelle commande (voir OrderMailer::sendSellerNotification()). Laissez vide pour utiliser automatiquement l'e-mail de l'auteur du site (site.author.email)."
+      default: ''
+
+    invoicing_fieldset:
+      type: fieldset
+      title: Facturation électronique (Factur-X / e-reporting)
+      help: "Voir CDC-E-REPORTING.md pour le détail de la réforme et des statuts e-reporting."
+      fields:
+        vat_rate:
+          type: number
+          label: Taux de TVA appliqué à la boutique
+          help: "Taux unique appliqué à l'ensemble des produits (ex : 0.055 pour 5,5 %, taux réduit livres en France). Les prix produits sont considérés TTC."
+          step: 0.001
+          default: 0.055
+
+        date_b2c_begin:
+          type: date
+          label: Date de début de l'obligation e-reporting B2C
+          help: "Avant cette date, les factures B2C sont marquées « Désactivée » (statut desactive du CDC). Valeur réglementaire actuelle pour les petites entreprises : 2027-09-01."
+          default: '2027-09-01'
+
+        seller.name:
+          type: text
+          label: Raison sociale (vendeur)
+          help: "Nom légal de l'émetteur des factures."
+
+        seller.address_line1:
+          type: text
+          label: Adresse (ligne 1)
+
+        seller.address_line2:
+          type: text
+          label: Adresse (ligne 2)
+
+        seller.postal_code:
+          type: text
+          label: Code postal
+
+        seller.city:
+          type: text
+          label: Ville
+
+        seller.country:
+          type: text
+          label: Pays (code ISO)
+          default: FR
+
+        seller.siret:
+          type: text
+          label: SIRET
+
+        seller.vat_number:
+          type: text
+          label: Numéro de TVA intracommunautaire

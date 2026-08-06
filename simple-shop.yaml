@@ -1,0 +1,29 @@
+enabled: true
+secret_key: 'CLE-STRIPE-RETIREE' # Remplacer par votre clé secrète Stripe Test
+public_key: 'CLE-STRIPE-RETIREE' # Optionnel si tout est géré côté serveur, mais utile à garder
+buy_route: '/buy'
+cart_route: '/cart'
+success_url: '/checkout-success'
+cancel_url: '/checkout-cancel'
+routes:
+  cart: '/cart'
+  validation: '/checkout/email'
+  delivery: '/checkout/delivery'
+  payment: '/checkout/payment'
+  confirmation: '/checkout/confirmation'
+  identify: '/identify'
+  account: '/mon-compte'
+
+# Facturation électronique Factur-X / e-reporting (voir CDC-E-REPORTING.md et
+# classes/Invoicing/InvoiceManager.php).
+vat_rate: 0.055
+date_b2c_begin: '2027-09-01'
+seller:
+  name: ''
+  address_line1: ''
+  address_line2: ''
+  postal_code: ''
+  city: ''
+  country: 'FR'
+  siret: ''
+  vat_number: ''

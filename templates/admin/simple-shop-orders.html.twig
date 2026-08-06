@@ -1,0 +1,569 @@
+{#
+    templates/admin/simple-shop-orders.html.twig
+
+    Page admin de gestion des commandes. Rendue par
+    SimpleShopPlugin::onPagesInitialized() lorsque
+    `admin.location === 'simple-shop-orders'`.
+
+    Variables attendues (voir SimpleShopPlugin::onPagesInitialized()) :
+      - simple_shop_orders          (array)  Liste des commandes enrichies
+                                               (voir OrderManager::getAllOrders()),
+                                               triées chronologiquement
+                                               (plus récentes en premier), et
+                                               complétées d'une clé `invoice`
+                                               (voir Invoicing\InvoiceManager::getOrCreateInvoice())
+                                               contenant `invoice_number` et
+                                               `ereporting_status`.
+      - simple_shop_order_statuses  (array)  Table statut technique => libellé
+                                               (voir OrderManager::STATUSES).
+      - simple_shop_orders_nonce    (string) Jeton anti-CSRF pour le
+                                               formulaire de changement de
+                                               statut de commande (voir
+                                               SimpleShopPlugin::ORDERS_STATUS_NONCE_ACTION).
+      - simple_shop_invoice_statuses       (array)  Table statut e-reporting technique => libellé,
+                                                      limitée aux options de l'itération 1 du CDC
+                                                      (voir Invoicing\InvoiceManager::getManualStatusOptions()).
+      - simple_shop_invoice_status_nonce   (string) Jeton anti-CSRF pour le formulaire de statut
+                                                      e-reporting (voir SimpleShopPlugin::ORDERS_INVOICE_STATUS_NONCE_ACTION).
+      - simple_shop_invoice_download_base  (string) URL absolue de base de la route admin de
+                                                      téléchargement de facture (ADMIN UNIQUEMENT,
+                                                      voir SimpleShopPlugin::onPagesInitialized(),
+                                                      location 'simple-shop-invoice-download').
+                                                      Le client ne télécharge JAMAIS sa facture
+                                                      lui-même.
+
+    STRUCTURE (pattern Treegrid, voir
+    https://www.w3.org/WAI/ARIA/apg/patterns/treegrid/examples/treegrid-1/) :
+
+    Le tableau des commandes EST le treegrid : chaque commande est une ligne
+    de niveau 1 (aria-level="1"), et chaque ligne enfant (adresse de
+    livraison, facture, puis un article par ligne de commande) est une ligne
+    de niveau 2 (aria-level="2"), pliée/dépliée via aria-expanded sur la
+    ligne de commande.
+
+    Chaque ligne de commande possède désormais TOUJOURS au moins deux lignes
+    enfants (adresse de livraison + facture), en plus d'une ligne par
+    article :
+      1. « Adresse de livraison » : bloc <address> (nom, adresse-ligne1/2/3,
+         code postal, pays), à partir de `order.customer` (aucune adresse de
+         livraison distincte n'existe dans ce modèle de données : `order.shipping`
+         ne porte que le choix de transporteur).
+      2. « Facture » : lien de téléchargement (admin uniquement, génération
+         Factur-X à la demande avec mise en cache, voir Invoicing\InvoiceManager)
+         + formulaire dédié de changement de statut e-reporting (select +
+         bouton, voir CDC-E-REPORTING.md).
+
+    Chacune de ces deux lignes contient deux cellules `role="gridcell"` : un
+    `<th scope="row">` (libellé, sans colspan) et un `<td colspan="5">`
+    (contenu), afin de rester cohérentes avec le pattern treegrid déjà en
+    place (toutes les cellules navigables au clavier portent `role="gridcell"`,
+    y compris les cellules d'en-tête de ligne).
+
+    DÉGRADATION PROGRESSIVE (no-js) : sans JavaScript, TOUTES les lignes
+    enfants restent visibles en permanence (aucun contenu masqué côté
+    serveur) : aucune donnée n'est perdue pour un utilisateur sans JS, seul
+    le confort du repli/dépli est une amélioration apportée par le script
+    ci-dessous, qui :
+      1. ajoute `aria-expanded="false"` aux lignes de commande, et masque
+         (classe `hidden`) leurs lignes enfants ;
+      2. gère la navigation clavier (flèches, Entrée, Home/End,
+         Ctrl+Home/End) et le clic souris, conformément au pattern APG.
+
+    Les deux changements de statut (commande, et désormais facture
+    e-reporting) restent des formulaires POST classiques (select + bouton),
+    fonctionnels avec ou sans JS, traités dans le même bloc PHP
+    (SimpleShopPlugin::onPagesInitialized(), distingués par la présence du
+    champ `invoice_ereporting_status`).
+
+    Le CSS (styles de base, responsive "tableau -> cartes" et styles du
+    treegrid : triangle de dépliement, masquage des lignes enfants, focus)
+    est centralisé dans plugin://simple-shop/css/admin-orders.css, chargé
+    par SimpleShopPlugin::onPagesInitialized(). ⚠️ Les nouvelles lignes
+    « Adresse de livraison »/« Facture » réutilisent la classe
+    `simple-shop-item-row` existante pour le masquage/affichage ; leur mise
+    en forme fine (deux cellules th/td au lieu d'une seule td colspan=6)
+    n'a pas été spécifiquement testée dans admin-orders.css et pourra
+    nécessiter un ajustement CSS de suivi.
+
+    NOTE : la classe `sr-only` (labels des selects de statut) est une
+    exception volontaire à la règle "pas de classes utilitaires" de ce
+    gabarit : son rôle (masquer visuellement un label tout en le conservant
+    accessible aux lecteurs d'écran) est considéré ici comme suffisamment
+    fondamental/standard pour mériter ce traitement, au même titre qu'un
+    attribut HTML natif (`hidden`) — même si, en toute rigueur, ça reste une
+    classe CSS "hackée".
+#}
+{% extends 'partials/base.html.twig' %}
+
+{% block titlebar %}
+    <h1><i class="fa fa-fw fa-list-alt"></i> Commandes</h1>
+{% endblock %}
+
+{% block content %}
+    <div class="admin-block simple-shop-orders-admin">
+        {% if simple_shop_orders is empty %}
+            <p>Aucune commande enregistrée pour le moment.</p>
+        {% else %}
+            <table id="simple-shop-orders-treegrid"
+                   role="treegrid"
+                   aria-label="Commandes"
+                   class="simple-shop-orders-table">
+                <thead>
+                    <tr>
+                        <th scope="col">Référence</th>
+                        <th scope="col">Date</th>
+                        <th scope="col">Client</th>
+                        <th scope="col">E-mail</th>
+                        <th scope="col">Montant</th>
+                        <th scope="col">Statut</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for order in simple_shop_orders %}
+                        {% set child_count = 2 + (order.items|length) %}
+                        <tr role="row"
+                            aria-level="1"
+                            aria-posinset="{{ loop.index }}"
+                            aria-setsize="{{ simple_shop_orders|length }}"
+                            data-order-reference="{{ order.order_reference }}"
+                            data-has-children="true">
+                            <td role="gridcell" data-label="Référence">
+                                <span class="simple-shop-disclosure" aria-hidden="true"></span>
+                                {{ order.order_reference }}
+                            </td>
+                            <td role="gridcell" data-label="Date">{{ order.created_at }}</td>
+                            <td role="gridcell" data-label="Client">{{ order.customer.firstname|default('') }} {{ order.customer.lastname|default('') }}</td>
+                            <td role="gridcell" data-label="E-mail">{{ order.customer.email|default('') }}</td>
+                            <td role="gridcell" data-label="Montant">{{ order.total_amount|number_format(2, ',', ' ') }} €</td>
+                            <td role="gridcell" data-label="Statut">
+                                <form method="POST" action="" class="simple-shop-order-status-form">
+                                    <input type="hidden" name="simple-shop-orders-nonce" value="{{ simple_shop_orders_nonce }}">
+                                    <input type="hidden" name="order_reference" value="{{ order.order_reference }}">
+                                    <label class="sr-only" for="simple-shop-status-{{ order.order_reference }}">
+                                        Statut de la commande {{ order.order_reference }}
+                                    </label>
+                                    <select id="simple-shop-status-{{ order.order_reference }}" name="new_status">
+                                        {% for value, label in simple_shop_order_statuses %}
+                                            <option value="{{ value }}" {% if order.status == value %}selected{% endif %}>{{ label }}</option>
+                                        {% endfor %}
+                                    </select>
+                                    <button type="submit" class="button">OK</button>
+                                </form>
+                            </td>
+                        </tr>
+
+                        <tr role="row"
+                            aria-level="2"
+                            aria-posinset="1"
+                            aria-setsize="{{ child_count }}"
+                            data-parent-reference="{{ order.order_reference }}"
+                            class="simple-shop-item-row">
+                            <th role="gridcell" scope="row">Adresse de livraison</th>
+                            <td role="gridcell" colspan="5">
+                                <address>
+                                    {% if order.customer.firstname|default('') or order.customer.lastname|default('') %}
+                                        {{ order.customer.firstname|default('') }} {{ order.customer.lastname|default('') }}<br>
+                                    {% endif %}
+                                    {% if order.customer['address-line1']|default('') %}{{ order.customer['address-line1'] }}<br>{% endif %}
+                                    {% if order.customer['address-line2']|default('') %}{{ order.customer['address-line2'] }}<br>{% endif %}
+                                    {% if order.customer['address-line3']|default('') %}{{ order.customer['address-line3'] }}<br>{% endif %}
+                                    {% if order.customer['postal-code']|default('') %}{{ order.customer['postal-code'] }}<br>{% endif %}
+                                    {% if order.customer.country|default('') %}{{ order.customer.country }}{% endif %}
+                                </address>
+                            </td>
+                        </tr>
+
+                        <tr role="row"
+                            aria-level="2"
+                            aria-posinset="2"
+                            aria-setsize="{{ child_count }}"
+                            data-parent-reference="{{ order.order_reference }}"
+                            class="simple-shop-item-row">
+                            <th role="gridcell" scope="row">Facture</th>
+                            <td role="gridcell" colspan="5">
+                                <a href="{{ simple_shop_invoice_download_base }}?order_reference={{ order.order_reference }}">
+                                    Télécharger la facture ({{ order.invoice.invoice_number|default('') }})
+                                </a>
+                                <form method="POST" action="" class="simple-shop-invoice-status-form">
+                                    <input type="hidden" name="simple-shop-invoice-nonce" value="{{ simple_shop_invoice_status_nonce }}">
+                                    <input type="hidden" name="order_reference" value="{{ order.order_reference }}">
+                                    <label class="sr-only" for="simple-shop-invoice-status-{{ order.order_reference }}">
+                                        Statut e-reporting de la facture {{ order.invoice.invoice_number|default('') }}
+                                    </label>
+                                    <select id="simple-shop-invoice-status-{{ order.order_reference }}" name="invoice_ereporting_status">
+                                        {% for value, label in simple_shop_invoice_statuses %}
+                                            <option value="{{ value }}" {% if order.invoice.ereporting_status|default('') == value %}selected{% endif %}>{{ label }}</option>
+                                        {% endfor %}
+                                    </select>
+                                    <button type="submit" class="button">OK</button>
+                                </form>
+                            </td>
+                        </tr>
+
+                        {% for item in order.items %}
+                            <tr role="row"
+                                aria-level="2"
+                                aria-posinset="{{ loop.index + 2 }}"
+                                aria-setsize="{{ child_count }}"
+                                data-parent-reference="{{ order.order_reference }}"
+                                class="simple-shop-item-row">
+                                <td role="gridcell" colspan="6" data-label="Article">
+                                    {{ item.title }}
+                                    — {{ item.quantity }} × {{ item.price|number_format(2, ',', ' ') }} €
+                                    = {{ (item.price * item.quantity)|number_format(2, ',', ' ') }} €
+                                </td>
+                            </tr>
+                        {% endfor %}
+                    {% endfor %}
+                </tbody>
+            </table>
+        {% endif %}
+    </div>
+
+    <script>
+    (function () {
+        'use strict';
+
+        /**
+         * Implémentation du pattern ARIA "Treegrid" (option par défaut :
+         * "Rows are focused first, but cells can be focused") appliquée au
+         * tableau des commandes / lignes enfants de l'espace admin Simple Shop.
+         *
+         * Référence : https://www.w3.org/WAI/ARIA/apg/patterns/treegrid/examples/treegrid-1/
+         *
+         * Amélioration progressive UNIQUEMENT : sans ce script, toutes les
+         * lignes enfants restent visibles en permanence (voir le twig), donc
+         * aucune donnée n'est perdue pour un utilisateur sans JS.
+         */
+        function TreegridOrders(table) {
+            this.table = table;
+            this.rows = Array.prototype.slice.call(table.querySelectorAll('tbody > tr[role="row"]'));
+            this.initCollapsedState();
+            this.setInitialTabindex();
+            this.registerEvents();
+        }
+
+        // --- Initialisation ---------------------------------------------
+
+        TreegridOrders.prototype.initCollapsedState = function () {
+            var self = this;
+            this.rows.forEach(function (row) {
+                if (row.getAttribute('data-has-children') === 'true') {
+                    row.setAttribute('aria-expanded', 'false');
+                    self.getChildren(row).forEach(function (child) {
+                        child.classList.add('hidden');
+                    });
+                }
+            });
+        };
+
+        TreegridOrders.prototype.setInitialTabindex = function () {
+            this.rows.forEach(function (row) {
+                row.setAttribute('tabindex', '-1');
+                Array.prototype.forEach.call(row.querySelectorAll('[role="gridcell"]'), function (cell) {
+                    cell.setAttribute('tabindex', '-1');
+                });
+            });
+            var visible = this.visibleRows();
+            if (visible.length) {
+                visible[0].setAttribute('tabindex', '0');
+            }
+        };
+
+        // --- Requêtes structurelles ---------------------------------------
+
+        TreegridOrders.prototype.visibleRows = function () {
+            return this.rows.filter(function (row) {
+                return !row.classList.contains('hidden');
+            });
+        };
+
+        TreegridOrders.prototype.getCells = function (row) {
+            return Array.prototype.slice.call(row.querySelectorAll('[role="gridcell"]'));
+        };
+
+        TreegridOrders.prototype.isOrderRow = function (row) {
+            return row.getAttribute('aria-level') === '1';
+        };
+
+        TreegridOrders.prototype.hasChildren = function (row) {
+            return row.getAttribute('data-has-children') === 'true';
+        };
+
+        TreegridOrders.prototype.getChildren = function (row) {
+            var ref = row.getAttribute('data-order-reference');
+            return this.rows.filter(function (r) {
+                return r.getAttribute('data-parent-reference') === ref;
+            });
+        };
+
+        TreegridOrders.prototype.getParent = function (row) {
+            var parentRef = row.getAttribute('data-parent-reference');
+            if (!parentRef) {
+                return null;
+            }
+            var found = null;
+            this.rows.some(function (r) {
+                if (r.getAttribute('data-order-reference') === parentRef) {
+                    found = r;
+                    return true;
+                }
+                return false;
+            });
+            return found;
+        };
+
+        // --- Plier / déplier -----------------------------------------------
+
+        TreegridOrders.prototype.expand = function (row) {
+            if (!this.hasChildren(row)) {
+                return;
+            }
+            row.setAttribute('aria-expanded', 'true');
+            this.getChildren(row).forEach(function (child) {
+                child.classList.remove('hidden');
+            });
+        };
+
+        TreegridOrders.prototype.collapse = function (row) {
+            if (!this.hasChildren(row)) {
+                return;
+            }
+            row.setAttribute('aria-expanded', 'false');
+            this.getChildren(row).forEach(function (child) {
+                child.classList.add('hidden');
+            });
+        };
+
+        TreegridOrders.prototype.toggle = function (row) {
+            if (row.getAttribute('aria-expanded') === 'true') {
+                this.collapse(row);
+            } else {
+                this.expand(row);
+            }
+        };
+
+        // --- Gestion du focus (roving tabindex) -----------------------------
+
+        TreegridOrders.prototype.clearTabindex = function () {
+            this.rows.forEach(function (r) {
+                r.setAttribute('tabindex', '-1');
+                Array.prototype.forEach.call(r.querySelectorAll('[role="gridcell"]'), function (c) {
+                    c.setAttribute('tabindex', '-1');
+                });
+            });
+        };
+
+        TreegridOrders.prototype.focusRow = function (row) {
+            if (!row) {
+                return;
+            }
+            this.clearTabindex();
+            row.setAttribute('tabindex', '0');
+            row.focus();
+        };
+
+        TreegridOrders.prototype.focusCell = function (cell) {
+            if (!cell) {
+                return;
+            }
+            this.clearTabindex();
+            cell.setAttribute('tabindex', '0');
+            cell.focus();
+        };
+
+        TreegridOrders.prototype.moveDown = function (fromRow, cell) {
+            var visible = this.visibleRows();
+            var index = visible.indexOf(fromRow);
+            if (index === -1 || index === visible.length - 1) {
+                return;
+            }
+            var nextRow = visible[index + 1];
+            if (cell) {
+                var cells = this.getCells(nextRow);
+                var colIndex = this.getCells(fromRow).indexOf(cell);
+                this.focusCell(cells[Math.min(colIndex, cells.length - 1)] || null) || this.focusRow(nextRow);
+            } else {
+                this.focusRow(nextRow);
+            }
+        };
+
+        TreegridOrders.prototype.moveUp = function (fromRow, cell) {
+            var visible = this.visibleRows();
+            var index = visible.indexOf(fromRow);
+            if (index <= 0) {
+                return;
+            }
+            var prevRow = visible[index - 1];
+            if (cell) {
+                var cells = this.getCells(prevRow);
+                var colIndex = this.getCells(fromRow).indexOf(cell);
+                this.focusCell(cells[Math.min(colIndex, cells.length - 1)] || null) || this.focusRow(prevRow);
+            } else {
+                this.focusRow(prevRow);
+            }
+        };
+
+        // --- Clavier : ligne ------------------------------------------------
+
+        TreegridOrders.prototype.handleRowKeydown = function (row, event) {
+            switch (event.key) {
+                case 'ArrowRight':
+                    event.preventDefault();
+                    if (this.hasChildren(row) && row.getAttribute('aria-expanded') === 'false') {
+                        this.expand(row);
+                    } else {
+                        this.focusCell(this.getCells(row)[0]);
+                    }
+                    break;
+                case 'ArrowLeft':
+                    event.preventDefault();
+                    if (this.hasChildren(row) && row.getAttribute('aria-expanded') === 'true') {
+                        this.collapse(row);
+                    } else {
+                        var parent = this.getParent(row);
+                        if (parent) {
+                            this.focusRow(parent);
+                        }
+                    }
+                    break;
+                case 'ArrowDown':
+                    event.preventDefault();
+                    this.moveDown(row, null);
+                    break;
+                case 'ArrowUp':
+                    event.preventDefault();
+                    this.moveUp(row, null);
+                    break;
+                case 'Home':
+                    event.preventDefault();
+                    this.focusRow(this.visibleRows()[0]);
+                    break;
+                case 'End':
+                    event.preventDefault();
+                    var visibleEnd = this.visibleRows();
+                    this.focusRow(visibleEnd[visibleEnd.length - 1]);
+                    break;
+                case 'Enter':
+                    event.preventDefault();
+                    this.toggle(row);
+                    break;
+                default:
+                    break;
+            }
+        };
+
+        // --- Clavier : cellule -----------------------------------------------
+
+        TreegridOrders.prototype.handleCellKeydown = function (row, cell, event) {
+            var cells = this.getCells(row);
+            var index = cells.indexOf(cell);
+
+            switch (event.key) {
+                case 'ArrowRight':
+                    event.preventDefault();
+                    if (index < cells.length - 1) {
+                        this.focusCell(cells[index + 1]);
+                    }
+                    break;
+                case 'ArrowLeft':
+                    event.preventDefault();
+                    if (index > 0) {
+                        this.focusCell(cells[index - 1]);
+                    } else {
+                        this.focusRow(row);
+                    }
+                    break;
+                case 'ArrowDown':
+                    event.preventDefault();
+                    this.moveDown(row, cell);
+                    break;
+                case 'ArrowUp':
+                    event.preventDefault();
+                    this.moveUp(row, cell);
+                    break;
+                case 'Home':
+                    event.preventDefault();
+                    if (event.ctrlKey) {
+                        var firstRow = this.visibleRows()[0];
+                        var firstCells = this.getCells(firstRow);
+                        this.focusCell(firstCells[Math.min(index, firstCells.length - 1)]);
+                    } else {
+                        this.focusCell(cells[0]);
+                    }
+                    break;
+                case 'End':
+                    event.preventDefault();
+                    if (event.ctrlKey) {
+                        var visibleList = this.visibleRows();
+                        var lastRow = visibleList[visibleList.length - 1];
+                        var lastCells = this.getCells(lastRow);
+                        this.focusCell(lastCells[Math.min(index, lastCells.length - 1)]);
+                    } else {
+                        this.focusCell(cells[cells.length - 1]);
+                    }
+                    break;
+                case 'Enter':
+                    if (index === 0 && this.isOrderRow(row) && this.hasChildren(row)) {
+                        event.preventDefault();
+                        this.toggle(row);
+                    }
+                    break;
+                default:
+                    break;
+            }
+        };
+
+        // --- Câblage des événements ------------------------------------------
+
+        TreegridOrders.prototype.registerEvents = function () {
+            var self = this;
+
+            this.rows.forEach(function (row) {
+                row.addEventListener('keydown', function (event) {
+                    // Ignore les événements remontés depuis un widget interne
+                    // (ex. les <select> de statut) pour ne pas interférer avec
+                    // son comportement clavier natif.
+                    if (event.target === row) {
+                        self.handleRowKeydown(row, event);
+                    }
+                });
+
+                row.addEventListener('click', function (event) {
+                    if (event.target === row && self.hasChildren(row)) {
+                        self.toggle(row);
+                        self.focusRow(row);
+                    }
+                });
+
+                self.getCells(row).forEach(function (cell, cellIndex) {
+                    cell.addEventListener('keydown', function (event) {
+                        if (event.target === cell) {
+                            self.handleCellKeydown(row, cell, event);
+                        }
+                    });
+
+                    cell.addEventListener('click', function (event) {
+                        if (event.target !== cell) {
+                            // Clic sur un élément interne (lien, champ de
+                            // formulaire...) : on ne vole pas le focus.
+                            return;
+                        }
+                        self.focusCell(cell);
+                        if (cellIndex === 0 && self.isOrderRow(row) && self.hasChildren(row)) {
+                            self.toggle(row);
+                        }
+                    });
+                });
+            });
+        };
+
+        document.addEventListener('DOMContentLoaded', function () {
+            var table = document.getElementById('simple-shop-orders-treegrid');
+            if (table) {
+                new TreegridOrders(table);
+            }
+        });
+    })();
+    </script>
+{% endblock %}

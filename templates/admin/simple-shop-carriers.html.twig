@@ -1,0 +1,21 @@
+{% extends 'partials/base.html.twig' %}
+
+{% block titlebar %}
+    <div class="button-bar">
+        {# Le bouton de sauvegarde natif de l'administration de Grav #}
+        <button class="button" type="submit" form="blueprints" data-rl-sr>
+            <i class="fa fa-check"></i> {{ "PLUGIN_ADMIN.SAVE"|t }}
+        </button>
+    </div>
+    <h1><i class="fa fa-fw fa-truck"></i> Configuration des Transporteurs</h1>
+{% endblock %}
+
+{% block content %}
+    <div class="admin-block">
+        {# Utilisation du macro natif de Grav pour générer les champs définis dans le Blueprint #}
+        {% include 'partials/blueprints.html.twig' with { 
+            blueprint: admin_carriers.blueprint, 
+            data: admin_carriers 
+        } %}
+    </div>
+{% endblock %}

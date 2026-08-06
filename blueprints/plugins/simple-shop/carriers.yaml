@@ -1,0 +1,57 @@
+title: Configuration des Transporteurs
+form:
+  fields:
+    carriers:
+      type: list
+      label: Liste des Transporteurs
+      btnLabel: Ajouter un transporteur
+      fields:
+        .name:
+          type: text
+          label: Nom du transporteur
+        .description:
+          type: textarea
+          label: Description détaillée
+        .enabled:
+          type: toggle
+          label: Activer ce transporteur
+          highlight: 1
+          default: 1
+          options:
+            1: PLUGIN_ADMIN.ENABLED
+            0: PLUGIN_ADMIN.DISABLED
+        .constraints.max_weight:
+          type: number
+          label: Poids maximum global (g)
+        .constraints.max_thickness:
+          type: number
+          label: Épaisseur maximum globale (mm)
+        .rules:
+          type: list
+          label: Grille de tarifs (Paliers)
+          btnLabel: Ajouter un palier
+          fields:
+            .zone:
+              type: select
+              label: Zone géographique
+              options:
+                'FR-METRO': 'France Métropolitaine'
+                'EU-ZONE-1': 'Europe (Zone 1)'
+                'INTERNATIONAL': 'International'
+            .min_basket:
+              type: number
+              label: Panier minimum (€)
+              validate:
+                type: number
+            .max_basket:
+              type: number
+              label: Panier maximum (€)
+            .min_weight:
+              type: number
+              label: Poids minimum (g)
+            .max_weight:
+              type: number
+              label: Poids maximum (g)
+            .price:
+              type: number
+              label: Prix des frais de port (€)

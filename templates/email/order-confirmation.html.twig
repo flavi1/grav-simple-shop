@@ -1,0 +1,88 @@
+{#
+    templates/email/order-confirmation.html.twig
+
+    Template de l'e-mail de confirmation de commande, envoyé au CLIENT par
+    OrderMailer::sendOrderConfirmation() lorsque le panier est transformé en
+    commande (CartController::step3Payment(), après CartStorage::toOrder()).
+
+    Variables attendues (voir OrderMailer::buildOrderVars()) :
+      - site_name       (string) Nom du site (site.title).
+      - order_reference (string) Référence de la commande.
+      - order_date      (string) Date de création (telle que stockée en base).
+      - order_total     (float)  Montant total TTC (articles + livraison).
+      - customer        (array)  Données client décodées (customer_data).
+      - shipping        (array)  Données de livraison décodées (shipping_data),
+                                  attendu au minimum : 'key', 'price'.
+      - billing         (array)  Données de facturation décodées (billing_data).
+      - order_items     (array)  Lignes de commande (order_item), chacune avec
+                                  'title', 'price', 'quantity'.
+#}
+{% extends 'email/base.html.twig' %}
+
+{% block content %}
+<p>
+    Bonjour {{ customer.firstname|default('') }} {{ customer.lastname|default('') }},
+</p>
+
+<p>
+    Nous vous confirmons la bonne réception de votre commande
+    <strong>{{ order_reference }}</strong>{% if order_date %} passée le {{ order_date }}{% endif %}.
+</p>
+
+<h3>Récapitulatif de votre commande</h3>
+<table style="width: 100%; border-collapse: collapse;">
+    <thead>
+        <tr>
+            <th style="text-align: left; border-bottom: 1px solid #ddd; padding: 4px;">Article</th>
+            <th style="text-align: right; border-bottom: 1px solid #ddd; padding: 4px;">Qté</th>
+            <th style="text-align: right; border-bottom: 1px solid #ddd; padding: 4px;">Prix unitaire</th>
+            <th style="text-align: right; border-bottom: 1px solid #ddd; padding: 4px;">Sous-total</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for item in order_items %}
+            <tr>
+                <td style="padding: 4px;">{{ item.title }}</td>
+                <td style="text-align: right; padding: 4px;">{{ item.quantity }}</td>
+                <td style="text-align: right; padding: 4px;">{{ item.price|number_format(2, ',', ' ') }} €</td>
+                <td style="text-align: right; padding: 4px;">{{ (item.price * item.quantity)|number_format(2, ',', ' ') }} €</td>
+            </tr>
+        {% endfor %}
+    </tbody>
+</table>
+
+<p style="text-align: right; font-weight: bold;">
+    Total : {{ order_total|number_format(2, ',', ' ') }} €
+</p>
+
+<h3>Adresse de livraison</h3>
+<p>
+    {{ customer.firstname|default('') }} {{ customer.lastname|default('') }}<br>
+    {{ customer['address-line1']|default('') }}<br>
+    {% if customer['address-line3']|default('') %}{{ customer['address-line3'] }}<br>{% endif %}
+    {{ customer['postal-code']|default('') }} {{ customer['address-line2']|default('') }}
+</p>
+
+{% if shipping.key is defined %}
+    <p>
+        Mode de livraison : {{ shipping.key }}{% if shipping.price is defined %} ({{ shipping.price|number_format(2, ',', ' ') }} €){% endif %}
+    </p>
+{% endif %}
+
+<h3>Adresse de facturation</h3>
+<p>
+    {{ billing.name|default('') }}<br>
+    {{ billing['address-line1']|default('') }}<br>
+    {% if billing['address-line3']|default('') %}{{ billing['address-line3'] }}<br>{% endif %}
+    {{ billing['postal-code']|default('') }} {{ billing['address-line2']|default('') }}
+</p>
+
+<p>
+    Merci pour votre confiance,<br>
+    L'équipe {{ site_name }}
+</p>
+{% endblock %}
+
+{% block footer %}
+  <p style="text-align: center;">{{ site_name }} - Tous droits réservés</p>
+{% endblock %}

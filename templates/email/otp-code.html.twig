@@ -1,0 +1,40 @@
+{#
+    templates/email/otp-code.html.twig
+
+    Template de l'e-mail contenant le code de connexion sécurisé à usage
+    unique (OTP), envoyé par CustomerController::sendOtpEmail() via
+    $this->grav['twig']->processTemplate('email/otp-code.html.twig', [...]).
+
+    Variables attendues :
+      - site_name (string) Nom du site (site.title).
+      - code      (string) Le code OTP à afficher.
+#}
+{% extends 'email/base.html.twig' %}
+
+{% block content %}
+<p>
+    Bonjour,
+</p>
+
+<p>
+    Voici votre code de connexion sécurisé à usage unique :
+</p>
+
+<p style="font-size: 1.5em; font-weight: bold; letter-spacing: 0.2em; text-align: center;">
+    {{ code }}
+</p>
+
+<p>
+    Ce code est valable pour une durée limitée. Si vous n'êtes pas à l'origine
+    de cette demande, vous pouvez ignorer cet e-mail en toute sécurité.
+</p>
+
+<p>
+    À bientôt,<br>
+    L'équipe {{ site_name }}
+</p>
+{% endblock %}
+
+{% block footer %}
+  <p style="text-align: center;">{{ site_name }} - Tous droits réservés</p>
+{% endblock %}

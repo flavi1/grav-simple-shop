@@ -1,0 +1,22 @@
+{# templates/simple-shop/newsletter-unsubscribe.html.twig #}
+{% extends 'partials/base.html.twig' %}
+
+{% block content %}
+<div class="shop-container newsletter-unsubscribe-page">
+    <h2>Désabonnement de la newsletter</h2>
+
+    {% if success %}
+        <p>
+            Vous avez bien été désabonné(e) de notre newsletter
+            {% if email %} (<strong>{{ email }}</strong>){% endif %}.
+        </p>
+    {% else %}
+        <p>
+            Ce lien de désabonnement n'est pas valide ou a expiré. Si vous souhaitez
+            ne plus recevoir nos communications, veuillez nous contacter directement.
+        </p>
+    {% endif %}
+
+    <p><a href="{{ base_url_absolute }}">Retour à l'accueil</a></p>
+</div>
+{% endblock %}

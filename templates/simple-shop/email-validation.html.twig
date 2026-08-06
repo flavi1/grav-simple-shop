@@ -1,0 +1,141 @@
+{#
+    templates/simple-shop/email-validation.html.twig
+
+    ⚠️ DÉCISION UX (friction minimale, voir échanges de conception) : la
+    branche "email_verified" ci-dessous est désormais un FILET DE SÉCURITÉ
+    DÉFENSIF, jamais atteint en pratique : CustomerController::verifyEmail()
+    redirige immédiatement vers `back_url`, côté serveur, dès que l'e-mail
+    est déjà vérifié — SANS jamais rendre cette page. Cela évite le clic
+    "Continuer" totalement superflu qui existait auparavant. Cette branche
+    n'est conservée que pour couvrir une éventuelle exécution future où le
+    contrôleur transmettrait `email_verified = true` par erreur ; elle ne
+    doit PAS être considérée comme un écran normalement visible.
+#}
+{% extends 'partials/base.html.twig' %}
+
+{% block content %}
+
+<div class="checkout-step email-validation-step">
+    <h2>Validation de votre adresse e-mail</h2>
+    
+    {% if email_verified %}
+        {# Affichage épuré si l'étape est déjà franchie (Idéal pour le bouton précédent/suivant) #}
+        <div class="verified-container">
+            <div class="verified-icon">✓</div>
+            <p>Votre adresse e-mail <strong>{{ customer_email }}</strong> a bien été validée.</p>
+            
+            <div class="form-actions" style="margin-top: 2rem;">
+                <a href="{{ next_step_url }}" class="btn btn-primary">
+                    Continuer
+                </a>
+            </div>
+            
+            <hr class="separator" style="margin-top: 2rem;" />
+            
+            {# Possibilité de ré-envoyer un code si l'utilisateur s'est trompé d'e-mail entre-temps #}
+            <form method="POST" action="{{ uri.route() }}">
+                <input type="hidden" name="action" value="resend_code" />
+                <input type="hidden" name="back_url" value="{{ back_url }}" />
+                {{ nonce_field('shop-email-verification', 'nonce')|raw }}
+                <p style="font-size: 0.85rem; color: #777;">
+                    Ce n'est pas le bon e-mail ? 
+                    <button type="submit" class="btn-link" style="display:inline; font-size: inherit;">
+                        Changer ou renvoyer un code
+                    </button>
+                </p>
+            </form>
+        </div>
+    {% else %}
+        {# Formulaire classique de saisie du code #}
+        <p>
+            Un code de sécurité à 6 chiffres a été envoyé à l'adresse : 
+            <strong>{{ customer_email }}</strong>.
+        </p>
+        <p class="hint">
+            Veuillez saisir ce code ci-dessous pour valider votre commande. Vérifiez vos courriers indésirables (spams) si vous ne recevez rien d'ici 2 minutes.
+        </p>
+
+        <form method="POST" action="{{ uri.route() }}" class="shop-form">
+            <input type="hidden" name="action" value="verify_code" />
+            <input type="hidden" name="back_url" value="{{ back_url }}" />
+            {{ nonce_field('shop-email-verification', 'nonce')|raw }}
+
+            <div class="form-group">
+                <label for="verification_code">Code de sécurité à 6 chiffres</label>
+                <input 
+                    type="text" 
+                    id="verification_code" 
+                    name="verification_code" 
+                    placeholder="000000" 
+                    maxlength="6" 
+                    pattern="[0-9]{6}"
+                    inputmode="numeric"
+                    autocomplete="one-time-code"
+                    required 
+                    autofocus
+                    class="form-control text-center code-input"
+                />
+            </div>
+
+            <div class="form-actions">
+                <button type="submit" class="btn btn-primary">
+                    Valider et continuer
+                </button>
+            </div>
+        </form>
+
+        <hr class="separator" />
+
+        <div class="resend-container">
+            <p>Vous n'avez pas reçu l'e-mail ?</p>
+            <form method="POST" action="{{ uri.route() }}">
+                <input type="hidden" name="action" value="resend_code" />
+                <input type="hidden" name="back_url" value="{{ back_url }}" />
+                {{ nonce_field('shop-email-verification', 'nonce')|raw }}
+                <button type="submit" class="btn btn-link">
+                    Renvoyer un nouveau code de sécurité
+                </button>
+            </form>
+        </div>
+    {% endif %}
+</div>
+
+<style>
+.code-input {
+    font-size: 1.5rem;
+    letter-spacing: 0.25rem;
+    max-width: 200px;
+    margin: 0 auto;
+    text-align: center;
+}
+.text-center {
+    text-align: center;
+}
+.resend-container {
+    margin-top: 1.5rem;
+    text-align: center;
+    font-size: 0.9rem;
+}
+.btn-link {
+    background: none;
+    border: none;
+    color: #0074d9;
+    text-decoration: underline;
+    cursor: pointer;
+    padding: 0;
+}
+.verified-container {
+    text-align: center;
+    padding: 2rem 1rem;
+    background: #f4f9f4;
+    border-radius: 6px;
+    border: 1px solid #d4ebd4;
+}
+.verified-icon {
+    font-size: 3rem;
+    color: #2ecc71;
+    margin-bottom: 1rem;
+}
+</style>
+
+{% endblock %}

@@ -1,0 +1,62 @@
+-- 1. Gestion des paniers anonymes (Porte l'expiration globale)
+CREATE TABLE IF NOT EXISTS cart (
+    cart_id TEXT PRIMARY KEY,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    expires_at DATETIME NOT NULL
+);
+
+-- 2. Articles du panier (Détermine le stock virtuel réservé)
+CREATE TABLE IF NOT EXISTS cart_item (
+    cart_id TEXT,
+    product_route TEXT,
+    quantity INTEGER NOT NULL,
+    PRIMARY KEY (cart_id, product_route),
+    FOREIGN KEY(cart_id) REFERENCES cart(cart_id) ON DELETE CASCADE
+);
+
+-- 3. Commandes validées
+CREATE TABLE IF NOT EXISTS "order" (
+    order_reference TEXT PRIMARY KEY,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    customer_data TEXT NOT NULL,
+    shipping_data TEXT NOT NULL,
+    billing_data TEXT NOT NULL,
+    total_amount REAL NOT NULL,
+    status TEXT DEFAULT 'paid'
+);
+
+-- 4. Articles de la commande
+CREATE TABLE IF NOT EXISTS order_item (
+    id INTEGER PRIMARY KEY,
+    order_reference TEXT,
+    product_route TEXT NOT NULL,
+    title TEXT NOT NULL,
+    price REAL NOT NULL,
+    quantity INTEGER NOT NULL,
+    FOREIGN KEY(order_reference) REFERENCES "order"(order_reference) ON DELETE CASCADE
+);
+
+-- 5. Factures Factur-X / suivi e-reporting (voir CDC-E-REPORTING.md et
+-- classes/Invoicing/InvoiceManager.php). Les noms de colonnes ainsi que les
+-- valeurs de `ereporting_status` sont volontairement en anglais, par
+-- cohérence avec order.status (voir OrderManager::STATUSES) ; la
+-- correspondance avec les termes légaux français du CDC est documentée dans
+-- InvoiceManager::STATUSES.
+--
+-- NOTE (migration additive) : cette table a été ajoutée après la mise en
+-- production initiale du plugin. Sur les installations existantes, elle est
+-- créée automatiquement grâce à la ré-exécution systématique de ce fichier à
+-- chaque ouverture de connexion (voir InventoryManager::getDatabase()),
+-- rendue sûre par l'usage de IF NOT EXISTS partout.
+CREATE TABLE IF NOT EXISTS invoice (
+    id INTEGER PRIMARY KEY,
+    order_reference TEXT NOT NULL UNIQUE,
+    invoice_number TEXT NOT NULL UNIQUE,
+    customer_type TEXT NOT NULL DEFAULT 'b2c',
+    ereporting_status TEXT NOT NULL DEFAULT 'not_submitted',
+    vat_rate REAL NOT NULL DEFAULT 0,
+    pdf_path TEXT,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY(order_reference) REFERENCES "order"(order_reference) ON DELETE CASCADE
+);

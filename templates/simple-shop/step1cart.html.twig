@@ -1,0 +1,105 @@
+{% extends 'partials/base.html.twig' %}
+
+{% block content %}
+<section class="shop-cart-page">
+
+    <h1 class="cart-title">Votre Panier (Étape 1/5)</h1>
+
+    {% set cart = shop_cart %}
+
+    {% if cart is empty %}
+        <div class="cart-empty">
+            <p class="cart-empty-message">Votre panier est actuellement vide.</p>
+            <a href="{{ base_url_absolute }}" class="btn btn-back-shop">Retour à la boutique</a>
+        </div>
+    {% else %}
+        {# Liste des articles du panier #}
+        <div class="cart-items">
+            {% set total = 0 %}
+            {% for route, item in cart %}
+                {% set item_total = item.price * item.quantity %}
+                {% set total = total + item_total %}
+                
+                <div class="cart-item">
+                    {% if item.cover_path %}
+                        <img src="{{ url(item.cover_path) }}" alt="{{ item.title }}" class="cart-item-image">
+                    {% endif %}
+                    
+                    <div class="cart-item-details">
+                        <h3 class="cart-item-title">
+                            <a href="{{ base_url_absolute ~ route }}" target="_blank" rel="noopener">{{ item.title }}</a>
+                        </h3>
+                        <span class="cart-item-price">{{ item.price|number_format(2, ',', ' ') }} €</span>
+                    </div>
+
+                    {# Formulaire de mise à jour des quantités (Reste sur /cart via le contrôleur) #}
+                    <form action="{{ base_url_absolute }}{{ shop_routes.cart }}" method="POST" class="cart-form-quantity">
+                        {{ nonce_field('shop-cart-action')|raw }}
+                        <input type="hidden" name="product_route" value="{{ route }}">
+                        <input type="hidden" name="action" value="update_quantity">
+                        <input type="number" name="quantity" value="{{ item.quantity }}" min="0" class="cart-input-quantity">
+                        <button type="submit" class="btn btn-update">Modifier</button>
+                    </form>
+
+                    <div class="cart-item-subtotal">
+                        {{ item_total|number_format(2, ',', ' ') }} €
+                    </div>
+
+                    {# Formulaire de suppression rapide #}
+                    <form action="{{ base_url_absolute }}{{ shop_routes.cart }}" method="POST" class="cart-form-remove">
+                        {{ nonce_field('shop-cart-action')|raw }}
+                        <input type="hidden" name="product_route" value="{{ route }}">
+                        <input type="hidden" name="action" value="remove_item">
+                        <button type="submit" class="btn-remove-link" title="Supprimer">×</button>
+                    </form>
+                </div>
+            {% endfor %}
+
+            <div class="cart-total">
+                Total : {{ total|number_format(2, ',', ' ') }} €
+            </div>
+        </div>
+
+        <hr class="cart-separator">
+
+        {# FORMULAIRE DE COMMANDE (Zéro Javascript) #}
+        <div class="checkout-section">
+            <h2>Informations de livraison & facturation</h2>
+            <p class="checkout-notice">Aucun compte ne sera créé. Vos données servent uniquement au traitement de cette commande (livraison exclusive en France).</p>
+
+            <form action="{{ base_url_absolute }}{{ shop_routes.cart }}" method="POST" class="checkout-form">
+                {{ nonce_field('shop-checkout-action')|raw }}
+                <input type="hidden" name="action" value="process_checkout">
+                <input type="hidden" name="country" value="FR">
+
+                {% include 'partials/simple-shop/identity_form.html.twig' with {
+                    'customer': customer,
+                    'fields': [
+                        'lastname', 'firstname', 'email', 'tel',
+                        'address-line1', 'postal-code', 'address-line2', 'address-line3',
+                        'newsletter', 'keep-data'
+                    ],
+                    'required': ['lastname', 'firstname', 'email', 'tel', 'address-line1', 'postal-code', 'address-line2']
+                } only %}
+
+                <div class="form-field">
+                    <label>
+                        <input type="checkbox" id="accept-cgv" name="accept-cgv" aria-describedby="cgv-description" required> 
+                        J'accepte les conditions générales de vente *
+                    </label>
+                    <span id="cgv-description" class="field-help">
+                        Lisez nos <a href="/cgv" target="_blank" rel="noopener">conditions générales de vente (s'ouvre dans un nouvel onglet)</a> avant de valider votre commande.
+                    </span>
+                </div>
+                
+
+                <button type="submit" class="btn btn-submit-checkout">
+                    Procéder au choix de la livraison
+                </button>
+            </form>
+        </div>
+
+    {% endif %}
+
+</section>
+{% endblock %}

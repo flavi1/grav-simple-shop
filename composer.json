@@ -1,0 +1,16 @@
+{
+    "name": "flavi1/simple-shop",
+    "description": "Grav plugin for a simple shop",
+    "type": "library",
+    "license": "MIT",
+    "authors": [
+        {
+            "name": "Flavien Guillon",
+            "email": "flavien.guillon@gmail.com"
+        }
+    ],
+    "require": {
+        "atgp/factur-x": "^3.4",
+        "setasign/fpdi-fpdf": "^2.3"
+    }
+}
