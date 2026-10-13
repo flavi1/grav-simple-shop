@@ -441,7 +441,7 @@ class CartController extends AbstractController
 						if ($result['error'] === 'banned') {
 							$this->addMessage("Cette adresse e-mail est bannie. Veuillez nous contacter.", 'error');
 						} elseif ($result['error'] === 'unsupported_zone') {
-							$this->addMessage(AddressFields::UNSUPPORTED_ZONE_MESSAGE, 'error');
+							$this->addMessage(ZoneResolver::unsupportedMessage((array) $this->grav['config']->get('plugins.simple-shop', [])), 'error');
 						} else {
 							$this->addMessage("Veuillez remplir correctement tous les champs obligatoires (*).", 'error');
 						}
@@ -514,9 +514,9 @@ class CartController extends AbstractController
 		}
 
 		// Filet de sécurité (profil ancien, session antérieure à la règle) :
-		// livraison en France métropolitaine hors Corse uniquement.
-		if (!AddressFields::isDeliverablePostalCode((string) ($customerData['postal-code'] ?? ''))) {
-			$this->addMessage(AddressFields::UNSUPPORTED_ZONE_MESSAGE, 'error');
+		// livraison uniquement dans les zones desservies.
+		if (!ZoneResolver::isDeliverable((array) $customerData, (array) $this->grav['config']->get('plugins.simple-shop', []))) {
+			$this->addMessage(ZoneResolver::unsupportedMessage((array) $this->grav['config']->get('plugins.simple-shop', [])), 'error');
 			$this->grav->redirect($absoluteCartUrl);
 			exit;
 		}

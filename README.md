@@ -5,9 +5,13 @@ Plugin e-commerce pour Grav 2.0 : panier, identification du client par code
 (passerelles séparées, ex. Stripe), commandes, factures Factur-X et
 administration via l'API et Admin2.
 
-Périmètre assumé : vente à des particuliers (B2C), **France métropolitaine
-hors Corse**, en euros, un seul taux de TVA. Un code postal hors zone est
-refusé avec un message clair (`AddressFields::isDeliverablePostalCode()`).
+Périmètre : vente à des particuliers (B2C), en euros, un seul taux de TVA.
+Le plugin sait résoudre toutes les destinations (`Delivery\ZoneResolver` :
+`FR-METRO`, `FR-CORSE`, `FR-OM`, `EU-ZONE-1`, `INTERNATIONAL`) ; les zones
+réellement desservies par un site se règlent dans `plugins.simple-shop.delivery.allowed_zones`
+(défaut : `FR-METRO`, soit la France métropolitaine hors Corse). Une adresse hors
+zone est refusée avec un message clair (`delivery.unsupported_message`).
+Ouvrir une zone demande aussi des règles pour cette zone dans `carriers.yaml`.
 
 Principe directeur : le site doit fonctionner **sans JavaScript** côté client.
 Seul le paiement Stripe en mode « Elements » en utilise (option, voir plus bas).
