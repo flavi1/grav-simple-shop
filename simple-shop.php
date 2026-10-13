@@ -61,11 +61,8 @@ class SimpleShopPlugin extends Plugin
         $this->grav['session']->init();
         $this->grav['assets']->addCss('plugin://simple-shop/css/cart.css');
 
-        $events = [
-            'onTwigSiteVariables' => ['onTwigSiteVariables', 0]
-        ];
-
-        $this->enable($events);
+        // `onTwigSiteVariables` est déjà abonné dans getSubscribedEvents() :
+        // ne PAS le réabonner via enable() (le listener s'exécuterait deux fois).
     }
 
     /**
