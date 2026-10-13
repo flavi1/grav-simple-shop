@@ -94,6 +94,74 @@ class OrderManager
         return $order ?: null;
     }
 
+    /** Modèle d'URL de suivi par défaut ({number} = numéro de suivi), valable pour Colissimo et la lettre suivie. */
+    public const DEFAULT_TRACKING_URL = 'https://www.laposte.fr/outils/suivre-vos-envois?code={number}';
+
+    /**
+     * Numéro de suivi normalisé (espaces retirés, majuscules), ou chaîne vide s'il est invalide.
+     * Caractères admis : lettres, chiffres, tiret ; 4 à 40 caractères.
+     */
+    public static function normalizeTrackingNumber(string $number): string
+    {
+        $n = strtoupper(preg_replace('/\s+/', '', trim($number)) ?? '');
+
+        return preg_match('/^[A-Z0-9-]{4,40}$/', $n) === 1 ? $n : '';
+    }
+
+    /** Lien de suivi pour un numéro (`plugins.simple-shop.delivery.tracking_url`, avec {number}). */
+    public static function trackingUrl(string $number, array $config = []): string
+    {
+        $tpl = (string) ($config['delivery']['tracking_url'] ?? '');
+        if ($tpl === '' || strpos($tpl, '{number}') === false || !preg_match('#^https://#', $tpl)) {
+            $tpl = self::DEFAULT_TRACKING_URL;
+        }
+
+        return str_replace('{number}', rawurlencode($number), $tpl);
+    }
+
+    /**
+     * Enregistre (ou efface, avec une chaîne vide) le numéro de suivi d'une commande. N'envoie aucun e-mail :
+     * saisir le numéro AVANT de passer la commande en « Expédiée ».
+     *
+     * @return bool Faux si la commande est introuvable ou le numéro invalide.
+     */
+    public static function setTracking(string $orderReference, string $number, ?string $changedBy = null): bool
+    {
+        if (self::getOrder($orderReference) === null) {
+            return false;
+        }
+
+        $db = InventoryManager::getDatabase();
+        if (trim($number) === '') {
+            $db->prepare('DELETE FROM order_tracking WHERE order_reference = :ref')->execute([':ref' => $orderReference]);
+
+            return true;
+        }
+
+        $n = self::normalizeTrackingNumber($number);
+        if ($n === '') {
+            return false;
+        }
+
+        $db->prepare(
+            'INSERT INTO order_tracking (order_reference, tracking_number, updated_by, updated_at)
+             VALUES (:ref, :n, :by, CURRENT_TIMESTAMP)
+             ON CONFLICT(order_reference) DO UPDATE SET tracking_number = :n, updated_by = :by, updated_at = CURRENT_TIMESTAMP'
+        )->execute([':ref' => $orderReference, ':n' => $n, ':by' => $changedBy]);
+
+        return true;
+    }
+
+    /** Numéro de suivi d'une commande, ou null. */
+    public static function getTracking(string $orderReference): ?string
+    {
+        $stmt = InventoryManager::getDatabase()->prepare('SELECT tracking_number FROM order_tracking WHERE order_reference = :ref');
+        $stmt->execute([':ref' => $orderReference]);
+        $n = $stmt->fetchColumn();
+
+        return $n === false ? null : (string) $n;
+    }
+
     /**
      * Change le statut d'une commande, l'inscrit dans l'historique
      * (`order_status_history`) et déclenche systématiquement l'événement

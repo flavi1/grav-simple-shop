@@ -136,6 +136,7 @@ class SimpleShopPlugin extends Plugin
             $group->get('/orders/export', [$c, 'exportOrders']);
             $group->get('/orders/{reference}', [$c, 'order']);
             $group->patch('/orders/{reference}/status', [$c, 'updateOrderStatus']);
+            $group->patch('/orders/{reference}/tracking', [$c, 'updateOrderTracking']);
             $group->patch('/orders/{reference}/invoice-status', [$c, 'updateInvoiceStatus']);
             $group->get('/orders/{reference}/invoice', [$c, 'invoicePdf']);
 

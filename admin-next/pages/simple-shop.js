@@ -365,6 +365,16 @@
                     .then(function () { pdfBtn.disabled = false; });
             } }, 'Télécharger la facture (PDF)');
 
+            var tr = o.tracking || {};
+            var trInput = h('input', { type: 'text', id: 'ss-tracking', value: tr.number || '', maxlength: '40', placeholder: 'ex. 6A12345678901' });
+            var trBtn = h('button', { class: 'ss-btn', type: 'button', onclick: function () {
+                trBtn.disabled = true;
+                api('PATCH', '/orders/' + encodeURIComponent(o.order_reference) + '/tracking', { tracking_number: trInput.value })
+                    .then(function (res) { self.notify(res.data.number ? 'Numéro de suivi enregistré.' : 'Numéro de suivi effacé.', false); self.openOrder(o.order_reference); })
+                    .catch(function (e) { self.fail(e); })
+                    .then(function () { trBtn.disabled = false; });
+            } }, 'Enregistrer le suivi');
+
             this.detail.innerHTML = '';
             this.detail.appendChild(h('div', { class: 'ss-card' },
                 h('h3', {}, 'Commande ' + o.order_reference + ' — ' + dateTime(o.created_at)),
@@ -385,7 +395,11 @@
                 h('div', { class: 'ss-grid', style: 'margin-top:1rem' },
                     h('div', {}, h('h3', {}, 'Statut'),
                         h('div', { class: 'ss-bar' }, h('label', { class: 'ss-field', for: 'ss-new-status' }, 'Nouveau statut', statusSelect), statusBtn),
-                        h('p', { class: 'ss-muted' }, 'Un e-mail est envoyé au client pour : expédiée, annulée, remboursée.')),
+                        h('p', { class: 'ss-muted' }, 'Un e-mail est envoyé au client pour : expédiée, annulée, remboursée.'),
+                        h('h3', { style: 'margin-top:1rem' }, 'Suivi du colis'),
+                        h('div', { class: 'ss-bar' }, h('label', { class: 'ss-field', for: 'ss-tracking' }, 'Numéro de suivi', trInput), trBtn),
+                        tr.url ? h('p', {}, h('a', { href: tr.url, target: '_blank', rel: 'noopener noreferrer' }, 'Page de suivi')) : null,
+                        h('p', { class: 'ss-muted' }, 'Saisissez le numéro AVANT de passer la commande en « Expédiée » : il figure dans l’e-mail au client.')),
                     h('div', {}, h('h3', {}, 'Historique'),
                         h('ul', { class: 'ss-list' }, o.history.map(function (e) {
                             return h('li', {}, dateTime(e.changed_at) + ' — ' + e.new_status_label + (e.changed_by ? ' (par ' + e.changed_by + ')' : ' (automatique)'));

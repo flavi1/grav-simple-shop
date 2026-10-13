@@ -86,6 +86,7 @@ class ShopApiController extends AbstractApiController
             'shipping'        => $order['shipping'],
             'billing'         => $order['billing'],
             'items'           => $order['items'],
+            'tracking'        => $this->trackingView($reference),
             'history'         => array_map(static fn (array $h) => $h + [
                 'new_status_label' => OrderManager::statusLabel((string) $h['new_status']),
             ], OrderManager::getStatusHistory($reference)),
@@ -121,6 +122,35 @@ class ShopApiController extends AbstractApiController
             'status'          => $status,
             'status_label'    => OrderManager::statusLabel($status),
         ]);
+    }
+
+    /** PATCH /simple-shop/orders/{reference}/tracking — corps : {"tracking_number": "6A12345678901"} ("" = effacer). */
+    public function updateOrderTracking(ServerRequestInterface $request): ResponseInterface
+    {
+        $this->requirePermission($request, self::PERM_WRITE);
+
+        $reference = $this->orderReference($request);
+        $number = (string) ($this->getRequestBody($request)['tracking_number'] ?? '');
+
+        if (OrderManager::getOrder($reference) === null) {
+            throw new NotFoundException("Commande introuvable : {$reference}.");
+        }
+        if (!OrderManager::setTracking($reference, $number, (string) $this->getUser($request)->username)) {
+            throw new ValidationException('Numéro de suivi invalide.', ['tracking_number' => '4 à 40 caractères : lettres, chiffres, tirets.']);
+        }
+
+        return ApiResponse::create(['order_reference' => $reference] + $this->trackingView($reference));
+    }
+
+    /** @return array{number: ?string, url: ?string} */
+    private function trackingView(string $reference): array
+    {
+        $n = OrderManager::getTracking($reference);
+
+        return [
+            'number' => $n,
+            'url'    => $n === null ? null : OrderManager::trackingUrl($n, (array) \Grav\Common\Grav::instance()['config']->get('plugins.simple-shop', [])),
+        ];
     }
 
     /** PATCH /simple-shop/orders/{reference}/invoice-status — corps : {"status": "submitted"}. */
