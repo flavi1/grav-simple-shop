@@ -18,6 +18,12 @@ routes:
   identify: '/identify'
   account: '/mon-compte'
 
+# E-mail au client quand sa commande passe à l'un de ces statuts (voir OrderManager::STATUSES)
+status_emails:
+  - shipped
+  - cancelled
+  - refunded
+
 # Facturation électronique Factur-X / e-reporting (voir CDC-E-REPORTING.md et
 # classes/Invoicing/InvoiceManager.php).
 vat_rate: 0.055

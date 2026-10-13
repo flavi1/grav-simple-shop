@@ -360,6 +360,13 @@ class CartStorage
                 $stmtPay->execute([':pay' => $paymentReference, ':ref' => $orderReference]);
             }
 
+            // Première ligne de l'historique des statuts (création -> 'paid').
+            $stmtHist = $db->prepare("
+                INSERT INTO order_status_history (order_reference, old_status, new_status, changed_by)
+                VALUES (:ref, NULL, 'paid', NULL)
+            ");
+            $stmtHist->execute([':ref' => $orderReference]);
+
             // Insertion des articles de la commande
             $stmtItem = $db->prepare("
                 INSERT INTO order_item (order_reference, product_route, title, price, quantity)

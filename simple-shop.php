@@ -8,9 +8,12 @@ use Grav\Common\Utils;
 use Grav\Plugin\SimpleShop\Controllers\CartController;
 use Grav\Plugin\SimpleShop\Controllers\CustomerController;
 use Grav\Plugin\SimpleShop\Inventory\CartStorage;
+use Grav\Plugin\SimpleShop\Inventory\InventoryManager;
 use Grav\Plugin\SimpleShop\Invoicing\InvoiceManager;
 use Grav\Plugin\SimpleShop\Orders\OrderManager;
 use Grav\Plugin\SimpleShop\Services\CustomerManager;
+use Grav\Plugin\SimpleShop\Services\OrderMailer;
+use RocketTheme\Toolbox\Event\Event;
 use Grav\Plugin\SimpleShop\Config\Routes;
 use Grav\Theme\NoJs;
 
@@ -47,6 +50,7 @@ class SimpleShopPlugin extends Plugin
         return [
             'onPluginsInitialized'     => [['onPluginsInitialized', 0]],
             'onMvcRegisterRoutes'      => [['onMvcRegisterRoutes', 0]], // <-- Abonnement au nouvel événement de routage MVC
+            'onSimpleShopOrderStatusChanged' => [['onOrderStatusChanged', 0]],
             'onTwigInitialized'        => [['onTwigInitialized', 0]],
             'onTwigTemplatePaths'      => [['onTwigTemplatePaths', 0]],
             'onTwigSiteVariables'      => [['onTwigSiteVariables', 0]],
@@ -96,6 +100,42 @@ class SimpleShopPlugin extends Plugin
             ];
 
             $router->addMany($routesMap);
+        }
+    }
+
+    /**
+     * Écouteur de `onSimpleShopOrderStatusChanged` : prévient le client par
+     * e-mail quand sa commande passe à un statut de la liste
+     * `plugins.simple-shop.status_emails` (par défaut : expédiée, annulée,
+     * remboursée). Jamais à la création (la confirmation part séparément) et
+     * jamais bloquant : une erreur est journalisée, pas propagée.
+     */
+    public function onOrderStatusChanged(Event $event): void
+    {
+        if ($event['old_status'] === null) {
+            return;
+        }
+
+        $enabled = (array) $this->config->get('plugins.simple-shop.status_emails', ['shipped', 'cancelled', 'refunded']);
+        $newStatus = (string) $event['new_status'];
+        if (!in_array($newStatus, $enabled, true)) {
+            return;
+        }
+
+        try {
+            $reference = (string) $event['order_reference'];
+            $order = OrderManager::getOrder($reference);
+            if (!$order) {
+                return;
+            }
+
+            $db = InventoryManager::getDatabase();
+            $stmt = $db->prepare('SELECT * FROM order_item WHERE order_reference = :ref ORDER BY id ASC');
+            $stmt->execute([':ref' => $reference]);
+
+            (new OrderMailer($this->grav))->sendStatusChange($order, $stmt->fetchAll(\PDO::FETCH_ASSOC), $newStatus);
+        } catch (\Throwable $e) {
+            $this->grav['log']->error('[SimpleShop] E-mail de changement de statut impossible : ' . $e->getMessage());
         }
     }
 
