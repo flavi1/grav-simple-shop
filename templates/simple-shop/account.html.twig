@@ -26,6 +26,11 @@
             </button>
         </form>
 
+        <form method="post" action="{{ base_url_absolute }}{{ shop_routes.logout }}" class="account-logout">
+            {{ nonce_field('shop-logout', 'nonce')|raw }}
+            <button type="submit" class="btn">Me déconnecter</button>
+        </form>
+
         {% if unsubscribe_url %}
             <p class="account-unsubscribe">
                 <a href="{{ unsubscribe_url }}">Se désabonner de la newsletter</a>

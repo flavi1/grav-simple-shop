@@ -78,6 +78,7 @@ class SimpleShopPlugin extends Plugin
                 $routes['payment_return']           => [CartController::class, 'step3PaymentReturn'],
                 $routes['identify']                 => [CustomerController::class, 'identify'],
                 $routes['account']                  => [CustomerController::class, 'account'],
+                $routes['logout']                   => [CustomerController::class, 'logout'],
                 $routes['newsletter_unsubscribe']   => [CustomerController::class, 'unsubscribeNewsletter'],
             ];
 

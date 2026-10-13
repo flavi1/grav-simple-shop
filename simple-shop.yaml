@@ -17,6 +17,7 @@ routes:
   confirmation: '/checkout/confirmation'
   identify: '/identify'
   account: '/mon-compte'
+  logout: '/mon-compte/deconnexion'
 
 # E-mail au client quand sa commande passe à l'un de ces statuts (voir OrderManager::STATUSES)
 status_emails:

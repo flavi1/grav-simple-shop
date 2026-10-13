@@ -22,6 +22,7 @@ class Routes
             'payment_return'          => $r['payment_return'] ?? '/checkout/payment-return',
             'identify'                => $r['identify'] ?? '/identify',
             'account'                 => $r['account'] ?? '/mon-compte',
+            'logout'                  => $r['logout'] ?? '/mon-compte/deconnexion',
             'newsletter_unsubscribe'  => $r['newsletter_unsubscribe'] ?? '/newsletter/unsubscribe',
         ];
     }

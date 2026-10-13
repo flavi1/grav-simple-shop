@@ -111,6 +111,9 @@ class CustomerController extends AbstractController
      */
     private const NONCE_ACCOUNT = 'shop-account';
 
+    /** Nonce du bouton de déconnexion. */
+    private const NONCE_LOGOUT = 'shop-logout';
+
     /**
      * Nombre maximal de tentatives de saisie du code OTP avant blocage.
      *
@@ -985,6 +988,35 @@ class CustomerController extends AbstractController
             'simple_shop_config' => $this->shopConfig(),
             'unsubscribe_url'    => $this->buildUnsubscribeUrl((string) ($customerData['email'] ?? '')),
         ]);
+    }
+
+    /**
+     * Déconnexion du client (POST + nonce : une simple visite d'URL, par
+     * exemple via une image tierce, ne doit pas déconnecter).
+     *
+     * Oublie l'e-mail vérifié et supprime le cookie « se souvenir de moi ».
+     * Les données conservées volontairement (« keep-data ») ne sont pas
+     * effacées. Un GET renvoie simplement vers la page du compte.
+     */
+    public function logout(): Response
+    {
+        $accountUrl = $this->routeUrl('account', '/mon-compte');
+
+        if (!$this->isPost()) {
+            return $this->redirect($accountUrl, 303);
+        }
+
+        $nonce = (string) $this->post('nonce', FILTER_DEFAULT, '');
+        if ($nonce === '' || !Utils::verifyNonce($nonce, self::NONCE_LOGOUT)) {
+            $this->addMessage('Votre session a expiré, veuillez réessayer.', 'error');
+
+            return $this->redirect($accountUrl, 303);
+        }
+
+        $this->customerManager()->logout();
+        $this->addMessage('Vous êtes déconnecté.', 'success');
+
+        return $this->redirect($this->routeUrl('cart', '/cart'), 303);
     }
 
     /**
