@@ -6,6 +6,7 @@ use Grav\Common\Utils;
 use Grav\Plugin\Mvc\AbstractController;
 use Grav\Plugin\Mvc\Response;
 use Grav\Plugin\SimpleShop\Inventory\CartStorage;
+use Grav\Plugin\SimpleShop\Delivery\ZoneResolver;
 use Grav\Plugin\SimpleShop\Services\AddressFields;
 use Grav\Plugin\SimpleShop\Services\CustomerManager;
 use Grav\Plugin\SimpleShop\Services\OtpThrottle;
@@ -947,7 +948,7 @@ class CustomerController extends AbstractController
                 } elseif ($result['error'] === 'banned') {
                     $this->addMessage(self::BANNED_MESSAGE, 'error');
                 } elseif ($result['error'] === 'unsupported_zone') {
-                    $this->addMessage(AddressFields::UNSUPPORTED_ZONE_MESSAGE, 'error');
+                    $this->addMessage(ZoneResolver::unsupportedMessage($this->shopConfig()), 'error');
                 } else {
                     $this->addMessage('Merci de renseigner tous les champs obligatoires.', 'error');
                 }

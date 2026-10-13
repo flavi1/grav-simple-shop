@@ -2,6 +2,7 @@
 
 namespace Grav\Plugin\SimpleShop\Services;
 
+use Grav\Plugin\SimpleShop\Delivery\ZoneResolver;
 use Grav\Common\Grav;
 use Grav\Common\Session;
 use Grav\Plugin\SimpleShop\Inventory\CartStorage;
@@ -165,8 +166,11 @@ class CustomerManager
             }
         }
 
-        // Livraison limitée à la France métropolitaine hors Corse.
-        if (!AddressFields::isDeliverablePostalCode((string) $data['postal-code'])) {
+        // Livraison limitée aux zones desservies (plugins.simple-shop.delivery.allowed_zones).
+        if (!ZoneResolver::isDeliverable(
+            ['country' => $data['country'] ?? 'FR', 'postal-code' => (string) $data['postal-code']],
+            (array) $this->grav['config']->get('plugins.simple-shop', [])
+        )) {
             return [
                 'success' => false,
                 'error' => 'unsupported_zone',

@@ -5,9 +5,13 @@ Plugin e-commerce pour Grav 2.0 : panier, identification du client par code
 (passerelles séparées, ex. Stripe), commandes, factures Factur-X et
 administration via l'API et Admin2.
 
-Périmètre assumé : vente à des particuliers (B2C), **France métropolitaine
-hors Corse**, en euros, un seul taux de TVA. Un code postal hors zone est
-refusé avec un message clair (`AddressFields::isDeliverablePostalCode()`).
+Périmètre : vente à des particuliers (B2C), en euros, un seul taux de TVA.
+Le plugin sait résoudre toutes les destinations (`Delivery\ZoneResolver` :
+`FR-METRO`, `FR-CORSE`, `FR-OM`, `EU-ZONE-1`, `INTERNATIONAL`) ; les zones
+réellement desservies par un site se règlent dans `plugins.simple-shop.delivery.allowed_zones`
+(défaut : `FR-METRO`, soit la France métropolitaine hors Corse). Une adresse hors
+zone est refusée avec un message clair (`delivery.unsupported_message`).
+Ouvrir une zone demande aussi des règles pour cette zone dans `carriers.yaml`.
 
 Principe directeur : le site doit fonctionner **sans JavaScript** côté client.
 Seul le paiement Stripe en mode « Elements » en utilise (option, voir plus bas).
@@ -62,9 +66,15 @@ recharge la page de retour.
 Dans les deux cas, le serveur vérifie le statut **et** le montant auprès de
 Stripe avant de créer la commande.
 
-Limite connue : si le client ferme son navigateur après avoir payé et avant
-le retour, la commande n'est pas créée (un webhook serait nécessaire ; voir
-`private/prompts/TODO.md`).
+### Webhook (client parti avant le retour)
+
+Au démarrage du paiement, la passerelle enregistre un **instantané** de la commande en cours
+(`pending_payment` : panier, client, livraison, facturation, montant attendu) et n'en confie que l'identifiant à Stripe
+(métadonnée `shop_snapshot`). Si le client ferme son navigateur après avoir payé, Stripe appelle
+`/stripe/webhook` (événement `payment_intent.succeeded`, signature vérifiée avec `webhook_secret`) et
+`Services\OrderFinalizer` crée la commande sans session : même idempotence (référence = PaymentIntent), un seul jeu d'e-mails,
+déstockage identique. Le montant encaissé et le total recalculé du panier doivent correspondre, sinon la commande n'est pas
+créée et l'incident est journalisé pour rapprochement manuel. Configuration pas à pas : `private/prompts/TODO.md`.
 
 ## Commandes, factures, événements
 
@@ -113,7 +123,7 @@ statut, historique, facture, export CSV), transporteurs (édition YAML
 validée), adresses bannies.
 
 API (préfixe `/api/v1/simple-shop`), permissions `api.simple-shop.read` /
-`api.simple-shop.write` :
+`api.simple-shop.write` (modèle de groupe « gestionnaire boutique » : `config/groups.dist.yaml`) :
 
 `GET /orders`, `GET /orders/export`, `GET /orders/{reference}`,
 `PATCH /orders/{reference}/status`, `PATCH /orders/{reference}/invoice-status`,
@@ -122,7 +132,7 @@ API (préfixe `/api/v1/simple-shop`), permissions `api.simple-shop.read` /
 
 ## Configuration et données
 
-- `simple-shop.yaml` : valeurs par défaut (routes, OTP, TVA, e-mails de statut…).
+- `simple-shop.yaml` : valeurs par défaut (routes, OTP, zones de livraison, TVA, e-mails de statut…).
 - La configuration réelle du site (`user/config`) n'est **pas** versionnée ni
   déployée : seuls les modèles `*.dist.yaml` le sont, sans secret. Les clés
   Stripe et les identifiants SMTP se saisissent sur le serveur.

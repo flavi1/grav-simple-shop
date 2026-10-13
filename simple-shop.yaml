@@ -19,6 +19,14 @@ routes:
   account: '/mon-compte'
   logout: '/mon-compte/deconnexion'
 
+# Livraison : zones desservies par CE site (le plugin sait résoudre FR-METRO,
+# FR-CORSE, FR-OM, EU-ZONE-1 et INTERNATIONAL ; chaque zone ouverte doit avoir
+# des règles dans carriers.yaml). Message personnalisable si la zone est refusée.
+delivery:
+  allowed_zones:
+    - FR-METRO
+  unsupported_message: ''
+
 # E-mail au client quand sa commande passe à l'un de ces statuts (voir OrderManager::STATUSES)
 status_emails:
   - shipped

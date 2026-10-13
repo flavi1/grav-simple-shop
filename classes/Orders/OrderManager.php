@@ -193,7 +193,7 @@ class OrderManager
     {
         $db = InventoryManager::getDatabase();
 
-        [$where, $params] = self::buildWhere($filters);
+        [$where, $params] = self::buildWhere($db, $filters);
 
         $stmtCount = $db->prepare('SELECT COUNT(*) FROM "order"' . $where);
         $stmtCount->execute($params);
@@ -210,11 +210,35 @@ class OrderManager
     }
 
     /**
+     * Replie un texte pour la recherche : minuscules et sans accents
+     * (« Éloïse » -> « eloise »). Publique car appelée par SQLite
+     * (`shop_fold()`), pas destinée à un autre usage.
+     */
+    public static function fold(?string $text): string
+    {
+        $text = mb_strtolower((string) $text, 'UTF-8');
+
+        if (class_exists(\Transliterator::class)) {
+            $t = \Transliterator::create('NFD; [:Nonspacing Mark:] Remove; NFC');
+            if ($t !== null) {
+                return (string) $t->transliterate($text);
+            }
+        }
+
+        return strtr($text, [
+            'à' => 'a', 'â' => 'a', 'ä' => 'a', 'á' => 'a', 'ã' => 'a', 'å' => 'a', 'ç' => 'c',
+            'é' => 'e', 'è' => 'e', 'ê' => 'e', 'ë' => 'e', 'í' => 'i', 'î' => 'i', 'ï' => 'i',
+            'ñ' => 'n', 'ó' => 'o', 'ô' => 'o', 'ö' => 'o', 'õ' => 'o', 'ú' => 'u', 'ù' => 'u',
+            'û' => 'u', 'ü' => 'u', 'ý' => 'y', 'ÿ' => 'y', 'œ' => 'oe', 'æ' => 'ae',
+        ]);
+    }
+
+    /**
      * Construit la clause WHERE (et ses paramètres) d'une recherche.
      *
      * @return array{0:string,1:array<string,string>}
      */
-    private static function buildWhere(array $filters): array
+    private static function buildWhere(\PDO $db, array $filters): array
     {
         $clauses = [];
         $params = [];
@@ -233,13 +257,18 @@ class OrderManager
 
         $q = trim((string) ($filters['q'] ?? ''));
         if ($q !== '') {
+            // Recherche insensible à la casse ET aux accents : le LIKE de
+            // SQLite ne l'est que pour l'ASCII, on compare donc des valeurs
+            // « repliées » (voir self::fold()) des deux côtés.
+            $db->sqliteCreateFunction('shop_fold', [self::class, 'fold'], 1);
+
             // Échappement des jokers LIKE saisis par l'utilisateur.
-            $like = '%' . str_replace(['\\', '%', '_'], ['\\\\', '\\%', '\\_'], $q) . '%';
-            $clauses[] = "(order_reference LIKE :q ESCAPE '\\'"
-                . " OR json_extract(customer_data, '$.lastname') LIKE :q ESCAPE '\\'"
-                . " OR json_extract(customer_data, '$.firstname') LIKE :q ESCAPE '\\'"
-                . " OR json_extract(customer_data, '$.email') LIKE :q ESCAPE '\\'"
-                . " OR json_extract(customer_data, '$.tel') LIKE :q ESCAPE '\\')";
+            $like = '%' . str_replace(['\\', '%', '_'], ['\\\\', '\\%', '\\_'], self::fold($q)) . '%';
+            $clauses[] = "(shop_fold(order_reference) LIKE :q ESCAPE '\\'"
+                . " OR shop_fold(json_extract(customer_data, '$.lastname')) LIKE :q ESCAPE '\\'"
+                . " OR shop_fold(json_extract(customer_data, '$.firstname')) LIKE :q ESCAPE '\\'"
+                . " OR shop_fold(json_extract(customer_data, '$.email')) LIKE :q ESCAPE '\\'"
+                . " OR shop_fold(json_extract(customer_data, '$.tel')) LIKE :q ESCAPE '\\')";
             $params[':q'] = $like;
         }
 
