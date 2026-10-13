@@ -2,6 +2,8 @@
 
 namespace Grav\Plugin\SimpleShop\Orders;
 
+use Grav\Plugin\SimpleShop\Services\AddressFields;
+
 use Grav\Common\Grav;
 use Grav\Plugin\SimpleShop\Inventory\InventoryManager;
 use RocketTheme\Toolbox\Event\Event;
@@ -82,9 +84,9 @@ class OrderManager
         $stmtItems = $db->prepare('SELECT * FROM order_item WHERE order_reference = :ref ORDER BY id ASC');
 
         foreach ($orders as &$order) {
-            $order['customer'] = json_decode((string) ($order['customer_data'] ?? '{}'), true) ?: [];
+            $order['customer'] = AddressFields::normalize(json_decode((string) ($order['customer_data'] ?? '{}'), true) ?: []);
             $order['shipping'] = json_decode((string) ($order['shipping_data'] ?? '{}'), true) ?: [];
-            $order['billing']  = json_decode((string) ($order['billing_data'] ?? '{}'), true) ?: [];
+            $order['billing']  = AddressFields::normalize(json_decode((string) ($order['billing_data'] ?? '{}'), true) ?: []);
 
             $stmtItems->execute([':ref' => $order['order_reference']]);
             $order['items'] = $stmtItems->fetchAll(\PDO::FETCH_ASSOC);

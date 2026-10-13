@@ -164,9 +164,9 @@
                                     {% if order.customer.firstname|default('') or order.customer.lastname|default('') %}
                                         {{ order.customer.firstname|default('') }} {{ order.customer.lastname|default('') }}<br>
                                     {% endif %}
-                                    {% if order.customer['address-line1']|default('') %}{{ order.customer['address-line1'] }}<br>{% endif %}
-                                    {% if order.customer['address-line2']|default('') %}{{ order.customer['address-line2'] }}<br>{% endif %}
-                                    {% if order.customer['address-line3']|default('') %}{{ order.customer['address-line3'] }}<br>{% endif %}
+                                    {% if order.customer['street']|default('') %}{{ order.customer['street'] }}<br>{% endif %}
+                                    {% if order.customer['city']|default('') %}{{ order.customer['city'] }}<br>{% endif %}
+                                    {% if order.customer['address-complement']|default('') %}{{ order.customer['address-complement'] }}<br>{% endif %}
                                     {% if order.customer['postal-code']|default('') %}{{ order.customer['postal-code'] }}<br>{% endif %}
                                     {% if order.customer.country|default('') %}{{ order.customer.country }}{% endif %}
                                 </address>

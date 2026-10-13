@@ -23,15 +23,15 @@
                                           (défaut : {}).
       - fields            (array)        Liste ordonnée des champs à afficher,
                                           parmi : 'lastname', 'firstname',
-                                          'email', 'tel', 'address-line1',
-                                          'postal-code', 'address-line2',
-                                          'address-line3', 'newsletter',
+                                          'email', 'tel', 'street',
+                                          'postal-code', 'city',
+                                          'address-complement', 'newsletter',
                                           'keep-data'.
                                           (défaut : tous les champs)
       - required          (array)        Liste des champs obligatoires parmi
                                           ceux affichés (défaut : 'email',
-                                          'address-line1', 'postal-code',
-                                          'address-line2').
+                                          'street', 'postal-code',
+                                          'city').
       - autofocus_field   (string|null)  Nom du champ à mettre en autofocus
                                           (défaut : null).
 #}
@@ -39,10 +39,10 @@
 {% set persist = customer._persist|default({}) %}
 {% set fields = fields|default([
     'lastname', 'firstname', 'email', 'tel',
-    'address-line1', 'postal-code', 'address-line2', 'address-line3',
+    'street', 'postal-code', 'city', 'address-complement',
     'newsletter', 'keep-data'
 ]) %}
-{% set required = required|default(['email', 'address-line1', 'postal-code', 'address-line2']) %}
+{% set required = required|default(['lastname', 'firstname', 'email', 'tel', 'street', 'postal-code', 'city']) %}
 {% set autofocus_field = autofocus_field|default(null) %}
 
 {% if 'lastname' in fields or 'firstname' in fields %}
@@ -76,34 +76,37 @@
     </div>
 {% endif %}
 
-{% if 'address-line1' in fields %}
+{% if 'street' in fields %}
     <div class="form-field">
-        <label for="address-line1">Adresse de livraison{% if 'address-line1' in required %} *{% endif %}</label>
-        <input type="text" id="address-line1" name="address-line1" autocomplete="shipping address-line1" value="{{ customer['address-line1']|default('') }}" {% if 'address-line1' in required %}required{% endif %} {% if autofocus_field == 'address-line1' %}autofocus{% endif %}>
+        <label for="street">Adresse de livraison{% if 'street' in required %} *{% endif %}</label>
+        <input type="text" id="street" name="street" autocomplete="shipping address-line1" value="{{ customer['street']|default('') }}" {% if 'street' in required %}required{% endif %} {% if autofocus_field == 'street' %}autofocus{% endif %}>
     </div>
 {% endif %}
 
-{% if 'postal-code' in fields or 'address-line2' in fields %}
+{% if 'postal-code' in fields or 'city' in fields %}
     <div class="form-group-row">
         {% if 'postal-code' in fields %}
             <div class="form-field">
                 <label for="postal-code">Code Postal{% if 'postal-code' in required %} *{% endif %}</label>
-                <input type="text" id="postal-code" name="postal-code" autocomplete="shipping postal-code" value="{{ customer['postal-code']|default('') }}" {% if 'postal-code' in required %}required{% endif %} {% if autofocus_field == 'postal-code' %}autofocus{% endif %}>
+                <input type="text" id="postal-code" name="postal-code" inputmode="numeric" pattern="[0-9]{5}" maxlength="5" title="Code postal à 5 chiffres (France métropolitaine, hors Corse)" autocomplete="shipping postal-code" value="{{ customer['postal-code']|default('') }}" {% if 'postal-code' in required %}required{% endif %} {% if autofocus_field == 'postal-code' %}autofocus{% endif %}>
             </div>
         {% endif %}
-        {% if 'address-line2' in fields %}
+        {% if 'city' in fields %}
             <div class="form-field">
-                <label for="address-line2">Ville{% if 'address-line2' in required %} *{% endif %}</label>
-                <input type="text" id="address-line2" name="address-line2" autocomplete="shipping address-level2" value="{{ customer['address-line2']|default('') }}" {% if 'address-line2' in required %}required{% endif %} {% if autofocus_field == 'address-line2' %}autofocus{% endif %}>
+                <label for="city">Ville{% if 'city' in required %} *{% endif %}</label>
+                <input type="text" id="city" name="city" autocomplete="shipping address-level2" value="{{ customer['city']|default('') }}" {% if 'city' in required %}required{% endif %} {% if autofocus_field == 'city' %}autofocus{% endif %}>
             </div>
         {% endif %}
     </div>
+    {% if 'postal-code' in fields %}
+        <p class="form-hint">Livraison en France métropolitaine uniquement (hors Corse).</p>
+    {% endif %}
 {% endif %}
 
-{% if 'address-line3' in fields %}
+{% if 'address-complement' in fields %}
     <div class="form-field">
-        <label for="address-line3">Complément d'adresse{% if 'address-line3' in required %} *{% endif %}</label>
-        <input type="text" id="address-line3" name="address-line3" autocomplete="shipping address-line3" value="{{ customer['address-line3']|default('') }}" {% if 'address-line3' in required %}required{% endif %} {% if autofocus_field == 'address-line3' %}autofocus{% endif %}>
+        <label for="address-complement">Complément d'adresse{% if 'address-complement' in required %} *{% endif %}</label>
+        <input type="text" id="address-complement" name="address-complement" autocomplete="shipping address-line2" value="{{ customer['address-complement']|default('') }}" {% if 'address-complement' in required %}required{% endif %} {% if autofocus_field == 'address-complement' %}autofocus{% endif %}>
     </div>
 {% endif %}
 

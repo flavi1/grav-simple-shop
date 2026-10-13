@@ -6,6 +6,7 @@ use Grav\Common\Utils;
 use Grav\Plugin\Mvc\AbstractController;
 use Grav\Plugin\Mvc\Response;
 use Grav\Plugin\SimpleShop\Inventory\CartStorage;
+use Grav\Plugin\SimpleShop\Services\AddressFields;
 use Grav\Plugin\SimpleShop\Services\CustomerManager;
 use Grav\Plugin\SimpleShop\Services\OtpThrottle;
 use Symfony\Component\Mime\Address;
@@ -942,6 +943,8 @@ class CustomerController extends AbstractController
                     $this->addMessage('Veuillez saisir une adresse e-mail valide.', 'error');
                 } elseif ($result['error'] === 'banned') {
                     $this->addMessage(self::BANNED_MESSAGE, 'error');
+                } elseif ($result['error'] === 'unsupported_zone') {
+                    $this->addMessage(AddressFields::UNSUPPORTED_ZONE_MESSAGE, 'error');
                 } else {
                     $this->addMessage('Merci de renseigner tous les champs obligatoires.', 'error');
                 }

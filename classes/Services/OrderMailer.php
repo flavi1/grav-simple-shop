@@ -83,7 +83,7 @@ class OrderMailer
      */
     public function sendOrderConfirmation(array $orderData, array $orderItems): bool
     {
-        $customer = json_decode((string) ($orderData['customer_data'] ?? '{}'), true) ?: [];
+        $customer = AddressFields::normalize(json_decode((string) ($orderData['customer_data'] ?? '{}'), true) ?: []);
         $email = trim((string) ($customer['email'] ?? ''));
 
         if ($email === '' || !filter_var($email, FILTER_VALIDATE_EMAIL)) {
@@ -199,9 +199,9 @@ class OrderMailer
             'order_reference' => $orderData['order_reference'] ?? '',
             'order_date'      => $orderData['created_at'] ?? '',
             'order_total'     => (float) ($orderData['total_amount'] ?? 0),
-            'customer'        => json_decode((string) ($orderData['customer_data'] ?? '{}'), true) ?: [],
+            'customer'        => AddressFields::normalize(json_decode((string) ($orderData['customer_data'] ?? '{}'), true) ?: []),
             'shipping'        => json_decode((string) ($orderData['shipping_data'] ?? '{}'), true) ?: [],
-            'billing'         => json_decode((string) ($orderData['billing_data'] ?? '{}'), true) ?: [],
+            'billing'         => AddressFields::normalize(json_decode((string) ($orderData['billing_data'] ?? '{}'), true) ?: []),
             'order_items'     => $orderItems,
         ];
     }

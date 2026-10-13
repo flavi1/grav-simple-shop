@@ -11,6 +11,7 @@ use Grav\Plugin\SimpleShop\Delivery\ZoneResolver;
 use Grav\Plugin\SimpleShop\Delivery\ShippingManager;
 use Grav\Plugin\SimpleShop\Inventory\CartStorage;
 use Grav\Plugin\SimpleShop\Inventory\InventoryManager;
+use Grav\Plugin\SimpleShop\Services\AddressFields;
 use Grav\Plugin\SimpleShop\Services\CustomerManager;
 use Grav\Plugin\SimpleShop\Services\OrderMailer;
 use \RocketTheme\Toolbox\Event\Event;
@@ -62,7 +63,7 @@ class CartController extends AbstractController
         $twig = $this->grav['twig'];
 
         $context = array_merge([
-            'customer'           => $this->grav['session']->shop_order->customer ?? [],
+            'customer'           => AddressFields::normalize((array) ($this->grav['session']->shop_order->customer ?? [])),
             'simple_shop_config' => $config,
             'shop_cart'          => $twig->twig_vars['shop_cart'] ?? [],
             'shop_cart_count'    => $twig->twig_vars['shop_cart_count'] ?? 0,
@@ -349,6 +350,8 @@ class CartController extends AbstractController
 					if (!$result['success']) {
 						if ($result['error'] === 'banned') {
 							$this->addMessage("Cette adresse e-mail est bannie. Veuillez nous contacter.", 'error');
+						} elseif ($result['error'] === 'unsupported_zone') {
+							$this->addMessage(AddressFields::UNSUPPORTED_ZONE_MESSAGE, 'error');
 						} else {
 							$this->addMessage("Veuillez remplir correctement tous les champs obligatoires (*).", 'error');
 						}
@@ -383,7 +386,7 @@ class CartController extends AbstractController
 		}
 
 		$twig = $this->grav['twig'];
-		$twig->twig_vars['customer'] = $this->session->shop_order->customer;
+		$twig->twig_vars['customer'] = AddressFields::normalize((array) ($this->session->shop_order->customer ?? []));
 		$twig->twig_vars['simple_shop_config'] = $config;
 
 
@@ -411,11 +414,19 @@ class CartController extends AbstractController
 			exit;
 		}
 
-		$customerData = $this->session->shop_order->customer ?? [];
+		$customerData = AddressFields::normalize((array) ($this->session->shop_order->customer ?? []));
 		$emailVerified = $this->session->shop_order->email_verified ?? false;
 
-		if (empty($customerData['email']) || empty($customerData['address-line1'])) {
+		if (empty($customerData['email']) || empty($customerData['street'])) {
 			$this->addMessage("Veuillez d'abord renseigner vos informations de livraison.", 'notice');
+			$this->grav->redirect($absoluteCartUrl);
+			exit;
+		}
+
+		// Filet de sécurité (profil ancien, session antérieure à la règle) :
+		// livraison en France métropolitaine hors Corse uniquement.
+		if (!AddressFields::isDeliverablePostalCode((string) ($customerData['postal-code'] ?? ''))) {
+			$this->addMessage(AddressFields::UNSUPPORTED_ZONE_MESSAGE, 'error');
 			$this->grav->redirect($absoluteCartUrl);
 			exit;
 		}
@@ -491,11 +502,11 @@ class CartController extends AbstractController
 		// TEMPS 0 : VÉRIFICATIONS SILENCIEUSES
 		// ==========================================
 		$order = $this->session->shop_order;
-		$customerData = $order->customer ?? [];
+		$customerData = AddressFields::normalize((array) ($order->customer ?? []));
 		$shippingData = $order->shipping ?? [];
 		$emailVerified = $order->email_verified ?? false;
 
-		if (empty($customerData['email']) || empty($customerData['address-line1'])) {
+		if (empty($customerData['email']) || empty($customerData['street'])) {
 			return $this->redirect($absoluteCartUrl);
 		}
 		if (empty($shippingData['key']) || !isset($shippingData['price'])) {
@@ -541,10 +552,10 @@ class CartController extends AbstractController
 				// Sauvegarde de l'adresse de facturation
 				$order->billing = [
 					'name'          => filter_input(INPUT_POST, 'billing_name', FILTER_DEFAULT),
-					'address-line1' => filter_input(INPUT_POST, 'billing_address_line1', FILTER_DEFAULT),
+					'street'        => filter_input(INPUT_POST, 'billing_street', FILTER_DEFAULT),
 					'postal-code'      => filter_input(INPUT_POST, 'billing_postal_code', FILTER_DEFAULT),
-					'address-line2'          => filter_input(INPUT_POST, 'billing_address_line2', FILTER_DEFAULT),
-					'address-line3'       => filter_input(INPUT_POST, 'billing_address_line3', FILTER_DEFAULT),
+					'city'          => filter_input(INPUT_POST, 'billing_city', FILTER_DEFAULT),
+					'address-complement' => filter_input(INPUT_POST, 'billing_address_complement', FILTER_DEFAULT),
 				];
 				$order->selected_gateway = $selectedGateway;
 				$order->payment_sub_step = 'gateway_form'; // On bascule au Temps 2
@@ -618,10 +629,10 @@ class CartController extends AbstractController
 		if (empty($order->billing)) {
 			$order->billing = [
 				'name'          => ($customerData['firstname'] ?? '') . ' ' . ($customerData['lastname'] ?? ''),
-				'address-line1' => $customerData['address-line1'] ?? '',
+				'street'        => $customerData['street'] ?? '',
 				'postal-code'   => $customerData['postal-code'] ?? '',
-				'address-line2' => $customerData['address-line2'] ?? '',
-				'address-line3' => $customerData['address-line3'] ?? '',
+				'city'          => $customerData['city'] ?? '',
+				'address-complement' => $customerData['address-complement'] ?? '',
 			];
 		}
 
@@ -643,7 +654,7 @@ class CartController extends AbstractController
 		$twig->twig_vars['cart'] = $cart;
 		$twig->twig_vars['customer'] = $customerData;
 		$twig->twig_vars['shipping'] = $shippingData;
-		$twig->twig_vars['billing'] = $order->billing;
+		$twig->twig_vars['billing'] = AddressFields::normalize((array) $order->billing);
 		$twig->twig_vars['gateways'] = $gateways;
 		$twig->twig_vars['selected_gateway'] = $order->selected_gateway ?? array_key_first($gateways);
 		$twig->twig_vars['sub_step'] = $subStep;
@@ -691,9 +702,9 @@ class CartController extends AbstractController
 		$twig->twig_vars['order_reference'] = $orderData['order_reference'];
 		$twig->twig_vars['order_date'] = $orderData['created_at'];
 		$twig->twig_vars['order_total'] = $orderData['total_amount'];
-		$twig->twig_vars['customer'] = json_decode($orderData['customer_data'], true);
-		$twig->twig_vars['shipping'] = json_decode($orderData['shipping_data'], true);
-		$twig->twig_vars['billing'] = json_decode($orderData['billing_data'], true);
+		$twig->twig_vars['customer'] = AddressFields::normalize((array) json_decode($orderData['customer_data'], true));
+		$twig->twig_vars['shipping'] = AddressFields::normalize((array) json_decode($orderData['shipping_data'], true));
+		$twig->twig_vars['billing'] = AddressFields::normalize((array) json_decode($orderData['billing_data'], true));
 		$twig->twig_vars['order_items'] = $orderItems;
 
         return $this->renderStep('step4confirmationorder');

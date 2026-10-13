@@ -56,9 +56,9 @@
 <h3>Adresse de livraison</h3>
 <p>
     {{ customer.firstname|default('') }} {{ customer.lastname|default('') }}<br>
-    {{ customer['address-line1']|default('') }}<br>
-    {% if customer['address-line3']|default('') %}{{ customer['address-line3'] }}<br>{% endif %}
-    {{ customer['postal-code']|default('') }} {{ customer['address-line2']|default('') }}
+    {{ customer['street']|default('') }}<br>
+    {% if customer['address-complement']|default('') %}{{ customer['address-complement'] }}<br>{% endif %}
+    {{ customer['postal-code']|default('') }} {{ customer['city']|default('') }}
 </p>
 
 {% if shipping.key is defined %}
@@ -70,9 +70,9 @@
 <h3>Adresse de facturation</h3>
 <p>
     {{ billing.name|default('') }}<br>
-    {{ billing['address-line1']|default('') }}<br>
-    {% if billing['address-line3']|default('') %}{{ billing['address-line3'] }}<br>{% endif %}
-    {{ billing['postal-code']|default('') }} {{ billing['address-line2']|default('') }}
+    {{ billing['street']|default('') }}<br>
+    {% if billing['address-complement']|default('') %}{{ billing['address-complement'] }}<br>{% endif %}
+    {{ billing['postal-code']|default('') }} {{ billing['city']|default('') }}
 </p>
 {% endblock %}
 

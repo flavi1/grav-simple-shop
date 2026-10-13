@@ -20,26 +20,30 @@ class CustomerManager
         'firstname',
         'email',
         'tel',
-        'address-line1',
+        'street',
         'postal-code',
-        'address-line2',
-        'address-line3',
+        'city',
+        'address-complement',
     ];
 
     /**
      * Champs obligatoires (validation métier) parmi {@see self::TEXT_FIELDS}.
      *
-     * ⚠️ CORRECTIF (Bug 4) : `address-line2` (complément d'adresse) a été
-     * retiré de cette liste — il s'agit d'un champ optionnel par nature
-     * (étage, bâtiment, appartement...), il ne doit jamais être exigé dans
-     * le tunnel de vente ni sur la page « Modifier mes informations ».
+     * Identique à ce que marquent d'une étoile les formulaires du tunnel
+     * (`step1cart`) et de « Mes informations » (`account`) : le serveur et
+     * l'interface disent la même chose. Seul `address-complement` (bâtiment,
+     * étage, lieu-dit…) est optionnel. Voir {@see AddressFields} pour le vocabulaire.
      *
      * @var string[]
      */
     public const REQUIRED_FIELDS = [
+        'lastname',
+        'firstname',
         'email',
-        'address-line1',
+        'tel',
+        'street',
         'postal-code',
+        'city',
     ];
 
     /**
@@ -87,7 +91,9 @@ class CustomerManager
      */
     public function getCustomerData(): array
     {
-        return $this->session->shop_order->customer ?? [];
+        // Normalisation à la lecture : une session ou un profil ancien peut
+        // encore contenir les anciens noms de champs (voir AddressFields).
+        return AddressFields::normalize((array) ($this->session->shop_order->customer ?? []));
     }
 
     /**
@@ -95,8 +101,8 @@ class CustomerManager
      */
     public function setCustomerData(array $data): void
     {
-        $current = $this->session->shop_order->customer ?? [];
-        $this->session->shop_order->customer = array_merge($current, $data);
+        $current = AddressFields::normalize((array) ($this->session->shop_order->customer ?? []));
+        $this->session->shop_order->customer = array_merge($current, AddressFields::normalize($data));
     }
 
     /**
@@ -147,14 +153,25 @@ class CustomerManager
             ];
         }
 
+        $data = AddressFields::normalize($data);
+
         foreach (self::REQUIRED_FIELDS as $field) {
-            if (($data[$field] ?? '') === '') {
+            if (trim((string) ($data[$field] ?? '')) === '') {
                 return [
                     'success' => false,
                     'error' => 'missing_required',
                     'email_changed' => false,
                 ];
             }
+        }
+
+        // Livraison limitée à la France métropolitaine hors Corse.
+        if (!AddressFields::isDeliverablePostalCode((string) $data['postal-code'])) {
+            return [
+                'success' => false,
+                'error' => 'unsupported_zone',
+                'email_changed' => false,
+            ];
         }
 
         $newEmail = (string) $data['email'];
@@ -478,6 +495,8 @@ class CustomerManager
      */
     private function isProfileDataMeaningful(array $data): bool
     {
+        $data = AddressFields::normalize($data);
+
         foreach (self::REQUIRED_FIELDS as $field) {
             if ($field === 'email') {
                 continue;

@@ -2,6 +2,8 @@
 
 namespace Grav\Plugin\SimpleShop\Invoicing;
 
+use Grav\Plugin\SimpleShop\Services\AddressFields;
+
 /**
  * Génère le XML CII (Cross Industry Invoice) profil BASIC de Factur-X pour
  * une commande, destiné à être fusionné avec le PDF de base via
@@ -78,8 +80,8 @@ class FacturXXmlBuilder
      */
     public function build(): string
     {
-        $customer = json_decode((string) ($this->order['customer_data'] ?? '{}'), true) ?: [];
-        $billing  = json_decode((string) ($this->order['billing_data'] ?? '{}'), true) ?: [];
+        $customer = AddressFields::normalize(json_decode((string) ($this->order['customer_data'] ?? '{}'), true) ?: []);
+        $billing  = AddressFields::normalize(json_decode((string) ($this->order['billing_data'] ?? '{}'), true) ?: []);
 
         $vatRate = (float) ($this->invoiceRow['vat_rate'] ?? 0.0);
         $vatCategoryCode = $vatRate < 0.20 ? 'AA' : 'S';
@@ -123,10 +125,10 @@ class FacturXXmlBuilder
         $buyerXml = $this->buildTradePartyXml(
             'BuyerTradeParty',
             $billingName,
-            (string) ($billing['address-line1'] ?? ($customer['address-line1'] ?? '')),
-            (string) ($billing['address-line2'] ?? ($customer['address-line2'] ?? '')),
+            (string) ($billing['street'] ?? ($customer['street'] ?? '')),
+            (string) ($billing['address-complement'] ?? ($customer['address-complement'] ?? '')),
             (string) ($billing['postal-code'] ?? ($customer['postal-code'] ?? '')),
-            '',
+            (string) ($billing['city'] ?? ($customer['city'] ?? '')),
             (string) ($customer['country'] ?? 'FR'),
             '',
             ''

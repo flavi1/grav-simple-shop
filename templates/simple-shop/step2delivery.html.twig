@@ -73,11 +73,11 @@
                 <h3>Adresse de livraison</h3>
                 <address class="customer-address-preview">
                     <strong>{{ customer.firstname }} {{ customer.lastname }}</strong><br>
-                    {{ customer['address-line1'] }}<br>
-                    {% if customer['address-line3'] %}
-                        {{ customer['address-line3'] }}<br>
+                    {{ customer['street'] }}<br>
+                    {% if customer['address-complement'] %}
+                        {{ customer['address-complement'] }}<br>
                     {% endif %}
-                    {{ customer['postal-code'] }} {{ customer['address-line2'] }}<br>
+                    {{ customer['postal-code'] }} {{ customer['city'] }}<br>
                     <span class="field-help">{{ customer.email }}</span>
                 </address>
             </div>
