@@ -1,6 +1,4 @@
 enabled: true
-secret_key: 'CLE-STRIPE-RETIREE' # Remplacer par votre clé secrète Stripe Test
-public_key: 'CLE-STRIPE-RETIREE' # Optionnel si tout est géré côté serveur, mais utile à garder
 buy_route: '/buy'
 cart_route: '/cart'
 success_url: '/checkout-success'
