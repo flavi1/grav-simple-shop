@@ -339,6 +339,10 @@ class OrderMailer
         }
 
         try {
+            // Hors rendu de page (ex. changement de statut depuis l'API de
+            // l'admin), Twig n'est pas forcément initialisé : init() est
+            // idempotente et enregistre les chemins de templates des plugins.
+            $this->grav['twig']->init();
             $html = $this->grav['twig']->processTemplate($template, $vars);
         } catch (\Throwable $e) {
             $this->log('error', "Erreur lors du rendu du template '{$template}' : " . $e->getMessage());

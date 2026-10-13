@@ -51,6 +51,10 @@ class SimpleShopPlugin extends Plugin
             'onPluginsInitialized'     => [['onPluginsInitialized', 0]],
             'onMvcRegisterRoutes'      => [['onMvcRegisterRoutes', 0]], // <-- Abonnement au nouvel événement de routage MVC
             'onSimpleShopOrderStatusChanged' => [['onOrderStatusChanged', 0]],
+            // Administration (Grav 2.0 : plugin `api` + Admin2)
+            'onApiRegisterRoutes'      => [['onApiRegisterRoutes', 0]],
+            'onApiSidebarItems'        => [['onApiSidebarItems', 0]],
+            'onApiPluginPageInfo'      => [['onApiPluginPageInfo', 0]],
             'onTwigInitialized'        => [['onTwigInitialized', 0]],
             'onTwigTemplatePaths'      => [['onTwigTemplatePaths', 0]],
             'onTwigSiteVariables'      => [['onTwigSiteVariables', 0]],
@@ -137,6 +141,66 @@ class SimpleShopPlugin extends Plugin
         } catch (\Throwable $e) {
             $this->grav['log']->error('[SimpleShop] E-mail de changement de statut impossible : ' . $e->getMessage());
         }
+    }
+
+    /**
+     * Routes de l'API d'administration (`/api/v1/simple-shop/...`), consommées
+     * par la page Admin2 du plugin (admin-next/pages/simple-shop.js).
+     */
+    public function onApiRegisterRoutes(Event $event): void
+    {
+        $routes = $event['routes'];
+        $c = \Grav\Plugin\SimpleShop\Api\ShopApiController::class;
+
+        $routes->group('/simple-shop', function ($group) use ($c) {
+            $group->get('/orders', [$c, 'orders']);
+            $group->get('/orders/export', [$c, 'exportOrders']);
+            $group->get('/orders/{reference}', [$c, 'order']);
+            $group->patch('/orders/{reference}/status', [$c, 'updateOrderStatus']);
+            $group->patch('/orders/{reference}/invoice-status', [$c, 'updateInvoiceStatus']);
+            $group->get('/orders/{reference}/invoice', [$c, 'invoicePdf']);
+
+            $group->get('/carriers', [$c, 'carriers']);
+            $group->put('/carriers', [$c, 'saveCarriers']);
+
+            $group->get('/bans', [$c, 'bans']);
+            $group->post('/bans', [$c, 'ban']);
+            $group->delete('/bans/{email:.+}', [$c, 'unban']);
+        });
+    }
+
+    /** Entrée « Boutique » dans le menu latéral d'Admin2. */
+    public function onApiSidebarItems(Event $event): void
+    {
+        $items = $event['items'];
+        $items[] = [
+            'id'        => 'simple-shop',
+            'plugin'    => 'simple-shop',
+            'label'     => 'Boutique',
+            'icon'      => 'fa-shopping-cart',
+            'route'     => '/plugin/simple-shop',
+            'priority'  => 20,
+            'badge'     => null,
+            'authorize' => 'api.simple-shop.read',
+        ];
+        $event['items'] = $items;
+    }
+
+    /** Définition de la page Admin2 : un composant web (admin-next/pages/simple-shop.js). */
+    public function onApiPluginPageInfo(Event $event): void
+    {
+        if ($event['plugin'] !== 'simple-shop') {
+            return;
+        }
+
+        $event['definition'] = [
+            'id'        => 'simple-shop',
+            'plugin'    => 'simple-shop',
+            'title'     => 'Boutique',
+            'icon'      => 'fa-shopping-cart',
+            'page_type' => 'component',
+            'actions'   => [],
+        ];
     }
 
     public function addMessage(string $message, string $scope = 'info'): void

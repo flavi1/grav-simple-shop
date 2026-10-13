@@ -175,6 +175,7 @@ class OrderManager
      * Recherche paginée de commandes (espace admin).
      *
      * Filtres reconnus (tous facultatifs) :
+     *  - `reference` : référence exacte d'une commande ;
      *  - `status`    : un statut de {@see self::STATUSES} ;
      *  - `q`         : texte libre cherché dans la référence, le nom, le
      *                  prénom, l'e-mail et le téléphone du client (SQLite JSON1) ;
@@ -222,6 +223,12 @@ class OrderManager
         if ($status !== '' && array_key_exists($status, self::STATUSES)) {
             $clauses[] = 'status = :status';
             $params[':status'] = $status;
+        }
+
+        $reference = trim((string) ($filters['reference'] ?? ''));
+        if ($reference !== '') {
+            $clauses[] = 'order_reference = :reference';
+            $params[':reference'] = $reference;
         }
 
         $q = trim((string) ($filters['q'] ?? ''));
