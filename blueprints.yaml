@@ -57,18 +57,94 @@ form:
       help: "Adresse e-mail recevant une notification à chaque nouvelle commande (voir OrderMailer::sendSellerNotification()). Laissez vide pour utiliser automatiquement l'e-mail de l'auteur du site (site.author.email)."
       default: ''
 
+    taxes_fieldset:
+      type: fieldset
+      title: Taxes
+      help: "Les prix des fiches produit sont saisis hors taxe ; la boutique affiche, encaisse et facture en TTC."
+      fields:
+        taxes.prices_entered:
+          type: select
+          label: Les prix des fiches produit sont saisis
+          default: ht
+          options:
+            ht: Hors taxe (HT)
+            ttc: Toutes taxes comprises (TTC)
+        taxes.default:
+          type: text
+          label: Code de la taxe appliquée à tout le site
+          help: "Doit correspondre à un code de la liste ci-dessous (ex. TVA_5_5). Livres : TVA à 5,5 %, y compris pour les frais de livraison."
+          default: TVA_5_5
+        taxes.rates:
+          type: list
+          label: Types de taxes
+          help: "Un type par ligne : code, libellé, taux (0.055 pour 5,5 %)."
+          style: vertical
+          fields:
+            .code:
+              type: text
+              label: Code
+              placeholder: TVA_5_5
+            .label:
+              type: text
+              label: Libellé
+              placeholder: TVA 5,5 %
+            .rate:
+              type: number
+              label: Taux
+              step: 0.001
+              placeholder: '0.055'
+
+    delivery_fieldset:
+      type: fieldset
+      title: Livraison
+      fields:
+        delivery.allowed_zones:
+          type: selectize
+          label: Zones desservies
+          help: "FR-METRO = France métropolitaine hors Corse. Chaque zone ouverte doit avoir des règles de tarif."
+          default: [FR-METRO]
+          selectize:
+            create: false
+            options:
+              - { value: FR-METRO, text: 'France métropolitaine (hors Corse)' }
+              - { value: FR-CORSE, text: 'Corse' }
+              - { value: FR-OM, text: 'Outre-mer' }
+              - { value: EU-ZONE-1, text: 'Union européenne (zone 1)' }
+              - { value: INTERNATIONAL, text: 'International' }
+        delivery.unsupported_message:
+          type: textarea
+          label: Message si la destination n'est pas desservie
+          help: "Laissez vide pour le message par défaut."
+        delivery.book_law.enabled:
+          type: toggle
+          label: "Plancher légal des frais de livraison de livres (loi Darcos)"
+          help: "Une commande de livres livrée ne peut pas avoir de livraison gratuite : minimum 3,00 € TTC sous 35 € TTC, puis 0,01 € TTC. Désactivez uniquement si la loi ne s'applique pas à votre activité."
+          highlight: 1
+          default: 1
+          options: { 1: Activé, 0: Désactivé }
+          validate: { type: bool }
+        delivery.book_law.threshold:
+          type: number
+          label: "Seuil de commande (€ TTC)"
+          help: "Au-dessous : frais minimum ci-dessous. À partir de ce montant : frais symbolique."
+          step: 0.01
+          default: 35
+        delivery.book_law.below:
+          type: number
+          label: "Frais minimum sous le seuil (€ TTC)"
+          step: 0.01
+          default: 3
+        delivery.book_law.at_or_above:
+          type: number
+          label: "Frais minimum à partir du seuil (€ TTC)"
+          step: 0.01
+          default: 0.01
+
     invoicing_fieldset:
       type: fieldset
       title: Facturation électronique (Factur-X / e-reporting)
       help: "Voir CDC-E-REPORTING.md pour le détail de la réforme et des statuts e-reporting."
       fields:
-        vat_rate:
-          type: number
-          label: Taux de TVA appliqué à la boutique
-          help: "Taux unique appliqué à l'ensemble des produits (ex : 0.055 pour 5,5 %, taux réduit livres en France). Les prix produits sont considérés TTC."
-          step: 0.001
-          default: 0.055
-
         date_b2c_begin:
           type: date
           label: Date de début de l'obligation e-reporting B2C

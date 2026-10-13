@@ -4,6 +4,7 @@
 namespace Grav\Plugin\SimpleShop\Inventory;
 
 use Grav\Common\Grav;
+use Grav\Plugin\SimpleShop\Services\TaxManager;
 
 class InventoryManager
 {
@@ -56,6 +57,11 @@ class InventoryManager
 			}
 		}
 
+        // Les prix des fiches produit sont saisis hors taxe (TaxManager) : tout
+        // le reste de la boutique (panier, paiement, commande) travaille en TTC.
+        $priceHt = $price;
+        $price = TaxManager::toTtc($price);
+
         // Alignement du stock physique selon book.yaml
         $stockPhysical = isset($header->product_quantity) ? (int)$header->product_quantity : 0;
 
@@ -63,6 +69,7 @@ class InventoryManager
         if ($stockPhysical === -1) {
             return [
                 'product_price'         => $price,
+                'product_price_ht'      => $priceHt,
                 'product_virtual_stock' => -1
             ];
         }
@@ -79,6 +86,7 @@ class InventoryManager
 
         return [
             'product_price'         => $price,
+            'product_price_ht'      => $priceHt,
             'product_virtual_stock' => max(0, $stockPhysical - $reserved)
         ];
     }

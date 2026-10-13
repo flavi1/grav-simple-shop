@@ -230,5 +230,16 @@ class SimpleShopPlugin extends Plugin
             ['Grav\Plugin\SimpleShop\Inventory\InventoryManager', 'getProductData']
         );
         $this->grav['twig']->twig->addFunction($f);
+
+        // Prix TTC d'un montant saisi dans une fiche produit (prix saisis hors
+        // taxe, voir TaxManager) : shop_price_ttc(header.product_price).
+        $this->grav['twig']->twig->addFunction(new \Twig\TwigFunction(
+            'shop_price_ttc',
+            static function ($value) {
+                return ($value === null || $value === '' || !is_numeric($value))
+                    ? null
+                    : \Grav\Plugin\SimpleShop\Services\TaxManager::toTtc((float) $value);
+            }
+        ));
     }
 }

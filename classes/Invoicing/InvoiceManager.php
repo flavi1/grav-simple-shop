@@ -141,7 +141,7 @@ class InvoiceManager
 
     /**
      * Retourne le taux de TVA unique appliqué à l'ensemble de la boutique
-     * (configuration `plugins.simple-shop.vat_rate`, ex. 0.055 pour 5,5 %).
+     * (configuration `plugins.simple-shop.taxes`, voir Services\TaxManager ; ex. 0.055 pour 5,5 %).
      *
      * ⚠️ Limitation assumée (voir échanges de conception) : un seul taux
      * pour toute la boutique. Une gestion multi-taux par produit n'est pas
@@ -151,7 +151,7 @@ class InvoiceManager
      */
     public static function getVatRate(): float
     {
-        return (float) (Grav::instance()['config']->get('plugins.simple-shop.vat_rate') ?? 0.055);
+        return \Grav\Plugin\SimpleShop\Services\TaxManager::defaultRate();
     }
 
     /**

@@ -26,6 +26,22 @@ delivery:
   allowed_zones:
     - FR-METRO
   unsupported_message: ''
+  # Plancher légal des frais de livraison de livres (loi Darcos, en vigueur depuis le 7/10/2023).
+  # Montants TTC ; le seuil se compare au prix des livres de la commande, hors livraison.
+  book_law:
+    enabled: true
+    threshold: 35.00      # en dessous : frais minimum « below » ; à partir de : « at_or_above »
+    below: 3.00
+    at_or_above: 0.01
+
+# Taxes. Les prix des fiches produit sont saisis HORS TAXE ; le panier, le paiement et
+# les factures sont en TTC. Un seul code pour tout le site (produits et livraison).
+taxes:
+  prices_entered: ht      # ht | ttc
+  default: TVA_5_5
+  rates:
+    TVA_5_5: { label: 'TVA 5,5 %', rate: 0.055 }
+    TVA_20: { label: 'TVA 20 %', rate: 0.20 }
 
 # E-mail au client quand sa commande passe à l'un de ces statuts (voir OrderManager::STATUSES)
 status_emails:
@@ -35,7 +51,7 @@ status_emails:
 
 # Facturation électronique Factur-X / e-reporting (voir CDC-E-REPORTING.md et
 # classes/Invoicing/InvoiceManager.php).
-vat_rate: 0.055
+# (l'ancienne clé `vat_rate` est remplacée par `taxes`)
 date_b2c_begin: '2027-09-01'
 seller:
   name: ''
