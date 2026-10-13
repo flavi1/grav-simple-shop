@@ -76,6 +76,17 @@ Au démarrage du paiement, la passerelle enregistre un **instantané** de la com
 déstockage identique. Le montant encaissé et le total recalculé du panier doivent correspondre, sinon la commande n'est pas
 créée et l'incident est journalisé pour rapprochement manuel. Configuration pas à pas : `private/prompts/TODO.md`.
 
+## Taxes et frais de livraison
+
+- **Prix HT.** Les prix des fiches produit (`product_price`) sont saisis hors taxe, jusqu'à 4 décimales. `InventoryManager::getProductData`
+  les convertit en TTC (`TaxManager::toTtc`, arrondi au centime) : panier, paiement, commandes et factures restent en TTC.
+  Dans Twig, `shop_price_ttc(prix_ht)` donne le TTC.
+- **Configuration** : `taxes.prices_entered` (`ht`|`ttc`), `taxes.default` (code unique pour tout le site, livraison comprise),
+  `taxes.rates` (ex. `TVA_5_5`, `TVA_20`). L'ancienne clé `vat_rate` n'est plus lue.
+- **Loi Darcos** (`delivery.book_law`, classe `Delivery/LegalShippingFloor`) : sous `threshold` € TTC de livres, frais minimum `below`
+  (3,00 €) ; à partir de `threshold`, minimum `at_or_above` (0,01 €). Appliqué dans `ShippingManager::getAvailableCarriers` ;
+  un mode peut s'en exclure avec `legal_floor: false` (retrait sur place). À faire valider juridiquement.
+
 ## Commandes, factures, événements
 
 - `Orders\OrderManager` : statuts (`paid`, `processing`, `shipped`,
