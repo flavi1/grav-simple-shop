@@ -1,0 +1,9 @@
+actions:
+  api.simple-shop:
+    type: access
+    label: Boutique (Simple Shop)
+    actions:
+      read:
+        label: Consulter les commandes, les transporteurs et les adresses bannies
+      write:
+        label: Modifier les statuts, les transporteurs et les adresses bannies

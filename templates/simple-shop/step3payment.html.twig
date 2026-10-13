@@ -14,8 +14,8 @@
             <h3>Vos informations de livraison <a href="{{ routes.step1 }}" class="edit-link">Modifier</a></h3>
             <p>
                 <strong>{{ customer.firstname }} {{ customer.lastname }}</strong><br>
-                {{ customer['address-line1'] }}<br>
-                {{ customer['postal-code'] }} {{ customer['address-line2'] }}, {{ customer['address-line3'] }}<br>
+                {{ customer['street'] }}<br>
+                {{ customer['postal-code'] }} {{ customer['city'] }}, {{ customer['address-complement'] }}<br>
                 Tél : {{ customer.tel }} | E-mail : {{ customer.email }}
             </p>
 
@@ -76,8 +76,8 @@
                 <input type="text" id="billing_name" name="billing_name" value="{{ billing.name }}" required class="form-control" />
             </div>
             <div class="form-group">
-                <label for="billing_address_line1">Adresse</label>
-                <input type="text" id="billing_address_line1" name="billing_address_line1" value="{{ billing['address-line1'] }}" required class="form-control" />
+                <label for="billing_street">Adresse</label>
+                <input type="text" id="billing_street" name="billing_street" value="{{ billing['street'] }}" required class="form-control" />
             </div>
             <div class="form-row">
                 <div class="form-group">
@@ -86,12 +86,12 @@
                 </div>
                 <div class="form-group">
                     <label for="billing_city">Ville</label>
-                    <input type="text" id="billing_city" name="billing_address_line2" value="{{ billing['address-line2'] }}" required class="form-control" />
+                    <input type="text" id="billing_city" name="billing_city" value="{{ billing['city'] }}" required class="form-control" />
                 </div>
             </div>
             <div class="form-group">
                 <label for="billing_complement">Complément d'adresse</label>
-                <input type="text" id="billing_complement" name="billing_address_line3" value="{{ billing['address-line3'] }}" class="form-control" />
+                <input type="text" id="billing_complement" name="billing_address_complement" value="{{ billing['address-complement'] }}" class="form-control" />
             </div>
 
             <h3 style="margin-top: 2rem;">Mode de paiement</h3>

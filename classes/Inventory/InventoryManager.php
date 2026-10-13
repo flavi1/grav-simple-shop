@@ -108,6 +108,110 @@ class InventoryManager
     }
 
     /**
+     * Décrémente le stock physique (`product_quantity`) d'un produit après une
+     * commande validée.
+     *
+     * Le front-matter de la page produit est modifié EN PLACE, ligne
+     * `product_quantity:` uniquement : on évite volontairement
+     * `Page::save()`, qui re-sérialise tout l'en-tête YAML (ordre des clés,
+     * guillemets, médias) et pourrait abîmer la fiche produit.
+     *
+     * @param string $productRoute Route Grav du produit (ex. "/livres/xxx").
+     * @param int    $quantity     Quantité commandée.
+     *
+     * @return bool Vrai si le stock est à jour (ou illimité), faux si la
+     *              décrémentation a échoué (déjà journalisé).
+     */
+    public static function decrementPhysicalStock(string $productRoute, int $quantity): bool
+    {
+        $grav = Grav::instance();
+
+        try {
+            $page = $grav['pages']->dispatch($productRoute);
+            if (!$page || $page->filePath() === null || !is_file($page->filePath())) {
+                throw new \RuntimeException("page produit introuvable pour '{$productRoute}'");
+            }
+
+            $lockDir = $grav['locator']->findResource('user://data/simple-shop', true, true);
+            if (!is_dir($lockDir)) {
+                mkdir($lockDir, 0755, true);
+            }
+
+            $result = self::decrementStockInFile($page->filePath(), $quantity, $lockDir . '/stock.lock');
+            if ($result === null) {
+                throw new \RuntimeException("ligne product_quantity absente ou illisible pour '{$productRoute}'");
+            }
+
+            if ($result['old'] < $quantity && $result['old'] !== -1) {
+                $grav['log']->warning("[SimpleShop] Stock insuffisant pour '{$productRoute}' (stock {$result['old']}, commandé {$quantity}) : ramené à 0.");
+            }
+
+            return true;
+        } catch (\Throwable $e) {
+            $grav['log']->error('[SimpleShop] Déstockage impossible : ' . $e->getMessage());
+
+            return false;
+        }
+    }
+
+    /**
+     * Réécrit la ligne `product_quantity:` du front-matter d'un fichier de page.
+     *
+     * Opération sérialisée par un verrou de fichier dédié (le verrou ne peut
+     * pas porter sur la page elle-même, remplacée par renommage) ; la valeur
+     * est relue sous verrou, jamais reprise d'une lecture antérieure. L'écriture
+     * passe par un fichier temporaire puis `rename()` : pas de page tronquée en
+     * cas d'interruption.
+     *
+     * @return array{old:int,new:int}|null Null si la ligne est absente ; stock
+     *         illimité (-1) : inchangé, old = new = -1.
+     */
+    public static function decrementStockInFile(string $file, int $quantity, string $lockFile): ?array
+    {
+        $lock = fopen($lockFile, 'c');
+        if ($lock === false || !flock($lock, LOCK_EX)) {
+            throw new \RuntimeException('verrou de stock indisponible');
+        }
+
+        try {
+            $content = file_get_contents($file);
+            if ($content === false || !preg_match('/\A(---\R)(.*?)(\R---\R?)/s', $content, $m)) {
+                return null;
+            }
+
+            $front = $m[2];
+            $pattern = '/^(product_quantity:[ \t]*)([\'"]?)(-?\d+)\2[ \t]*$/m';
+            if (!preg_match($pattern, $front, $q)) {
+                return null;
+            }
+
+            $old = (int) $q[3];
+            if ($old === -1) {
+                return ['old' => -1, 'new' => -1];
+            }
+
+            $new = max(0, $old - max(0, $quantity));
+            $newFront = preg_replace($pattern, '${1}' . $q[2] . $new . $q[2], $front, 1);
+            $newContent = $m[1] . $newFront . substr($content, strlen($m[1]) + strlen($front));
+
+            $tmp = $file . '.tmp-' . bin2hex(random_bytes(4));
+            if (file_put_contents($tmp, $newContent) === false) {
+                throw new \RuntimeException("écriture impossible : {$tmp}");
+            }
+            @chmod($tmp, fileperms($file) & 0777);
+            if (!rename($tmp, $file)) {
+                @unlink($tmp);
+                throw new \RuntimeException("remplacement impossible : {$file}");
+            }
+
+            return ['old' => $old, 'new' => $new];
+        } finally {
+            flock($lock, LOCK_UN);
+            fclose($lock);
+        }
+    }
+
+    /**
      * Ouvre (et initialise si besoin) la connexion à la base SQLite du plugin.
      *
      * MIGRATION ADDITIVE (voir shop.sql) : le schéma SQL est exécuté à chaque

@@ -83,7 +83,7 @@ class OrderMailer
      */
     public function sendOrderConfirmation(array $orderData, array $orderItems): bool
     {
-        $customer = json_decode((string) ($orderData['customer_data'] ?? '{}'), true) ?: [];
+        $customer = AddressFields::normalize(json_decode((string) ($orderData['customer_data'] ?? '{}'), true) ?: []);
         $email = trim((string) ($customer['email'] ?? ''));
 
         if ($email === '' || !filter_var($email, FILTER_VALIDATE_EMAIL)) {
@@ -108,6 +108,41 @@ class OrderMailer
             $siteName,
             $invoicePdfPath
         );
+    }
+
+    /**
+     * Prévient le client d'un changement de statut de sa commande (ex.
+     * « Expédiée »). Appelé par le listener de l'événement
+     * `onSimpleShopOrderStatusChanged` (voir SimpleShopPlugin::onOrderStatusChanged()),
+     * seulement pour les statuts listés dans `plugins.simple-shop.status_emails`.
+     *
+     * @param array  $orderData  Ligne de la table `order`.
+     * @param array  $orderItems Lignes de la table `order_item`.
+     * @param string $newStatus  Nouveau statut (clé de OrderManager::STATUSES).
+     *
+     * @return bool Vrai si l'e-mail a été accepté pour envoi.
+     */
+    public function sendStatusChange(array $orderData, array $orderItems, string $newStatus): bool
+    {
+        $customer = AddressFields::normalize(json_decode((string) ($orderData['customer_data'] ?? '{}'), true) ?: []);
+        $email = trim((string) ($customer['email'] ?? ''));
+
+        if ($email === '' || !filter_var($email, FILTER_VALIDATE_EMAIL)) {
+            $this->log('error', "E-mail de changement de statut annulé : adresse client invalide/absente "
+                . "(commande '" . ($orderData['order_reference'] ?? '?') . "').");
+
+            return false;
+        }
+
+        $siteName = $this->siteName();
+        $label    = \Grav\Plugin\SimpleShop\Orders\OrderManager::statusLabel($newStatus);
+        $subject  = "[{$siteName}] Votre commande " . ($orderData['order_reference'] ?? '') . ' : ' . mb_strtolower($label);
+
+        $vars = $this->buildOrderVars($orderData, $orderItems, $siteName);
+        $vars['new_status']       = $newStatus;
+        $vars['new_status_label'] = $label;
+
+        return $this->sendTemplatedEmail('email/order-status.html.twig', $vars, $subject, $email, $siteName);
     }
 
     /**
@@ -199,9 +234,9 @@ class OrderMailer
             'order_reference' => $orderData['order_reference'] ?? '',
             'order_date'      => $orderData['created_at'] ?? '',
             'order_total'     => (float) ($orderData['total_amount'] ?? 0),
-            'customer'        => json_decode((string) ($orderData['customer_data'] ?? '{}'), true) ?: [],
+            'customer'        => AddressFields::normalize(json_decode((string) ($orderData['customer_data'] ?? '{}'), true) ?: []),
             'shipping'        => json_decode((string) ($orderData['shipping_data'] ?? '{}'), true) ?: [],
-            'billing'         => json_decode((string) ($orderData['billing_data'] ?? '{}'), true) ?: [],
+            'billing'         => AddressFields::normalize(json_decode((string) ($orderData['billing_data'] ?? '{}'), true) ?: []),
             'order_items'     => $orderItems,
         ];
     }
@@ -304,6 +339,10 @@ class OrderMailer
         }
 
         try {
+            // Hors rendu de page (ex. changement de statut depuis l'API de
+            // l'admin), Twig n'est pas forcément initialisé : init() est
+            // idempotente et enregistre les chemins de templates des plugins.
+            $this->grav['twig']->init();
             $html = $this->grav['twig']->processTemplate($template, $vars);
         } catch (\Throwable $e) {
             $this->log('error', "Erreur lors du rendu du template '{$template}' : " . $e->getMessage());

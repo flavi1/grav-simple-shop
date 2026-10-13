@@ -1,0 +1,51 @@
+{#
+    templates/email/order-status.html.twig
+
+    E-mail envoyé au CLIENT quand le statut de sa commande change (voir
+    OrderMailer::sendStatusChange()).
+
+    Variables : celles de OrderMailer::buildOrderVars() (site_name,
+    order_reference, order_date, order_total, customer, shipping, billing,
+    order_items) plus :
+      - new_status       (string) Clé technique du statut (shipped, cancelled…).
+      - new_status_label (string) Libellé lisible (« Expédiée »…).
+#}
+{% extends 'email/base.html.twig' %}
+
+{% block content %}
+<p>
+    Bonjour {{ customer.firstname|default('') }} {{ customer.lastname|default('') }},
+</p>
+
+{% if new_status == 'shipped' %}
+<p>
+    Bonne nouvelle : votre commande <strong>{{ order_reference }}</strong> a été <strong>expédiée</strong>.
+    {% if shipping.name|default('') %}Mode de livraison : {{ shipping.name }}.{% endif %}
+</p>
+{% elseif new_status == 'cancelled' %}
+<p>
+    Votre commande <strong>{{ order_reference }}</strong> a été <strong>annulée</strong>.
+    Si vous n'êtes pas à l'origine de cette annulation, répondez simplement à ce message.
+</p>
+{% elseif new_status == 'refunded' %}
+<p>
+    Votre commande <strong>{{ order_reference }}</strong> a été <strong>remboursée</strong>
+    ({{ order_total|number_format(2, ',', ' ') }} €). Le délai d'apparition du remboursement
+    sur votre compte dépend de votre banque.
+</p>
+{% else %}
+<p>
+    Le statut de votre commande <strong>{{ order_reference }}</strong> est maintenant :
+    <strong>{{ new_status_label }}</strong>.
+</p>
+{% endif %}
+
+<h3>Rappel de votre commande</h3>
+<ul>
+    {% for item in order_items %}
+        <li>{{ item.quantity }} × {{ item.title }}</li>
+    {% endfor %}
+</ul>
+
+<p>Merci de votre confiance,<br>{{ site_name }}</p>
+{% endblock %}

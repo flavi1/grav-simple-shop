@@ -14,7 +14,7 @@ use RocketTheme\Toolbox\Event\Event;
  * ITÉRATION 1 (mode manuel transitoire, voir CDC section 4) : le statut
  * e-reporting est modifié manuellement par le marchand via un formulaire
  * dédié dans `/admin/simple-shop-orders`
- * (voir templates/admin/simple-shop-orders.html.twig). Les options
+ * (voir classes/Api/ShopApiController.php). Les options
  * proposées par ce formulaire sont volontairement limitées à celles de
  * l'itération 1 (voir {@see self::getManualStatusOptions()}) : les autres
  * valeurs de {@see self::STATUSES} (transmitted, received, refused,

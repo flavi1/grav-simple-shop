@@ -60,3 +60,30 @@ CREATE TABLE IF NOT EXISTS invoice (
     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY(order_reference) REFERENCES "order"(order_reference) ON DELETE CASCADE
 );
+
+-- 6. Rattachement d'un paiement à sa commande (idempotence). La référence de
+-- paiement (ex. identifiant PaymentIntent Stripe) est UNIQUE : un même
+-- paiement ne peut jamais créer deux commandes, même si le client recharge la
+-- page de retour, revient en arrière ou clique deux fois (voir
+-- CartStorage::toOrder()).
+CREATE TABLE IF NOT EXISTS order_payment (
+    payment_reference TEXT PRIMARY KEY,
+    order_reference TEXT NOT NULL,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY(order_reference) REFERENCES "order"(order_reference) ON DELETE CASCADE
+);
+
+-- 7. Historique des changements de statut d'une commande (un changement =
+-- une ligne, y compris la création : old_status NULL -> 'paid'). `changed_by`
+-- identifie l'auteur d'un changement manuel (compte admin) ; NULL pour un
+-- changement automatique (création de la commande).
+CREATE TABLE IF NOT EXISTS order_status_history (
+    id INTEGER PRIMARY KEY,
+    order_reference TEXT NOT NULL,
+    old_status TEXT,
+    new_status TEXT NOT NULL,
+    changed_by TEXT,
+    changed_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY(order_reference) REFERENCES "order"(order_reference) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_order_status_history_order ON order_status_history(order_reference);

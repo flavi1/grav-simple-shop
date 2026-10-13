@@ -15,15 +15,20 @@
                 'customer': customer,
                 'fields': [
                     'lastname', 'firstname', 'email', 'tel',
-                    'address-line1', 'postal-code', 'address-line2', 'address-line3',
+                    'street', 'postal-code', 'city', 'address-complement',
                     'newsletter', 'keep-data'
                 ],
-                'required': ['lastname', 'firstname', 'email', 'tel', 'address-line1', 'postal-code', 'address-line2']
+                'required': ['lastname', 'firstname', 'email', 'tel', 'street', 'postal-code', 'city']
             } only %}
 
             <button type="submit" class="btn btn-submit-checkout">
                 Enregistrer les modifications
             </button>
+        </form>
+
+        <form method="post" action="{{ base_url_absolute }}{{ shop_routes.logout }}" class="account-logout">
+            {{ nonce_field('shop-logout', 'nonce')|raw }}
+            <button type="submit" class="btn">Me déconnecter</button>
         </form>
 
         {% if unsubscribe_url %}

@@ -1,6 +1,9 @@
 enabled: true
-secret_key: 'CLE-STRIPE-RETIREE' # Remplacer par votre clé secrète Stripe Test
-public_key: 'CLE-STRIPE-RETIREE' # Optionnel si tout est géré côté serveur, mais utile à garder
+# Anti-spam des codes de connexion (OTP), vérifié côté serveur
+otp:
+  resend_delay: 60        # secondes entre deux envois pour une même session
+  max_per_email_hour: 5   # envois par heure vers une même adresse e-mail
+  max_per_ip_hour: 20     # envois par heure depuis une même adresse IP
 buy_route: '/buy'
 cart_route: '/cart'
 success_url: '/checkout-success'
@@ -10,9 +13,17 @@ routes:
   validation: '/checkout/email'
   delivery: '/checkout/delivery'
   payment: '/checkout/payment'
+  payment_return: '/checkout/payment-return'
   confirmation: '/checkout/confirmation'
   identify: '/identify'
   account: '/mon-compte'
+  logout: '/mon-compte/deconnexion'
+
+# E-mail au client quand sa commande passe à l'un de ces statuts (voir OrderManager::STATUSES)
+status_emails:
+  - shipped
+  - cancelled
+  - refunded
 
 # Facturation électronique Factur-X / e-reporting (voir CDC-E-REPORTING.md et
 # classes/Invoicing/InvoiceManager.php).

@@ -27,7 +27,10 @@ interface PaymentGatewayInterface
      * Traite la capture finale ou la validation du paiement (Temps 3)
      * 
      * @param array $postData Le tableau $_POST reçu
-     * @return array ['success' => bool, 'error' => ?string]
+     * @return array ['success' => bool, 'error' => ?string, 'payment_reference' => ?string]
+     *               `payment_reference` (optionnelle, ex. identifiant PaymentIntent) rend la
+     *               création de la commande idempotente : un même paiement ne crée jamais
+     *               deux commandes (voir CartStorage::toOrder()).
      */
     public function processPayment(array $postData): array;
 }

@@ -21,9 +21,9 @@
             <h3 style="font-size: 1rem; margin-top: 0;">Adresse de livraison</h3>
             <p style="margin-bottom: 0; font-size: 0.95rem; line-height: 1.4;">
                 <strong>{{ customer.firstname }} {{ customer.lastname }}</strong><br>
-                {{ customer['address-line1'] }}<br>
-                {% if customer['address-line3'] %}{{ customer['address-line3'] }}<br>{% endif %}
-                {{ customer['postal-code'] }} {{ customer['address-line2'] }}<br>
+                {{ customer['street'] }}<br>
+                {% if customer['address-complement'] %}{{ customer['address-complement'] }}<br>{% endif %}
+                {{ customer['postal-code'] }} {{ customer['city'] }}<br>
                 Tél : {{ customer.tel }}
             </p>
         </div>

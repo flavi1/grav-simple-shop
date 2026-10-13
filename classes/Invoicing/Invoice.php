@@ -2,6 +2,8 @@
 
 namespace Grav\Plugin\SimpleShop\Invoicing;
 
+use Grav\Plugin\SimpleShop\Services\AddressFields;
+
 use Atgp\FacturX\Writer;
 use Atgp\FacturX\XsdValidator;
 
@@ -188,8 +190,8 @@ class Invoice
      */
     private function buildBasePdf(array $lines): string
     {
-        $customer = json_decode((string) ($this->order['customer_data'] ?? '{}'), true) ?: [];
-        $billing  = json_decode((string) ($this->order['billing_data'] ?? '{}'), true) ?: [];
+        $customer = AddressFields::normalize(json_decode((string) ($this->order['customer_data'] ?? '{}'), true) ?: []);
+        $billing  = AddressFields::normalize(json_decode((string) ($this->order['billing_data'] ?? '{}'), true) ?: []);
 
         $pdf = new \setasign\Fpdi\Fpdi();
         $pdf->SetAutoPageBreak(true, 20);
@@ -237,10 +239,9 @@ class Invoice
         $billingName = (string) ($billing['name'] ?? trim(((string) ($customer['firstname'] ?? '')) . ' ' . ((string) ($customer['lastname'] ?? ''))));
         $addressLines = [
             $billingName,
-            (string) ($billing['address-line1'] ?? ($customer['address-line1'] ?? '')),
-            (string) ($billing['address-line2'] ?? ($customer['address-line2'] ?? '')),
-            (string) ($billing['address-line3'] ?? ($customer['address-line3'] ?? '')),
-            (string) ($billing['postal-code'] ?? ($customer['postal-code'] ?? '')),
+            (string) ($billing['street'] ?? ($customer['street'] ?? '')),
+            (string) ($billing['address-complement'] ?? ($customer['address-complement'] ?? '')),
+            trim(((string) ($billing['postal-code'] ?? ($customer['postal-code'] ?? ''))) . ' ' . ((string) ($billing['city'] ?? ($customer['city'] ?? '')))),
             (string) ($customer['country'] ?? ''),
         ];
         foreach ($addressLines as $line) {
