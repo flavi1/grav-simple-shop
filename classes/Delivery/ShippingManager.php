@@ -80,6 +80,7 @@ class ShippingManager
     public function getAvailableCarriers(string $zone, array $metrics): array
     {
         $available = [];
+        $shopConfig = (array) Grav::instance()['config']->get('plugins.simple-shop', []);
 
         foreach ($this->carriersConfig as $key => $carrier) {
             if (!($carrier['enabled'] ?? false)) {
@@ -120,11 +121,18 @@ class ShippingManager
 
             // Si un tarif a pu être calculé pour ce transporteur, on l'ajoute aux options
             if ($matchedPrice !== null) {
+                // Plancher légal des frais de livraison de livres (loi Darcos).
+                // `legal_floor: false` : retrait sur place, qui n'est pas une livraison au sens de la loi
+                // (à n'utiliser que pour cela ; voir LegalShippingFloor).
+                $price = ($carrier['legal_floor'] ?? true) === false
+                    ? $matchedPrice
+                    : LegalShippingFloor::apply($matchedPrice, (float) $metrics['subtotal'], $shopConfig);
+
                 $available[$key] = [
                     'key'         => $key,
                     'name'        => $carrier['name'],
                     'description' => $carrier['description'],
-                    'price'       => $matchedPrice
+                    'price'       => $price
                 ];
             }
         }

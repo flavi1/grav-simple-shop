@@ -412,10 +412,23 @@
             this.body.appendChild(h('p', { class: 'ss-muted' },
                 'Modes de livraison et grilles de tarifs (France métropolitaine hors Corse : zone FR-METRO). '
                 + 'Le texte est vérifié avant enregistrement ; les erreurs sont listées en haut de page.'));
+            var legalBox = h('div', { class: 'ss-msg ok', role: 'note' });
+            this.body.appendChild(legalBox);
             this.body.appendChild(area);
             this.body.appendChild(h('div', { class: 'ss-bar', style: 'margin-top:.8rem' }, saveBtn));
 
-            api('GET', '/carriers').then(function (res) { area.value = res.data.yaml; })
+            api('GET', '/carriers').then(function (res) {
+                area.value = res.data.yaml;
+                var law = (res.data.legal || {}).book_law || {};
+                var pct = ((res.data.legal || {}).vat_rate || 0) * 100;
+                legalBox.textContent = law.enabled
+                    ? 'Plancher légal (loi Darcos) : les frais de livraison de livres ne peuvent pas être inférieurs à '
+                        + money(law.below) + ' TTC pour une commande de moins de ' + money(law.threshold)
+                        + ' TTC, ni à ' + money(law.at_or_above) + ' TTC au-delà. Les tarifs ci-dessous sont des TTC (TVA '
+                        + pct.toLocaleString('fr-FR') + ' %). Réglages : Plugins > Simple Shop > Livraison. '
+                        + 'Un mode avec « legal_floor: false » (retrait sur place) y échappe.'
+                    : 'Plancher légal des frais de livraison de livres désactivé (Plugins > Simple Shop > Livraison).';
+            })
                 .catch(function (e) { self.fail(e); });
         }
 

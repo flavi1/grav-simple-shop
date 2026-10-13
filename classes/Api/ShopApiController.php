@@ -184,6 +184,11 @@ class ShopApiController extends AbstractApiController
         return ApiResponse::create([
             'yaml'  => is_file($path) ? (string) file_get_contents($path) : "carriers: {}\n",
             'zones' => CarrierConfig::ZONES,
+            'legal' => [
+                'book_law'  => \Grav\Plugin\SimpleShop\Delivery\LegalShippingFloor::settings((array) $this->grav['config']->get('plugins.simple-shop', [])),
+                'vat_rate'  => \Grav\Plugin\SimpleShop\Services\TaxManager::defaultRate(),
+                'tax_code'  => \Grav\Plugin\SimpleShop\Services\TaxManager::defaultCode(),
+            ],
         ]);
     }
 
