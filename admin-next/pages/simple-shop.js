@@ -125,6 +125,11 @@
 
     var STYLE = [
         '.ss{font-size:.875rem;color:var(--foreground,#111827)}',
+        // Couleurs d'état : fond ET texte toujours fixés ensemble (lisibles quel que soit le thème d'Admin2).
+        '.ss{--ss-ok-bg:#dcfce7;--ss-ok-fg:#14532d;--ss-err-bg:#fee2e2;--ss-err-fg:#7f1d1d;--ss-warn-bg:#fef3c7;--ss-warn-fg:#78350f;'
+            + '--ss-info-bg:#e0e7ff;--ss-info-fg:#1e1b4b;--ss-blue-bg:#dbeafe;--ss-blue-fg:#1e3a8a;--ss-n-bg:#f3f4f6;--ss-n-fg:#1f2937}',
+        '.ss[data-ss-theme=dark]{--ss-ok-bg:#14532d;--ss-ok-fg:#dcfce7;--ss-err-bg:#7f1d1d;--ss-err-fg:#fee2e2;--ss-warn-bg:#78350f;--ss-warn-fg:#fef3c7;'
+            + '--ss-info-bg:#312e81;--ss-info-fg:#e0e7ff;--ss-blue-bg:#1e3a8a;--ss-blue-fg:#dbeafe;--ss-n-bg:#374151;--ss-n-fg:#f3f4f6}',
         '.ss *{box-sizing:border-box}',
         '.ss-tabs{display:flex;gap:.25rem;border-bottom:1px solid var(--border,#e5e7eb);margin-bottom:1rem}',
         '.ss-tab{padding:.5rem .9rem;border:0;background:none;cursor:pointer;color:var(--muted-foreground,#6b7280);border-bottom:2px solid transparent;font:inherit}',
@@ -141,14 +146,17 @@
         '.ss tr.ss-row{cursor:pointer}',
         '.ss tr.ss-row:hover{background:var(--accent,#f9fafb)}',
         '.ss-num{text-align:right;white-space:nowrap}',
-        '.ss-badge{display:inline-block;padding:.1rem .5rem;border-radius:999px;font-size:.75rem;background:var(--accent,#eef2ff)}',
-        '.ss-badge.paid{background:#dbeafe}.ss-badge.processing{background:#fef3c7}.ss-badge.shipped{background:#d1fae5}',
-        '.ss-badge.delivered{background:#bbf7d0}.ss-badge.cancelled,.ss-badge.refunded{background:#fee2e2}',
+        '.ss-badge{display:inline-block;padding:.1rem .5rem;border-radius:999px;font-size:.75rem;background:var(--ss-info-bg);color:var(--ss-info-fg)}',
+        '.ss-badge.paid{background:var(--ss-blue-bg);color:var(--ss-blue-fg)}.ss-badge.processing{background:var(--ss-warn-bg);color:var(--ss-warn-fg)}',
+        '.ss-badge.shipped,.ss-badge.delivered{background:var(--ss-ok-bg);color:var(--ss-ok-fg)}',
+        '.ss-badge.cancelled,.ss-badge.refunded{background:var(--ss-err-bg);color:var(--ss-err-fg)}',
+        '.ss-badge.pending{background:var(--ss-n-bg);color:var(--ss-n-fg)}',
         '.ss-card{border:1px solid var(--border,#e5e7eb);border-radius:.5rem;padding:1rem;margin-top:1rem;background:var(--card,var(--background,#fff))}',
         '.ss-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(16rem,1fr));gap:1rem}',
         '.ss h3{margin:0 0 .5rem;font-size:.95rem}',
         '.ss-msg{padding:.6rem .8rem;border-radius:.375rem;margin-bottom:.8rem}',
-        '.ss-msg.ok{background:#dcfce7}.ss-msg.err{background:#fee2e2}',
+        '.ss-msg.ok{background:var(--ss-ok-bg);color:var(--ss-ok-fg)}.ss-msg.err{background:var(--ss-err-bg);color:var(--ss-err-fg)}',
+        '.ss-msg.info{background:var(--ss-info-bg);color:var(--ss-info-fg)}',
         '.ss-muted{color:var(--muted-foreground,#6b7280)}',
         '.ss textarea.ss-yaml{width:100%;min-height:26rem;font-family:ui-monospace,Menlo,monospace;font-size:.8rem}',
         '.ss ul.ss-list{margin:0;padding-left:1.1rem}',
@@ -156,11 +164,15 @@
         '.ss :focus-visible{outline:2px solid var(--primary,#2563eb);outline-offset:2px}',
         '.ss-section{margin-top:1.5rem}.ss-section:first-of-type{margin-top:.5rem}',
         '.ss-provider{padding:.5rem 0;border-bottom:1px solid var(--border,#e5e7eb)}',
-        '.ss-ok{color:#166534}.ss-ko{color:#991b1b}',
+        '.ss-ok,.ss-ko{display:inline-block;padding:.1rem .5rem;border-radius:.375rem}',
+        '.ss-ok{background:var(--ss-ok-bg);color:var(--ss-ok-fg)}.ss-ko{background:var(--ss-err-bg);color:var(--ss-err-fg)}',
         '.ss details.ss-mode,.ss details.ss-advanced{border:1px solid var(--border,#e5e7eb);border-radius:.5rem;margin:.6rem 0;background:var(--card,var(--background,#fff))}',
         '.ss details>summary{cursor:pointer;padding:.7rem .9rem;display:flex;flex-wrap:wrap;gap:.4rem;align-items:center}',
         '.ss-mode-name{font-weight:600}',
-        '.ss-b-on{background:#dcfce7}.ss-b-off{background:#f3f4f6}',
+        '.ss-badge.ss-b-on{background:var(--ss-ok-bg);color:var(--ss-ok-fg)}.ss-badge.ss-b-off{background:var(--ss-n-bg);color:var(--ss-n-fg)}',
+        '.ss-badge.ss-b-ko{background:var(--ss-err-bg);color:var(--ss-err-fg)}',
+        '.ss-done{display:block;padding:.4rem .6rem;border-radius:.375rem;background:var(--ss-ok-bg);color:var(--ss-ok-fg)}',
+        '.ss-done:empty{display:none}',
         '.ss-mode-form{padding:0 .9rem .9rem}',
         '.ss-mode-form fieldset{border:1px solid var(--border,#e5e7eb);border-radius:.375rem;margin:.8rem 0;padding:.6rem .8rem}',
         '.ss-mode-form legend{font-weight:600;padding:0 .3rem}','.ss-mode-form fieldset{min-width:0}',
@@ -189,7 +201,39 @@
             this.innerHTML = '';
             this.appendChild(h('style', {}, STYLE));
             this.appendChild(this.root);
+            this.watchTheme();
             this.draw();
+        }
+
+        disconnectedCallback() {
+            if (this.themeObserver) {
+                this.themeObserver.disconnect();
+            }
+        }
+
+        /**
+         * Admin2 peut être en thème clair ou sombre : on lit la couleur du texte
+         * héritée (claire = thème sombre) et on bascule nos couleurs d'état.
+         * Ré-évalué quand <html>/<body> changent de classe ou d'attribut de thème.
+         */
+        watchTheme() {
+            var self = this;
+            function sync() {
+                var m = /rgba?\((\d+),\s*(\d+),\s*(\d+)/.exec(getComputedStyle(self).color || '');
+                var dark = m ? (0.2126 * m[1] + 0.7152 * m[2] + 0.0722 * m[3]) / 255 > 0.5 : false;
+                self.root.setAttribute('data-ss-theme', dark ? 'dark' : 'light');
+            }
+            sync();
+            if (window.MutationObserver) {
+                this.themeObserver = new MutationObserver(function () { window.requestAnimationFrame(sync); });
+                [document.documentElement, document.body].forEach(function (node) {
+                    self.themeObserver.observe(node, { attributes: true, attributeFilter: ['class', 'style', 'data-theme', 'data-mode'] });
+                });
+            }
+            if (window.matchMedia) {
+                var mq = window.matchMedia('(prefers-color-scheme: dark)');
+                if (mq.addEventListener) { mq.addEventListener('change', function () { window.requestAnimationFrame(sync); }); }
+            }
         }
 
         /** Message d'information / d'erreur en tête de page. */
@@ -204,7 +248,7 @@
             }
             this.messageBox.innerHTML = '';
             if (this.message) {
-                this.messageBox.appendChild(h('div', { class: 'ss-msg ' + (this.message.error ? 'err' : 'ok'), role: 'alert' },
+                this.messageBox.appendChild(h('div', { class: 'ss-msg ' + (this.message.error ? 'err' : 'ok'), role: this.message.error ? 'alert' : 'status' },
                     this.message.text,
                     this.message.details.length ? h('ul', { class: 'ss-list' }, this.message.details.map(function (d) { return h('li', {}, d); })) : null));
             }
@@ -229,10 +273,10 @@
                     'aria-selected': selected ? 'true' : 'false', tabindex: selected ? '0' : '-1',
                     onclick: function () { self.tab = t[0]; self.message = null; self.draw(); },
                     onkeydown: function (ev) {
-                        var dir = ev.key === 'ArrowRight' ? 1 : (ev.key === 'ArrowLeft' ? -1 : 0);
-                        if (!dir) { return; }
+                        var target = { ArrowRight: i + 1, ArrowLeft: i - 1, Home: 0, End: tabs.length - 1 }[ev.key];
+                        if (target === undefined) { return; }
                         ev.preventDefault();
-                        self.tab = tabs[(i + dir + tabs.length) % tabs.length][0];
+                        self.tab = tabs[(target + tabs.length) % tabs.length][0];
                         self.message = null;
                         self.draw();
                         var next = self.root.querySelector('#ss-tab-' + self.tab);
@@ -465,7 +509,13 @@
             var sSim = section('ss-s-sim', 'Simulateur', 'Vérifiez le prix que verrait un client pour un colis donné.');
             var sYaml = h('details', { class: 'ss-advanced' }, h('summary', {}, 'Mode avancé : fichier YAML'));
 
+            var modesStatus = h('p', { class: 'ss-done', role: 'status', tabindex: '-1' });
+            var editors = {};
+            var simRefresh = null;
+            var draftHolder = h('div');
+
             sProviders.appendChild(providersBox);
+            sModes.appendChild(modesStatus);
             sModes.appendChild(modesBox);
             sSim.appendChild(simBox);
             sYaml.appendChild(yamlBox);
@@ -476,14 +526,29 @@
             this.body.appendChild(sSim);
             this.body.appendChild(sYaml);
 
-            function reload() {
+            /**
+             * Recharge les données. after = { key, message } : rouvre le mode « key »,
+             * y affiche le message et y place le focus ; sans « key » (mode supprimé),
+             * le message s'affiche en tête de la liste des modes, qui reçoit le focus.
+             * Le simulateur garde sa saisie et recalcule s'il avait déjà un résultat.
+             */
+            function reload(after) {
                 return api('GET', '/carriers').then(function (res) {
                     data = res.data;
                     drawInfo();
                     drawProviders();
                     drawModes();
-                    drawSimulator();
+                    if (simRefresh) { simRefresh(); } else { drawSimulator(); }
                     drawYaml();
+                    if (after && after.message) {
+                        var ed = after.key ? editors[after.key] : null;
+                        if (ed) {
+                            ed.done(after.message);
+                        } else {
+                            modesStatus.textContent = after.message;
+                            modesStatus.focus();
+                        }
+                    }
                 }).catch(function (e) { self.fail(e); });
             }
 
@@ -530,7 +595,15 @@
             // ----- Modes -----
             function drawModes() {
                 modesBox.innerHTML = '';
-                data.modes.forEach(function (m) { modesBox.appendChild(modeEditor(m, false).el); });
+                modesStatus.textContent = '';
+                editors = {};
+                draftHolder.innerHTML = '';
+                data.modes.forEach(function (m) {
+                    var ed = modeEditor(m, false);
+                    editors[m.key] = ed;
+                    modesBox.appendChild(ed.el);
+                });
+                modesBox.appendChild(draftHolder);
                 modesBox.appendChild(newModeForm());
             }
 
@@ -569,7 +642,7 @@
                 var inputs = {};
                 var uidp = nextId('ss-mode');
 
-                var status = h('p', { class: 'ss-form-status', role: 'status', 'aria-live': 'polite' });
+                var status = h('p', { class: 'ss-form-status', role: 'status', tabindex: '-1' });
                 var errors = h('div', { role: 'alert' });
 
                 inputs.enabled = h('input', { type: 'checkbox', id: uidp + '-enabled', checked: !!m.enabled });
@@ -663,7 +736,11 @@
                 function remove(question) {
                     if (!window.confirm(question)) { return; }
                     api('DELETE', '/carriers/' + encodeURIComponent(m.key))
-                        .then(function () { self.notify('Mode « ' + m.name + ' » : ' + (m.source === 'manual' ? 'supprimé.' : 'valeurs du plugin rétablies.'), false); return reload(); })
+                        .then(function () {
+                            return m.source === 'manual'
+                                ? reload({ message: 'Mode « ' + m.name + ' » supprimé.' })
+                                : reload({ key: m.key, message: 'Mode « ' + m.name + ' » : valeurs du plugin rétablies.' });
+                        })
                         .catch(function (e) { showErrors(e); });
                 }
 
@@ -681,7 +758,7 @@
                     saveBtn.disabled = true;
                     status.textContent = 'Enregistrement…';
                     api('PUT', '/carriers/' + encodeURIComponent(m.key), read())
-                        .then(function () { self.notify('Mode « ' + inputs.name.value + ' » enregistré.', false); return reload(); })
+                        .then(function () { return reload({ key: m.key, message: 'Mode « ' + inputs.name.value + ' » ' + (isNew ? 'créé.' : 'enregistré.') }); })
                         .catch(function (e) { showErrors(e); })
                         .then(function () { saveBtn.disabled = false; });
                 } },
@@ -713,15 +790,25 @@
                 var summary = h('summary', {},
                     h('span', { class: 'ss-mode-name' }, m.name || 'Nouveau mode'), ' ',
                     h('span', { class: 'ss-badge' }, sourceLabel(m)), ' ',
-                    h('span', { class: 'ss-badge ' + (m.enabled && m.available ? 'ss-b-on' : 'ss-b-off') }, statusLabel(m)));
+                    h('span', { class: 'ss-badge ' + (!m.available ? 'ss-b-ko' : (m.enabled ? 'ss-b-on' : 'ss-b-off')) }, statusLabel(m)));
                 var el = h('details', { class: 'ss-mode', open: isNew }, summary, form);
 
-                return { el: el, focus: function () { inputs.name.focus(); } };
+                return {
+                    el: el,
+                    focus: function () { inputs.name.focus(); },
+                    /** Après un enregistrement : mode ouvert, message visible et focus dessus. */
+                    done: function (message) {
+                        el.open = true;
+                        status.className = 'ss-form-status ss-done';
+                        status.textContent = message;
+                        status.focus();
+                        status.scrollIntoView({ block: 'center' });
+                    }
+                };
             }
 
             function newModeForm() {
                 var nameInput = h('input', { type: 'text', id: 'ss-new-mode-name', maxlength: '80' });
-                var holder = h('div');
                 var btn = h('button', { class: 'ss-btn', type: 'button', onclick: function () {
                     var name = nameInput.value.trim();
                     if (!name) { nameInput.focus(); return; }
@@ -732,14 +819,15 @@
                         margin: { fixed: 0, percent: 0 }, free_from: null, constraints: { max_weight: null, max_thickness: null },
                         rules: [], available: true };
                     var ed = modeEditor(draft, true);
-                    holder.innerHTML = '';
-                    holder.appendChild(ed.el);
+                    draftHolder.innerHTML = '';
+                    draftHolder.appendChild(ed.el);
+                    nameInput.value = '';
                     ed.focus();
                 } }, 'Ajouter ce mode manuel');
                 return h('div', { class: 'ss-new-mode' },
                     h('h4', {}, 'Ajouter un mode manuel'),
-                    h('div', { class: 'ss-bar' }, h('div', { class: 'ss-field-row' }, h('label', { for: 'ss-new-mode-name' }, 'Nom du nouveau mode'), nameInput), btn),
-                    holder);
+                    h('p', { class: 'ss-muted' }, 'Le nouveau mode s’ouvre à la fin de la liste ci-dessus ; il n’est créé qu’après « Créer le mode ».'),
+                    h('div', { class: 'ss-bar' }, h('div', { class: 'ss-field-row' }, h('label', { for: 'ss-new-mode-name' }, 'Nom du nouveau mode'), nameInput), btn));
             }
 
             function slug(name) {
@@ -759,13 +847,15 @@
                     zone: h('select', { id: 'ss-sim-z' }, zoneOptions.map(function (z) { return h('option', { value: z }, z); }))
                 };
                 var out = h('div', { 'aria-live': 'polite' });
-                var form = h('form', { onsubmit: function (ev) {
-                    ev.preventDefault();
+                var hasResult = false;
+                simRefresh = function () { if (hasResult) { run(); } };
+                function run() {
                     out.textContent = 'Calcul…';
                     api('POST', '/carriers/simulate', { weight: f.weight.value, thickness: f.thickness.value, subtotal: f.subtotal.value, zone: f.zone.value })
-                        .then(function (res) { drawResult(res.data); })
+                        .then(function (res) { hasResult = true; drawResult(res.data); })
                         .catch(function (e) { out.innerHTML = ''; self.fail(e); });
-                } },
+                }
+                var form = h('form', { onsubmit: function (ev) { ev.preventDefault(); run(); } },
                     h('div', { class: 'ss-bar' },
                         h('div', { class: 'ss-field-row' }, h('label', { for: 'ss-sim-w' }, 'Poids du colis, emballage compris (g)'), f.weight),
                         h('div', { class: 'ss-field-row' }, h('label', { for: 'ss-sim-t' }, 'Épaisseur (mm)'), f.thickness),
@@ -806,7 +896,11 @@
                     if (!window.confirm('Remplacer toute la configuration des modes par ce texte ?')) { return; }
                     saveBtn.disabled = true;
                     api('PUT', '/carriers', { yaml: area.value })
-                        .then(function () { self.notify('Configuration enregistrée (l’ancienne version est conservée en carriers.yaml.bak).', false); return reload(); })
+                        .then(function () { return reload(); })
+                        .then(function () {
+                            yamlStatus.textContent = 'Configuration enregistrée (l’ancienne version est conservée en carriers.yaml.bak).';
+                            yamlStatus.focus();
+                        })
                         .catch(function (e) { self.fail(e); })
                         .then(function () { saveBtn.disabled = false; });
                 } }, 'Enregistrer le YAML');
@@ -814,6 +908,8 @@
                 yamlBox.appendChild(h('label', { for: 'ss-yaml-area', class: 'ss-sr' }, 'Configuration YAML des transporteurs'));
                 yamlBox.appendChild(area);
                 yamlBox.appendChild(h('div', { class: 'ss-bar', style: 'margin-top:.8rem' }, saveBtn));
+                var yamlStatus = h('p', { class: 'ss-done', role: 'status', tabindex: '-1' });
+                yamlBox.appendChild(yamlStatus);
             }
 
             reload();
