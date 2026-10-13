@@ -151,7 +151,29 @@
         '.ss-msg.ok{background:#dcfce7}.ss-msg.err{background:#fee2e2}',
         '.ss-muted{color:var(--muted-foreground,#6b7280)}',
         '.ss textarea.ss-yaml{width:100%;min-height:26rem;font-family:ui-monospace,Menlo,monospace;font-size:.8rem}',
-        '.ss ul.ss-list{margin:0;padding-left:1.1rem}'
+        '.ss ul.ss-list{margin:0;padding-left:1.1rem}',
+        '.ss-sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}',
+        '.ss :focus-visible{outline:2px solid var(--primary,#2563eb);outline-offset:2px}',
+        '.ss-section{margin-top:1.5rem}.ss-section:first-of-type{margin-top:.5rem}',
+        '.ss-provider{padding:.5rem 0;border-bottom:1px solid var(--border,#e5e7eb)}',
+        '.ss-ok{color:#166534}.ss-ko{color:#991b1b}',
+        '.ss details.ss-mode,.ss details.ss-advanced{border:1px solid var(--border,#e5e7eb);border-radius:.5rem;margin:.6rem 0;background:var(--card,var(--background,#fff))}',
+        '.ss details>summary{cursor:pointer;padding:.7rem .9rem;display:flex;flex-wrap:wrap;gap:.4rem;align-items:center}',
+        '.ss-mode-name{font-weight:600}',
+        '.ss-b-on{background:#dcfce7}.ss-b-off{background:#f3f4f6}',
+        '.ss-mode-form{padding:0 .9rem .9rem}',
+        '.ss-mode-form fieldset{border:1px solid var(--border,#e5e7eb);border-radius:.375rem;margin:.8rem 0;padding:.6rem .8rem}',
+        '.ss-mode-form legend{font-weight:600;padding:0 .3rem}','.ss-mode-form fieldset{min-width:0}',
+        '.ss-field-row{display:flex;flex-direction:column;gap:.2rem;margin:.4rem 0}',
+        '.ss-field-row label{font-size:.8rem}',
+        '.ss-field-row.ss-check{flex-direction:row;align-items:center;gap:.5rem}',
+        '.ss-inline{display:flex;flex-wrap:wrap;gap:1rem}',
+        '.ss-table-scroll{overflow-x:auto;margin:.5rem 0}',
+        '.ss-table-scroll table input,.ss-table-scroll table select{width:7.5rem}',
+        '.ss-new-mode{margin-top:1.2rem}.ss-new-mode h4{margin:0 0 .4rem}',
+        '.ss-form-status{min-height:1.2rem;margin:.4rem 0 0}',
+        '.ss-advanced>*:not(summary){padding:0 .9rem .9rem}',
+        '@media (prefers-reduced-motion:no-preference){.ss details{transition:none}}'
     ].join('\n');
 
     // ------------------------------------------------------------------
@@ -198,12 +220,24 @@
 
             this.root.innerHTML = '';
             this.messageBox = h('div');
-            this.body = h('div');
+            this.body = h('div', { id: 'ss-panel', role: 'tabpanel' });
 
-            this.root.appendChild(h('div', { class: 'ss-tabs', role: 'tablist' }, tabs.map(function (t) {
+            this.root.appendChild(h('div', { class: 'ss-tabs', role: 'tablist', 'aria-label': 'Sections de la boutique' }, tabs.map(function (t, i) {
+                var selected = self.tab === t[0];
                 return h('button', {
-                    class: 'ss-tab', role: 'tab', type: 'button', 'aria-selected': self.tab === t[0] ? 'true' : 'false',
-                    onclick: function () { self.tab = t[0]; self.message = null; self.draw(); }
+                    class: 'ss-tab', role: 'tab', type: 'button', id: 'ss-tab-' + t[0], 'aria-controls': 'ss-panel',
+                    'aria-selected': selected ? 'true' : 'false', tabindex: selected ? '0' : '-1',
+                    onclick: function () { self.tab = t[0]; self.message = null; self.draw(); },
+                    onkeydown: function (ev) {
+                        var dir = ev.key === 'ArrowRight' ? 1 : (ev.key === 'ArrowLeft' ? -1 : 0);
+                        if (!dir) { return; }
+                        ev.preventDefault();
+                        self.tab = tabs[(i + dir + tabs.length) % tabs.length][0];
+                        self.message = null;
+                        self.draw();
+                        var next = self.root.querySelector('#ss-tab-' + self.tab);
+                        if (next) { next.focus(); }
+                    }
                 }, t[1]);
             })));
             this.root.appendChild(this.messageBox);
@@ -414,36 +448,375 @@
 
         showCarriers() {
             var self = this;
-            var area = h('textarea', { class: 'ss-yaml', spellcheck: 'false', 'aria-label': 'Configuration YAML des transporteurs' });
-            var saveBtn = h('button', { class: 'ss-btn ss-primary', type: 'button', onclick: function () {
-                saveBtn.disabled = true;
-                api('PUT', '/carriers', { yaml: area.value })
-                    .then(function () { self.notify('Transporteurs enregistrés (l\'ancienne version est conservée en carriers.yaml.bak).', false); })
-                    .catch(function (e) { self.fail(e); })
-                    .then(function () { saveBtn.disabled = false; });
-            } }, 'Enregistrer');
+            var data = null;
+            var modesBox = h('div');
+            var providersBox = h('div');
+            var infoBox = h('div', { role: 'note' });
+            var simBox = h('div');
+            var yamlBox = h('div');
 
-            this.body.appendChild(h('p', { class: 'ss-muted' },
-                'Modes de livraison et grilles de tarifs (France métropolitaine hors Corse : zone FR-METRO). '
-                + 'Le texte est vérifié avant enregistrement ; les erreurs sont listées en haut de page.'));
-            var legalBox = h('div', { class: 'ss-msg ok', role: 'note' });
-            this.body.appendChild(legalBox);
-            this.body.appendChild(area);
-            this.body.appendChild(h('div', { class: 'ss-bar', style: 'margin-top:.8rem' }, saveBtn));
+            function section(id, title, intro) {
+                return h('section', { class: 'ss-section', 'aria-labelledby': id },
+                    h('h3', { id: id }, title), intro ? h('p', { class: 'ss-muted' }, intro) : null);
+            }
 
-            api('GET', '/carriers').then(function (res) {
-                area.value = res.data.yaml;
-                var law = (res.data.legal || {}).book_law || {};
-                var pct = ((res.data.legal || {}).vat_rate || 0) * 100;
-                legalBox.textContent = law.enabled
-                    ? 'Plancher légal (loi Darcos) : les frais de livraison de livres ne peuvent pas être inférieurs à '
-                        + money(law.below) + ' TTC pour une commande de moins de ' + money(law.threshold)
-                        + ' TTC, ni à ' + money(law.at_or_above) + ' TTC au-delà. Les tarifs ci-dessous sont des TTC (TVA '
-                        + pct.toLocaleString('fr-FR') + ' %). Réglages : Plugins > Simple Shop > Livraison. '
-                        + 'Un mode avec « legal_floor: false » (retrait sur place) y échappe.'
-                    : 'Plancher légal des frais de livraison de livres désactivé (Plugins > Simple Shop > Livraison).';
-            })
-                .catch(function (e) { self.fail(e); });
+            var sProviders = section('ss-s-providers', 'Transporteurs connectés', 'Plugins transporteur installés. Leurs identifiants (clés d’API) se saisissent dans la page du plugin.');
+            var sModes = section('ss-s-modes', 'Modes de livraison', 'Chaque mode a sa grille de tarifs, sa marge et ses règles. Les prix sont saisis hors taxe : la TVA est ajoutée automatiquement, puis le plancher légal.');
+            var sSim = section('ss-s-sim', 'Simulateur', 'Vérifiez le prix que verrait un client pour un colis donné.');
+            var sYaml = h('details', { class: 'ss-advanced' }, h('summary', {}, 'Mode avancé : fichier YAML'));
+
+            sProviders.appendChild(providersBox);
+            sModes.appendChild(modesBox);
+            sSim.appendChild(simBox);
+            sYaml.appendChild(yamlBox);
+
+            this.body.appendChild(infoBox);
+            this.body.appendChild(sProviders);
+            this.body.appendChild(sModes);
+            this.body.appendChild(sSim);
+            this.body.appendChild(sYaml);
+
+            function reload() {
+                return api('GET', '/carriers').then(function (res) {
+                    data = res.data;
+                    drawInfo();
+                    drawProviders();
+                    drawModes();
+                    drawSimulator();
+                    drawYaml();
+                }).catch(function (e) { self.fail(e); });
+            }
+
+            // ----- Encart : TVA, emballage, plancher légal -----
+            function drawInfo() {
+                var law = (data.legal || {}).book_law || {};
+                var pct = ((data.legal || {}).vat_rate || 0) * 100;
+                var pack = (data.settings || {}).packaging || {};
+                var ht = (data.settings || {}).prices_entered === 'ht';
+                infoBox.innerHTML = '';
+                infoBox.appendChild(h('div', { class: 'ss-msg ok' },
+                    h('p', { style: 'margin:0 0 .4rem' }, h('strong', {}, 'Plancher légal (loi Darcos) : '),
+                        law.enabled
+                            ? 'les frais de livraison de livres ne peuvent pas être inférieurs à ' + money(law.below) + ' TTC pour une commande de livres de moins de '
+                                + money(law.threshold) + ' TTC, ni à ' + money(law.at_or_above) + ' TTC au-delà. Un mode peut y échapper (retrait sur place).'
+                            : 'désactivé.'),
+                    h('p', { style: 'margin:0' }, 'Prix saisis ' + (ht ? 'hors taxe, TVA ' : 'toutes taxes comprises (TVA ')
+                        + pct.toLocaleString('fr-FR') + ' %' + (ht ? ' ajoutée automatiquement' : ')') + '. Emballage ajouté à chaque colis : '
+                        + pack.weight + ' g et ' + pack.thickness + ' mm. Ces réglages, le seuil et les montants du plancher : Plugins > Simple Shop > Livraison.')));
+            }
+
+            // ----- Fournisseurs -----
+            function drawProviders() {
+                providersBox.innerHTML = '';
+                if (!data.providers.length) {
+                    providersBox.appendChild(h('p', { class: 'ss-muted' }, 'Aucun plugin transporteur actif. Seuls les modes manuels ci-dessous sont proposés.'));
+                    return;
+                }
+                data.providers.forEach(function (p) {
+                    var status = h('span', { role: 'status', class: 'ss-muted' });
+                    var btn = h('button', { class: 'ss-btn', type: 'button', onclick: function () {
+                        btn.disabled = true;
+                        status.textContent = 'Test en cours…';
+                        api('POST', '/carriers/providers/' + encodeURIComponent(p.id) + '/test', {})
+                            .then(function (res) { status.textContent = (res.data.ok ? 'Réussi : ' : 'Échec : ') + res.data.message; status.className = res.data.ok ? 'ss-ok' : 'ss-ko'; })
+                            .catch(function (e) { status.textContent = 'Échec : ' + e.message; status.className = 'ss-ko'; })
+                            .then(function () { btn.disabled = false; });
+                    } }, 'Tester la connexion');
+                    providersBox.appendChild(h('div', { class: 'ss-provider' },
+                        h('strong', {}, p.label), ' ', h('span', { class: 'ss-muted' }, '(plugin « ' + p.id + ' »)'), ' ', btn, ' ', status));
+                });
+            }
+
+            // ----- Modes -----
+            function drawModes() {
+                modesBox.innerHTML = '';
+                data.modes.forEach(function (m) { modesBox.appendChild(modeEditor(m, false).el); });
+                modesBox.appendChild(newModeForm());
+            }
+
+            function sourceLabel(m) {
+                if (m.source === 'manual') { return 'Manuel'; }
+                var label = 'Plugin ' + m.provider;
+                return m.source === 'provider+override' ? label + ' — modifié' : label;
+            }
+
+            function statusLabel(m) {
+                if (!m.available) { return 'Indisponible : ' + (m.unavailable_reason || 'réglages du plugin incomplets'); }
+                return m.enabled ? 'Actif' : 'Désactivé';
+            }
+
+            function field(label, input, help) {
+                var id = input.id;
+                return h('div', { class: 'ss-field-row' },
+                    h('label', { for: id }, label), input,
+                    help ? h('small', { id: id + '-help', class: 'ss-muted' }, help) : null);
+            }
+
+            var uid = 0;
+            function nextId(prefix) { uid++; return prefix + '-' + uid; }
+
+            function numInput(value, opts) {
+                opts = opts || {};
+                return h('input', {
+                    type: 'number', id: nextId('ss-n'), min: '0', step: opts.step || 'any', inputmode: 'decimal',
+                    value: value === null || value === undefined ? '' : String(value), placeholder: opts.placeholder || '',
+                    'aria-label': opts.aria || null, 'aria-describedby': opts.describedby || null
+                });
+            }
+
+            function modeEditor(m, isNew) {
+                var weightInfinite = 9999999;
+                var inputs = {};
+                var uidp = nextId('ss-mode');
+
+                var status = h('p', { class: 'ss-form-status', role: 'status', 'aria-live': 'polite' });
+                var errors = h('div', { role: 'alert' });
+
+                inputs.enabled = h('input', { type: 'checkbox', id: uidp + '-enabled', checked: !!m.enabled });
+                inputs.name = h('input', { type: 'text', id: uidp + '-name', value: m.name || '', required: true, maxlength: '80' });
+                inputs.description = h('textarea', { id: uidp + '-desc', rows: '2', maxlength: '300' }, m.description || '');
+                inputs.description.value = m.description || '';
+                inputs.mfixed = numInput(m.margin.fixed);
+                inputs.mfixed.id = uidp + '-mfixed';
+                inputs.mpercent = numInput(m.margin.percent);
+                inputs.mpercent.id = uidp + '-mpercent';
+                inputs.free = numInput(m.free_from);
+                inputs.free.id = uidp + '-free';
+                inputs.floor = h('input', { type: 'checkbox', id: uidp + '-floor', checked: m.legal_floor !== false });
+                inputs.maxw = numInput(m.constraints.max_weight);
+                inputs.maxw.id = uidp + '-maxw';
+                inputs.maxt = numInput(m.constraints.max_thickness);
+                inputs.maxt.id = uidp + '-maxt';
+
+                var zones = (data.zones && data.zones.length) ? data.zones.slice() : data.all_zones.slice();
+                var tbody = h('tbody');
+                var rows = [];
+
+                function addRow(rule) {
+                    rule = rule || { zone: zones[0], min_weight: 0, max_weight: null, min_basket: 0, max_basket: null, price: '' };
+                    var n = rows.length + 1;
+                    var zoneList = zones.indexOf(rule.zone) === -1 ? zones.concat([rule.zone]) : zones;
+                    var r = {
+                        zone: h('select', { 'aria-label': 'Zone, ligne ' + n }, zoneList.map(function (z) { return h('option', { value: z, selected: z === rule.zone }, z); })),
+                        minw: numInput(rule.min_weight, { aria: 'Poids de (g), ligne ' + n }),
+                        maxw: numInput(rule.max_weight !== null && rule.max_weight >= weightInfinite ? null : rule.max_weight, { aria: 'Poids jusqu’à (g), ligne ' + n, placeholder: 'sans limite' }),
+                        minb: numInput(rule.min_basket, { aria: 'Panier de (€), ligne ' + n }),
+                        maxb: numInput(rule.max_basket !== null && rule.max_basket >= 99999 ? null : rule.max_basket, { aria: 'Panier jusqu’à (€), ligne ' + n, placeholder: 'sans limite' }),
+                        thick: numInput(rule.max_thickness, { aria: 'Épaisseur maximale (mm), ligne ' + n, placeholder: 'sans limite' }),
+                        price: numInput(rule.price, { aria: 'Prix (€), ligne ' + n })
+                    };
+                    r.price.required = true;
+                    r.del = h('button', { class: 'ss-btn', type: 'button', 'aria-label': 'Supprimer la ligne ' + n, onclick: function () {
+                        rows.splice(rows.indexOf(r), 1);
+                        r.tr.remove();
+                        status.textContent = 'Ligne supprimée (pas encore enregistré).';
+                        (rows.length ? rows[Math.min(rows.length - 1, 0)].zone : addBtn).focus();
+                    } }, 'Supprimer');
+                    r.tr = h('tr', {},
+                        h('td', {}, r.zone), h('td', {}, r.minw), h('td', {}, r.maxw), h('td', {}, r.minb), h('td', {}, r.maxb),
+                        h('td', {}, r.thick), h('td', {}, r.price), h('td', {}, r.del));
+                    rows.push(r);
+                    tbody.appendChild(r.tr);
+
+                    return r;
+                }
+
+                var addBtn = h('button', { class: 'ss-btn', type: 'button', onclick: function () {
+                    var r = addRow();
+                    r.minw.focus();
+                } }, 'Ajouter une ligne');
+
+                (m.rules || []).forEach(addRow);
+
+                var priceHead = ((data.settings || {}).prices_entered === 'ht') ? 'Prix (€ HT)' : 'Prix (€ TTC)';
+                var table = h('table', {},
+                    h('caption', { class: 'ss-sr' }, 'Grille de tarifs du mode ' + (m.name || 'nouveau')),
+                    h('thead', {}, h('tr', {}, ['Zone', 'Poids de (g)', 'Jusqu’à (g)', 'Panier de (€)', 'Jusqu’à (€)', 'Épaisseur max (mm)', priceHead, ''].map(function (t) {
+                        return h('th', { scope: 'col' }, t);
+                    }))),
+                    tbody);
+
+                function read() {
+                    function v(i) { return i.value === '' ? null : i.value; }
+                    return {
+                        name: inputs.name.value,
+                        description: inputs.description.value,
+                        enabled: inputs.enabled.checked,
+                        legal_floor: inputs.floor.checked,
+                        margin: { fixed: v(inputs.mfixed), percent: v(inputs.mpercent) },
+                        free_from: v(inputs.free),
+                        constraints: { max_weight: v(inputs.maxw), max_thickness: v(inputs.maxt) },
+                        rules: rows.map(function (r) {
+                            return { zone: r.zone.value, min_weight: v(r.minw), max_weight: v(r.maxw), min_basket: v(r.minb), max_basket: v(r.maxb), max_thickness: v(r.thick), price: v(r.price) };
+                        })
+                    };
+                }
+
+                var saveBtn = h('button', { class: 'ss-btn ss-primary', type: 'submit' }, isNew ? 'Créer le mode' : 'Enregistrer ce mode');
+                var extraBtn = null;
+                if (!isNew && m.source === 'provider+override') {
+                    extraBtn = h('button', { class: 'ss-btn', type: 'button', onclick: function () { remove('Rétablir les valeurs du plugin pour « ' + m.name + ' » ? Vos modifications de ce mode seront perdues.'); } }, 'Rétablir les valeurs du plugin');
+                } else if (!isNew && m.source === 'manual') {
+                    extraBtn = h('button', { class: 'ss-btn', type: 'button', onclick: function () { remove('Supprimer le mode « ' + m.name + ' » ?'); } }, 'Supprimer ce mode');
+                }
+
+                function remove(question) {
+                    if (!window.confirm(question)) { return; }
+                    api('DELETE', '/carriers/' + encodeURIComponent(m.key))
+                        .then(function () { self.notify('Mode « ' + m.name + ' » : ' + (m.source === 'manual' ? 'supprimé.' : 'valeurs du plugin rétablies.'), false); return reload(); })
+                        .catch(function (e) { showErrors(e); });
+                }
+
+                function showErrors(e) {
+                    errors.innerHTML = '';
+                    status.textContent = '';
+                    errors.appendChild(h('div', { class: 'ss-msg err' }, e.message,
+                        e.details && e.details.length ? h('ul', { class: 'ss-list' }, e.details.map(function (d) { return h('li', {}, d); })) : null));
+                    errors.scrollIntoView({ block: 'nearest' });
+                }
+
+                var form = h('form', { class: 'ss-mode-form', novalidate: false, onsubmit: function (ev) {
+                    ev.preventDefault();
+                    errors.innerHTML = '';
+                    saveBtn.disabled = true;
+                    status.textContent = 'Enregistrement…';
+                    api('PUT', '/carriers/' + encodeURIComponent(m.key), read())
+                        .then(function () { self.notify('Mode « ' + inputs.name.value + ' » enregistré.', false); return reload(); })
+                        .catch(function (e) { showErrors(e); })
+                        .then(function () { saveBtn.disabled = false; });
+                } },
+                    h('div', { class: 'ss-field-row ss-check' }, inputs.enabled, h('label', { for: uidp + '-enabled' }, 'Proposer ce mode aux clients')),
+                    m.available === false ? h('p', { class: 'ss-msg err' }, 'Indisponible pour le moment : ' + (m.unavailable_reason || 'réglages du plugin incomplets') + ' Le mode n’est pas proposé tant que ce n’est pas réglé.') : null,
+                    field('Nom affiché au client', inputs.name),
+                    field('Description affichée au client', inputs.description),
+                    h('fieldset', {}, h('legend', {}, 'Marge sur le tarif de la grille'),
+                        h('div', { class: 'ss-inline' },
+                            field('Marge fixe (€ ' + (priceHead.indexOf('HT') > -1 ? 'HT' : 'TTC') + ')', inputs.mfixed),
+                            field('Marge (%)', inputs.mpercent)),
+                        h('p', { class: 'ss-muted' }, 'Ajoutées au prix de la grille (ex. 0,50 € pour le suivi de la lettre verte). Pas de marge sur une ligne à 0 €.')),
+                    h('fieldset', {}, h('legend', {}, 'Règles'),
+                        h('div', { class: 'ss-inline' },
+                            field('Offert dès (€ de livres TTC)', inputs.free, 'Vide = jamais. Au-dessus, la livraison est offerte, au plancher légal près.'),
+                            field('Poids maximal du colis (g)', inputs.maxw, 'Vide = illimité.'),
+                            field('Épaisseur maximale (mm)', inputs.maxt, 'Vide = illimité.')),
+                        h('div', { class: 'ss-field-row ss-check' }, inputs.floor,
+                            h('label', { for: uidp + '-floor' }, 'Appliquer le plancher légal des frais de livraison de livres'),
+                        ), h('p', { class: 'ss-muted' }, 'À décocher uniquement pour un retrait sur place, qui n’est pas une livraison.')),
+                    h('fieldset', {}, h('legend', {}, 'Grille de tarifs'),
+                        h('p', { class: 'ss-muted' }, 'La première ligne qui correspond au colis s’applique. Poids en grammes ; laissez « jusqu’à » vide pour « sans limite ».'),
+                        h('div', { class: 'ss-table-scroll', role: 'region', tabindex: '0', 'aria-label': 'Grille de tarifs, défilement horizontal' }, table),
+                        addBtn),
+                    errors,
+                    h('div', { class: 'ss-bar' }, saveBtn, extraBtn),
+                    status);
+
+                var summary = h('summary', {},
+                    h('span', { class: 'ss-mode-name' }, m.name || 'Nouveau mode'), ' ',
+                    h('span', { class: 'ss-badge' }, sourceLabel(m)), ' ',
+                    h('span', { class: 'ss-badge ' + (m.enabled && m.available ? 'ss-b-on' : 'ss-b-off') }, statusLabel(m)));
+                var el = h('details', { class: 'ss-mode', open: isNew }, summary, form);
+
+                return { el: el, focus: function () { inputs.name.focus(); } };
+            }
+
+            function newModeForm() {
+                var nameInput = h('input', { type: 'text', id: 'ss-new-mode-name', maxlength: '80' });
+                var holder = h('div');
+                var btn = h('button', { class: 'ss-btn', type: 'button', onclick: function () {
+                    var name = nameInput.value.trim();
+                    if (!name) { nameInput.focus(); return; }
+                    var base = slug(name), key = base, i = 2;
+                    var existing = data.modes.map(function (x) { return x.key; });
+                    while (existing.indexOf(key) !== -1) { key = base + '_' + (i++); }
+                    var draft = { key: key, source: 'manual', provider: null, name: name, description: '', enabled: false, legal_floor: true,
+                        margin: { fixed: 0, percent: 0 }, free_from: null, constraints: { max_weight: null, max_thickness: null },
+                        rules: [], available: true };
+                    var ed = modeEditor(draft, true);
+                    holder.innerHTML = '';
+                    holder.appendChild(ed.el);
+                    ed.focus();
+                } }, 'Ajouter ce mode manuel');
+                return h('div', { class: 'ss-new-mode' },
+                    h('h4', {}, 'Ajouter un mode manuel'),
+                    h('div', { class: 'ss-bar' }, h('div', { class: 'ss-field-row' }, h('label', { for: 'ss-new-mode-name' }, 'Nom du nouveau mode'), nameInput), btn),
+                    holder);
+            }
+
+            function slug(name) {
+                var s = name.normalize ? name.normalize('NFD').replace(/[̀-ͯ]/g, '') : name;
+                s = s.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '').slice(0, 40);
+                return s.length >= 2 ? s : 'mode';
+            }
+
+            // ----- Simulateur -----
+            function drawSimulator() {
+                simBox.innerHTML = '';
+                var zoneOptions = (data.zones && data.zones.length ? data.zones : data.all_zones);
+                var f = {
+                    weight: h('input', { type: 'number', id: 'ss-sim-w', min: '1', step: '1', value: '340', required: true }),
+                    thickness: h('input', { type: 'number', id: 'ss-sim-t', min: '0', step: '1', value: '29', required: true }),
+                    subtotal: h('input', { type: 'number', id: 'ss-sim-s', min: '0', step: 'any', value: '12.95', required: true }),
+                    zone: h('select', { id: 'ss-sim-z' }, zoneOptions.map(function (z) { return h('option', { value: z }, z); }))
+                };
+                var out = h('div', { 'aria-live': 'polite' });
+                var form = h('form', { onsubmit: function (ev) {
+                    ev.preventDefault();
+                    out.textContent = 'Calcul…';
+                    api('POST', '/carriers/simulate', { weight: f.weight.value, thickness: f.thickness.value, subtotal: f.subtotal.value, zone: f.zone.value })
+                        .then(function (res) { drawResult(res.data); })
+                        .catch(function (e) { out.innerHTML = ''; self.fail(e); });
+                } },
+                    h('div', { class: 'ss-bar' },
+                        h('div', { class: 'ss-field-row' }, h('label', { for: 'ss-sim-w' }, 'Poids du colis, emballage compris (g)'), f.weight),
+                        h('div', { class: 'ss-field-row' }, h('label', { for: 'ss-sim-t' }, 'Épaisseur (mm)'), f.thickness),
+                        h('div', { class: 'ss-field-row' }, h('label', { for: 'ss-sim-s' }, 'Montant des livres (€ TTC)'), f.subtotal),
+                        h('div', { class: 'ss-field-row' }, h('label', { for: 'ss-sim-z' }, 'Zone'), f.zone),
+                        h('button', { class: 'ss-btn ss-primary', type: 'submit' }, 'Calculer')));
+                simBox.appendChild(form);
+                simBox.appendChild(out);
+
+                function drawResult(res) {
+                    var ht = (data.settings || {}).prices_entered === 'ht';
+                    out.innerHTML = '';
+                    out.appendChild(h('div', { class: 'ss-table-scroll', role: 'region', tabindex: '0', 'aria-label': 'Résultat de la simulation' },
+                        h('table', {},
+                            h('caption', { class: 'ss-sr' }, 'Prix de chaque mode pour ce colis'),
+                            h('thead', {}, h('tr', {}, ['Mode', 'Proposé au client', 'Grille (' + (ht ? 'HT' : 'TTC') + ')', 'Avec marge', 'Avant plancher (TTC)', 'Plancher légal', 'Prix TTC', 'Remarque'].map(function (t) { return h('th', { scope: 'col' }, t); }))),
+                            h('tbody', {}, res.rows.map(function (r) {
+                                var q = r.quote;
+                                return h('tr', {},
+                                    h('th', { scope: 'row' }, r.name),
+                                    h('td', {}, r.offered ? 'Oui' : 'Non'),
+                                    h('td', { class: 'ss-num' }, q ? money(q.grid_price) : '—'),
+                                    h('td', { class: 'ss-num' }, q ? money(q.after_margin) : '—'),
+                                    h('td', { class: 'ss-num' }, q ? money(q.price_before_floor) : '—'),
+                                    h('td', { class: 'ss-num' }, q ? (q.floor > 0 ? money(q.floor) : 'aucun') : '—'),
+                                    h('td', { class: 'ss-num' }, q ? h('strong', {}, money(q.price)) : '—'),
+                                    h('td', {}, r.reason || (q && q.free_applied ? 'Offert dès le seuil du mode.' : (q && q.price > q.price_before_floor ? 'Relevé au plancher légal.' : (r.pickup ? 'Le client choisit un point de retrait.' : '')))));
+                            })))));
+                }
+            }
+
+            // ----- YAML avancé -----
+            function drawYaml() {
+                yamlBox.innerHTML = '';
+                var area = h('textarea', { class: 'ss-yaml', spellcheck: 'false', id: 'ss-yaml-area' });
+                area.value = data.yaml;
+                var saveBtn = h('button', { class: 'ss-btn ss-primary', type: 'button', onclick: function () {
+                    if (!window.confirm('Remplacer toute la configuration des modes par ce texte ?')) { return; }
+                    saveBtn.disabled = true;
+                    api('PUT', '/carriers', { yaml: area.value })
+                        .then(function () { self.notify('Configuration enregistrée (l’ancienne version est conservée en carriers.yaml.bak).', false); return reload(); })
+                        .catch(function (e) { self.fail(e); })
+                        .then(function () { saveBtn.disabled = false; });
+                } }, 'Enregistrer le YAML');
+                yamlBox.appendChild(h('p', { class: 'ss-muted' }, 'Réservé aux cas particuliers : l’écran ci-dessus suffit normalement. Le texte est vérifié avant enregistrement.'));
+                yamlBox.appendChild(h('label', { for: 'ss-yaml-area', class: 'ss-sr' }, 'Configuration YAML des transporteurs'));
+                yamlBox.appendChild(area);
+                yamlBox.appendChild(h('div', { class: 'ss-bar', style: 'margin-top:.8rem' }, saveBtn));
+            }
+
+            reload();
         }
 
         // ---------------- Adresses bannies ----------------

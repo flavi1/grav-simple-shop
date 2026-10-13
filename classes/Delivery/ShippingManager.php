@@ -153,16 +153,31 @@ class ShippingManager
      */
     public static function quoteMode(array $mode, string $zone, array $metrics, array $config, bool $ignoreEnabled = false): ?array
     {
-        if ((!$ignoreEnabled && empty($mode['enabled'])) || empty($mode['available'])) {
-            return null;
+        return self::evaluate($mode, $zone, $metrics, $config, $ignoreEnabled)['quote'];
+    }
+
+    /**
+     * Comme quoteMode(), mais explique aussi pourquoi un mode n'est pas proposé (simulateur d'administration).
+     *
+     * @return array{quote: ?array, reason: string} reason vide si le mode est proposé.
+     */
+    public static function evaluate(array $mode, string $zone, array $metrics, array $config, bool $ignoreEnabled = false): array
+    {
+        $no = static fn (string $reason): array => ['quote' => null, 'reason' => $reason];
+
+        if (!$ignoreEnabled && empty($mode['enabled'])) {
+            return $no('Mode désactivé.');
+        }
+        if (empty($mode['available'])) {
+            return $no((string) ($mode['unavailable_reason'] ?? '') ?: 'Mode indisponible.');
         }
 
         $constraints = $mode['constraints'] ?? [];
         if (!empty($constraints['max_weight']) && $metrics['weight'] > $constraints['max_weight']) {
-            return null;
+            return $no('Colis trop lourd pour ce mode (' . $constraints['max_weight'] . ' g au plus).');
         }
         if (!empty($constraints['max_thickness']) && $metrics['thickness'] > $constraints['max_thickness']) {
-            return null;
+            return $no('Colis trop épais pour ce mode (' . $constraints['max_thickness'] . ' mm au plus).');
         }
 
         $matched = null;
@@ -183,7 +198,7 @@ class ShippingManager
             break; // première règle valide
         }
         if ($matched === null) {
-            return null;
+            return $no('Aucune ligne de la grille ne correspond (zone, poids, épaisseur ou montant du panier).');
         }
 
         $freeApplied = !empty($mode['free_from']) && $metrics['subtotal'] >= $mode['free_from'];
@@ -194,7 +209,7 @@ class ShippingManager
         // qui n'est pas une livraison au sens de la loi (à n'utiliser que pour cela ; voir LegalShippingFloor).
         $floor = ($mode['legal_floor'] ?? true) === false ? 0.0 : LegalShippingFloor::minimum((float) $metrics['subtotal'], $config);
 
-        return [
+        $quote = [
             'price'              => round(max($before, $floor), 2),
             'grid_price'         => $matched,
             'after_margin'       => $grid > 0
@@ -205,6 +220,8 @@ class ShippingManager
             'floor'              => $floor,
             'free_applied'       => $freeApplied,
         ];
+
+        return ['quote' => $quote, 'reason' => ''];
     }
 
     /**

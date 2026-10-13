@@ -94,27 +94,4 @@ final class CarrierCatalog
             'unavailable_reason'    => (string) ($mode['unavailable_reason'] ?? ''),
         ];
     }
-
-    /**
-     * Fabrique l'entrée à écrire dans carriers.yaml pour un mode modifié dans l'administration.
-     * Pour un mode de fournisseur, seuls les champs différents des valeurs par défaut sont conservés.
-     *
-     * @param array $edited  Champs reçus (name, description, enabled, legal_floor, margin, free_from, constraints, rules).
-     * @param array|null $defaults Valeurs par défaut normalisées du fournisseur (`provider_defaults`), ou null pour un mode manuel.
-     */
-    public static function toStorage(array $edited, ?array $defaults): array
-    {
-        $out = [];
-        foreach (self::EDITABLE as $field) {
-            if (!array_key_exists($field, $edited)) {
-                continue;
-            }
-            if ($defaults !== null && ($defaults[$field] ?? null) == $edited[$field]) {
-                continue;
-            }
-            $out[$field] = $edited[$field];
-        }
-
-        return $out;
-    }
 }
