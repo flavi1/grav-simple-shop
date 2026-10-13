@@ -52,8 +52,18 @@ class CarrierConfig
                 $errors[] = "{$where} : doit être un bloc (name, enabled, rules…).";
                 continue;
             }
-            if (trim((string) ($carrier['name'] ?? '')) === '') {
+            if (!preg_match('/^[a-z0-9_]+(\.[a-z0-9_]+)?$/', (string) $key)) {
+                $errors[] = "{$where} : la clé ne peut contenir que des minuscules, chiffres et _ (et un point pour un mode de fournisseur).";
+            }
+            // Un mode de fournisseur (clé « fournisseur.mode ») peut ne surcharger que quelques champs.
+            if (strpos((string) $key, '.') === false && trim((string) ($carrier['name'] ?? '')) === '') {
                 $errors[] = "{$where} : le nom (name) est obligatoire.";
+            }
+            if (isset($carrier['free_from']) && (!is_numeric($carrier['free_from']) || $carrier['free_from'] < 0)) {
+                $errors[] = "{$where} : free_from doit être un nombre positif ou nul.";
+            }
+            if (isset($carrier['legal_floor']) && !is_bool($carrier['legal_floor'])) {
+                $errors[] = "{$where} : legal_floor doit valoir true ou false.";
             }
             if (isset($carrier['enabled']) && !is_bool($carrier['enabled']) && !in_array($carrier['enabled'], [0, 1], true)) {
                 $errors[] = "{$where} : enabled doit valoir true ou false.";
@@ -112,6 +122,21 @@ class CarrierConfig
         }
 
         return $errors;
+    }
+
+    /**
+     * Texte YAML d'un tableau de modes (écriture depuis l'interface d'administration ; les commentaires d'un fichier
+     * édité à la main ne sont pas conservés).
+     *
+     * @param array<string, array> $carriers
+     */
+    public static function dump(array $carriers): string
+    {
+        $header = "# Modes de livraison — écrit par l'administration (Boutique > Transporteurs).\n"
+            . "# Prix hors taxe par défaut (plugins.simple-shop.delivery.prices_entered). Les modes d'un plugin transporteur\n"
+            . "# (clé « fournisseur.mode ») ne contiennent que les valeurs modifiées par rapport aux réglages du plugin.\n\n";
+
+        return $header . Yaml::dump(['carriers' => $carriers], 6, 2, Yaml::DUMP_OBJECT_AS_MAP);
     }
 
     /**

@@ -65,7 +65,8 @@
 
 {% if shipping.key is defined %}
     <p>
-        Mode de livraison : {{ shipping.key }}{% if shipping.price is defined %} ({{ shipping.price|number_format(2, ',', ' ') }} €){% endif %}
+        Mode de livraison : {{ shipping.name|default(shipping.key) }}{% if shipping.price is defined %} ({{ shipping.price|number_format(2, ',', ' ') }} €){% endif %}
+        {% if shipping.pickup_point is defined and shipping.pickup_point %}<br>Point de retrait : {{ shipping.pickup_point.name }}, {{ shipping.pickup_point.street }}, {{ shipping.pickup_point['postal-code'] }} {{ shipping.pickup_point.city }}{% endif %}
     </p>
 {% endif %}
 

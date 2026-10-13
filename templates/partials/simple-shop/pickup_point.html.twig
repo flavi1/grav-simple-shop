@@ -1,0 +1,5 @@
+{# Point de retrait choisi (shipping.pickup_point) : nom et adresse. Variable : point (array). #}
+<span class="pickup-point-summary">
+    <strong>Point de retrait :</strong> {{ point.name }},
+    {{ point.street }}{% if point.street %}, {% endif %}{{ point['postal-code'] }} {{ point.city }}
+</span>

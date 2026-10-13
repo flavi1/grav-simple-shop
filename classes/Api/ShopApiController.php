@@ -10,6 +10,9 @@ use Grav\Plugin\Api\Exceptions\NotFoundException;
 use Grav\Plugin\Api\Exceptions\ValidationException;
 use Grav\Plugin\Api\Response\ApiResponse;
 use Grav\Plugin\SimpleShop\Delivery\CarrierConfig;
+use Grav\Plugin\SimpleShop\Delivery\ModeEditor;
+use Grav\Plugin\SimpleShop\Delivery\ShippingManager;
+use Grav\Plugin\SimpleShop\Delivery\ZoneResolver;
 use Grav\Plugin\SimpleShop\Invoicing\InvoiceManager;
 use Grav\Plugin\SimpleShop\Orders\OrderManager;
 use Grav\Plugin\SimpleShop\Services\CustomerManager;
@@ -204,22 +207,203 @@ class ShopApiController extends AbstractApiController
     // Transporteurs
     // ------------------------------------------------------------------
 
-    /** GET /simple-shop/carriers — texte YAML courant. */
+    /**
+     * GET /simple-shop/carriers — tout ce qu'il faut à l'écran « Transporteurs » : modes (manuels et des plugins
+     * transporteur), fournisseurs, réglages utiles, texte YAML (mode avancé).
+     */
     public function carriers(ServerRequestInterface $request): ResponseInterface
     {
         $this->requirePermission($request, self::PERM_READ);
 
         $path = $this->carriersPath();
+        $config = (array) $this->grav['config']->get('plugins.simple-shop', []);
+        $manager = new ShippingManager();
+
+        $providers = [];
+        foreach ($manager->getProviders() as $id => $provider) {
+            $providers[] = ['id' => $id, 'label' => $provider->getLabel()];
+        }
 
         return ApiResponse::create([
-            'yaml'  => is_file($path) ? (string) file_get_contents($path) : "carriers: {}\n",
-            'zones' => CarrierConfig::ZONES,
-            'legal' => [
-                'book_law'  => \Grav\Plugin\SimpleShop\Delivery\LegalShippingFloor::settings((array) $this->grav['config']->get('plugins.simple-shop', [])),
+            'yaml'      => is_file($path) ? (string) file_get_contents($path) : "carriers: {}\n",
+            'zones'     => array_values(ZoneResolver::allowedZones($config)),
+            'all_zones' => CarrierConfig::ZONES,
+            'modes'     => array_values(array_map([$this, 'modeView'], $manager->getModes())),
+            'providers' => $providers,
+            'settings'  => [
+                'prices_entered' => ShippingManager::pricesEnteredHt($config) ? 'ht' : 'ttc',
+                'packaging'      => ShippingManager::packaging($config),
+            ],
+            'legal'     => [
+                'book_law'  => \Grav\Plugin\SimpleShop\Delivery\LegalShippingFloor::settings($config),
                 'vat_rate'  => \Grav\Plugin\SimpleShop\Services\TaxManager::defaultRate(),
                 'tax_code'  => \Grav\Plugin\SimpleShop\Services\TaxManager::defaultCode(),
             ],
         ]);
+    }
+
+    /** @return array Vue d'un mode pour l'interface (sans les valeurs par défaut du fournisseur). */
+    private function modeView(array $mode): array
+    {
+        unset($mode['provider_defaults']);
+
+        return $mode;
+    }
+
+    /**
+     * PUT /simple-shop/carriers/{key} — crée ou modifie un mode.
+     * Mode manuel (clé `lettre_suivie`) : toutes les valeurs. Mode d'un plugin (`colissimo.domicile`) : seules les valeurs
+     * qui diffèrent de celles du plugin sont enregistrées.
+     */
+    public function saveCarrierMode(ServerRequestInterface $request): ResponseInterface
+    {
+        $this->requirePermission($request, self::PERM_WRITE);
+
+        $key = (string) $this->getRouteParam($request, 'key');
+        $manager = new ShippingManager();
+        $catalog = $manager->getModes();
+        $isProviderMode = strpos($key, '.') !== false;
+
+        if ($isProviderMode && !isset($catalog[$key])) {
+            throw new NotFoundException("Mode inconnu : {$key} (plugin transporteur désactivé ?).");
+        }
+        if (!$isProviderMode && !ModeEditor::isManualKey($key)) {
+            throw new ValidationException('Identifiant de mode invalide.', ['key' => 'Minuscules, chiffres et _ (2 à 40 caractères).']);
+        }
+
+        [$clean, $errors] = ModeEditor::sanitize($this->getRequestBody($request), $isProviderMode);
+        if ($errors !== []) {
+            throw new ValidationException('Mode de livraison invalide.', ['mode' => $errors]);
+        }
+
+        $this->updateCarriersFile(function (array $carriers) use ($key, $clean, $catalog, $isProviderMode): array {
+            $entry = ModeEditor::toStorage($clean, $isProviderMode ? $catalog[$key]['provider_defaults'] : null);
+            if ($entry === []) {
+                unset($carriers[$key]);   // identique au plugin : plus de surcharge à conserver
+            } else {
+                $carriers[$key] = $entry;
+            }
+
+            return $carriers;
+        });
+
+        $mode = (new ShippingManager())->getModes()[$key] ?? null;
+
+        return ApiResponse::create(['saved' => true, 'mode' => $mode === null ? null : $this->modeView($mode)]);
+    }
+
+    /** DELETE /simple-shop/carriers/{key} — supprime un mode manuel, ou rétablit les valeurs du plugin pour un mode de plugin. */
+    public function deleteCarrierMode(ServerRequestInterface $request): ResponseInterface
+    {
+        $this->requirePermission($request, self::PERM_WRITE);
+
+        $key = (string) $this->getRouteParam($request, 'key');
+        if (!preg_match('/^[a-z0-9_]+(\.[a-z0-9_]+)?$/', $key)) {
+            throw new ValidationException('Identifiant de mode invalide.');
+        }
+
+        $existed = false;
+        $this->updateCarriersFile(function (array $carriers) use ($key, &$existed): array {
+            $existed = isset($carriers[$key]);
+            unset($carriers[$key]);
+
+            return $carriers;
+        });
+        if (!$existed) {
+            throw new NotFoundException("Aucun réglage enregistré pour le mode {$key}.");
+        }
+
+        $mode = (new ShippingManager())->getModes()[$key] ?? null;
+
+        return ApiResponse::create(['deleted' => true, 'mode' => $mode === null ? null : $this->modeView($mode)]);
+    }
+
+    /** POST /simple-shop/carriers/simulate — corps : {weight, thickness, subtotal, zone}. Détail du calcul de chaque mode. */
+    public function simulateCarriers(ServerRequestInterface $request): ResponseInterface
+    {
+        $this->requirePermission($request, self::PERM_READ);
+
+        $body = $this->getRequestBody($request);
+        $num = static fn ($v, float $max) => is_numeric($v) && (float) $v >= 0 && (float) $v <= $max ? (float) $v : null;
+        $weight = $num($body['weight'] ?? null, 1000000);
+        $thickness = $num($body['thickness'] ?? 0, 100000);
+        $subtotal = $num(isset($body['subtotal']) ? str_replace(',', '.', (string) $body['subtotal']) : null, 1000000);
+        $zone = (string) ($body['zone'] ?? 'FR-METRO');
+        if ($weight === null || $thickness === null || $subtotal === null || !in_array($zone, CarrierConfig::ZONES, true)) {
+            throw new ValidationException('Paramètres de simulation invalides.', ['simulation' => ['Poids (g), épaisseur (mm), montant des livres (€ TTC) et zone sont obligatoires.']]);
+        }
+
+        $config = (array) $this->grav['config']->get('plugins.simple-shop', []);
+        $metrics = ['weight' => (int) $weight, 'thickness' => (int) $thickness, 'subtotal' => $subtotal];
+
+        $rows = [];
+        foreach ((new ShippingManager())->getModes() as $key => $mode) {
+            $r = ShippingManager::evaluate($mode, $zone, $metrics, $config, true);
+            $rows[] = [
+                'key'      => $key,
+                'name'     => $mode['name'],
+                'enabled'  => $mode['enabled'],
+                'offered'  => $r['quote'] !== null && $mode['enabled'],
+                'reason'   => $r['quote'] === null ? $r['reason'] : ($mode['enabled'] ? '' : 'Mode désactivé (non proposé au client).'),
+                'quote'    => $r['quote'],
+                'pickup'   => $mode['requires_pickup_point'],
+            ];
+        }
+
+        return ApiResponse::create(['metrics' => $metrics, 'rows' => $rows]);
+    }
+
+    /** POST /simple-shop/carriers/providers/{id}/test — contrôle de connexion du plugin transporteur. */
+    public function testCarrierProvider(ServerRequestInterface $request): ResponseInterface
+    {
+        $this->requirePermission($request, self::PERM_WRITE);
+
+        $id = (string) $this->getRouteParam($request, 'id');
+        $provider = (new ShippingManager())->getProviders()[$id] ?? null;
+        if ($provider === null) {
+            throw new NotFoundException("Transporteur inconnu : {$id}.");
+        }
+
+        try {
+            $result = $provider->testConnection();
+        } catch (\Throwable $e) {
+            $this->grav['log']->error("[SimpleShop][API] Test du transporteur {$id} : " . $e->getMessage());
+            $result = ['ok' => false, 'message' => 'Le test a échoué (voir le journal du serveur).'];
+        }
+
+        return ApiResponse::create(['id' => $id] + $result);
+    }
+
+    /**
+     * Lecture-modification-écriture de carriers.yaml sous verrou : le fichier est relu, modifié par `$change`, validé,
+     * puis écrit par fichier temporaire + renommage (jamais de fichier tronqué ; ancienne version en .bak).
+     *
+     * @param callable(array): array $change Reçoit le tableau `carriers` et retourne le nouveau.
+     */
+    private function updateCarriersFile(callable $change): void
+    {
+        $path = $this->carriersPath();
+        $dir = dirname($path);
+        if (!is_dir($dir) && !@mkdir($dir, 0755, true) && !is_dir($dir)) {
+            throw new \RuntimeException("Dossier inaccessible : {$dir}");
+        }
+
+        $lock = fopen($path . '.lock', 'c');
+        if ($lock === false || !flock($lock, LOCK_EX)) {
+            throw new \RuntimeException('Verrou de carriers.yaml indisponible.');
+        }
+
+        try {
+            $current = is_file($path) ? \Symfony\Component\Yaml\Yaml::parseFile($path) : [];
+            $carriers = is_array($current['carriers'] ?? null) ? $current['carriers'] : [];
+            $errors = CarrierConfig::save($path, CarrierConfig::dump($change($carriers)));
+            if ($errors !== []) {
+                throw new ValidationException('Configuration des transporteurs invalide.', ['carriers' => $errors]);
+            }
+        } finally {
+            flock($lock, LOCK_UN);
+            fclose($lock);
+        }
     }
 
     /** PUT /simple-shop/carriers — corps : {"yaml": "..."} ; validé avant écriture. */
