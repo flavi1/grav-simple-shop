@@ -281,7 +281,14 @@ class CartStorage
         return true;
     }
     
-    public static function toOrder(?string $paymentReference = null, ?bool &$created = null): string
+    /**
+     * @param string|null $paymentReference Référence du paiement (idempotence).
+     * @param bool|null   $created          Sortie : faux si la commande existait déjà.
+     * @param array|null  $snapshot         Commande en cours reconstituée SANS session
+     *                                      (webhook : cart_id, customer, shipping, billing,
+     *                                      voir PendingPayment) ; null = utiliser la session.
+     */
+    public static function toOrder(?string $paymentReference = null, ?bool &$created = null, ?array $snapshot = null): string
     {
         $created = true;
 
@@ -300,11 +307,14 @@ class CartStorage
         }
 
         $session = Grav::instance()['session'];
-        if (!isset($session->shop_order)) {
-            throw new \RuntimeException('Session de commande expirée.');
+        if ($snapshot !== null) {
+            $order = (object) $snapshot;
+        } else {
+            if (!isset($session->shop_order)) {
+                throw new \RuntimeException('Session de commande expirée.');
+            }
+            $order = $session->shop_order;
         }
-
-        $order = $session->shop_order;
         $cartId = $order->cart_id ?? null;
 
         if (!$cartId) {
@@ -419,8 +429,11 @@ class CartStorage
         // CartController::sendOrderEmails() (appel séparé, non lié).
         OrderManager::fireStatusChangedEvent(Grav::instance(), $orderReference, null, 'paid');
 
-        // Nettoyage de la session commande en cours
-        unset($session->shop_order);
+        // Nettoyage de la session commande en cours (jamais depuis un webhook :
+        // la session courante n'est pas celle du client).
+        if ($snapshot === null) {
+            unset($session->shop_order);
+        }
 
         return $orderReference;
     }

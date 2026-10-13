@@ -73,6 +73,19 @@ CREATE TABLE IF NOT EXISTS order_payment (
     FOREIGN KEY(order_reference) REFERENCES "order"(order_reference) ON DELETE CASCADE
 );
 
+-- 6bis. Instantanés de commande en attente de paiement. À chaque démarrage de
+-- paiement, la passerelle y enregistre ce qu'il faut pour créer la commande SANS
+-- session (cart_id, client, livraison, facturation, montant attendu) ; seul
+-- l'identifiant `snapshot_id` est confié à la passerelle (métadonnées Stripe).
+-- Le webhook s'en sert quand le client a quitté le site avant le retour.
+-- Purgés après 30 jours (voir PendingPayment::purge()).
+CREATE TABLE IF NOT EXISTS pending_payment (
+    snapshot_id TEXT PRIMARY KEY,
+    order_data TEXT NOT NULL,
+    amount_cents INTEGER NOT NULL,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+
 -- 7. Historique des changements de statut d'une commande (un changement =
 -- une ligne, y compris la création : old_status NULL -> 'paid'). `changed_by`
 -- identifie l'auteur d'un changement manuel (compte admin) ; NULL pour un

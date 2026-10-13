@@ -14,6 +14,7 @@ use Grav\Plugin\SimpleShop\Inventory\CartStorage;
 use Grav\Plugin\SimpleShop\Inventory\InventoryManager;
 use Grav\Plugin\SimpleShop\Services\AddressFields;
 use Grav\Plugin\SimpleShop\Services\CustomerManager;
+use Grav\Plugin\SimpleShop\Services\OrderFinalizer;
 use Grav\Plugin\SimpleShop\Services\OrderMailer;
 use \RocketTheme\Toolbox\Event\Event;
 
@@ -171,7 +172,11 @@ class CartController extends AbstractController
             $this->sendOrderEmails($orderNumber);
         }
 
-        if (isset($this->session->shop_order)) {
+        if (!$created) {
+            // Commande déjà créée (webhook arrivé avant le retour du client) :
+            // toOrder() n'a pas vidé la session, on le fait ici.
+            unset($this->session->shop_order);
+        } elseif (isset($this->session->shop_order)) {
             unset($this->session->shop_order->payment_sub_step, $this->session->shop_order->selected_gateway);
         }
         $this->session->shop_last_order = $orderNumber;
@@ -253,37 +258,7 @@ class CartController extends AbstractController
      */
     private function sendOrderEmails(string $orderReference): void
     {
-        try {
-            $db = InventoryManager::getDatabase();
-
-            $stmt = $db->prepare("SELECT * FROM \"order\" WHERE order_reference = :ref");
-            $stmt->execute([':ref' => $orderReference]);
-            $orderData = $stmt->fetch(\PDO::FETCH_ASSOC);
-
-            if (!$orderData) {
-                return;
-            }
-
-            $stmtItems = $db->prepare("SELECT * FROM order_item WHERE order_reference = :ref");
-            $stmtItems->execute([':ref' => $orderReference]);
-            $orderItems = $stmtItems->fetchAll(\PDO::FETCH_ASSOC);
-
-            $mailer = new OrderMailer($this->grav);
-            $mailer->sendOrderConfirmation($orderData, $orderItems);
-            $mailer->sendSellerNotification($orderData, $orderItems);
-        } catch (\Throwable $e) {
-            if (isset($this->grav['log'])) {
-                try {
-                    $this->grav['log']->error(
-                        '[SimpleShop][CartController] Erreur lors de l\'envoi des e-mails de commande '
-                        . "({$orderReference}) : " . $e->getMessage()
-                    );
-                } catch (\Throwable $inner) {
-                    // Ignoré : filet de sécurité, ne doit jamais faire échouer le tunnel.
-                }
-            }
-            error_log('[SimpleShop][CartController] ERROR: order emails failed for ' . $orderReference . ': ' . $e->getMessage());
-        }
+        OrderFinalizer::sendOrderEmails($this->grav, $orderReference);
     }
 
     public function step1Cart(): Response 
