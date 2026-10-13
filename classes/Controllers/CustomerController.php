@@ -7,6 +7,7 @@ use Grav\Plugin\Mvc\AbstractController;
 use Grav\Plugin\Mvc\Response;
 use Grav\Plugin\SimpleShop\Inventory\CartStorage;
 use Grav\Plugin\SimpleShop\Services\CustomerManager;
+use Grav\Plugin\SimpleShop\Services\OtpThrottle;
 use Symfony\Component\Mime\Address;
 
 /**
@@ -489,13 +490,10 @@ class CustomerController extends AbstractController
         }
 
         $manager->setCustomerData(['email' => $targetEmail]);
-        $manager->resetEmailVerification();
 
-        $code = $manager->getOrGenerateEmailVerificationCode($targetEmail);
-
-        if (!$this->sendOtpEmail($targetEmail, $code)) {
-            $this->addMessage("Erreur technique lors de l'envoi du mail de connexion.", 'error');
-
+        // Anti-spam (délai + plafonds) : voir deliverOtp(). Le message
+        // d'échec est déjà posé par deliverOtp().
+        if (!$this->deliverOtp($manager, $targetEmail, true)) {
             return $this->redirect($this->withBackUrl($identifyUrl, $backUrl), 303);
         }
 
@@ -721,13 +719,8 @@ class CustomerController extends AbstractController
 
             // Renvoi d'un nouveau code.
             if ($action === 'resend_code') {
-                $manager->resetEmailVerification();
-                $code = $manager->getOrGenerateEmailVerificationCode($email);
-
-                if ($this->sendOtpEmail($email, $code)) {
+                if ($this->deliverOtp($manager, $email, true)) {
                     $this->addMessage("Un nouveau code a été envoyé à l'adresse : {$email}", 'success');
-                } else {
-                    $this->addMessage("Erreur technique lors de l'envoi du code.", 'error');
                 }
 
                 return $this->redirect($this->withBackUrl($verifyUrl, $backUrl), 303);
@@ -762,12 +755,12 @@ class CustomerController extends AbstractController
 
         // GET : (ré)envoi automatique du code si nécessaire. À ce stade,
         // l'e-mail n'est JAMAIS déjà vérifié (voir garde-fou ci-dessus).
-        $code = $manager->getOrGenerateEmailVerificationCode($email);
-
-        if ($this->sendOtpEmail($email, $code)) {
+        // Un simple rechargement de la page ne doit JAMAIS renvoyer d'e-mail :
+        // on n'envoie que s'il n'y a pas déjà un code valide pour cette adresse.
+        if (!$manager->hasPendingOtp($email)
+            && $this->deliverOtp($manager, $email, false)
+        ) {
             $this->addMessage("Un code de vérification a été envoyé à l'adresse : {$email}", 'info');
-        } else {
-            $this->addMessage("Erreur technique lors de l'envoi du code.", 'error');
         }
 
         // Rendu de la page de vérification. `email_verified` est toujours
@@ -782,6 +775,85 @@ class CustomerController extends AbstractController
             'customer'           => $manager->getCustomerData(),
             'simple_shop_config' => $this->shopConfig(),
         ]);
+    }
+
+    /**
+     * Envoie un code OTP en appliquant l'anti-spam, 100 % côté serveur.
+     *
+     * Ordre des contrôles (tout refus pose un message flash neutre et
+     * retourne faux, SANS rien envoyer ni invalider le code en cours) :
+     *  1. délai minimal entre deux envois pour la session
+     *     (`plugins.simple-shop.otp.resend_delay`, 60 s) ;
+     *  2. plafonds par adresse destinataire et par IP sur une heure
+     *     ({@see OtpThrottle}, indépendants de la session).
+     *
+     * @param CustomerManager $manager Gestionnaire de session client.
+     * @param string          $email   Adresse destinataire (déjà validée).
+     * @param bool            $newCode Vrai pour invalider le code en cours et
+     *                                 en générer un nouveau ; faux pour
+     *                                 réutiliser un code encore valide.
+     *
+     * @return bool Vrai si un e-mail a été envoyé.
+     */
+    private function deliverOtp(CustomerManager $manager, string $email, bool $newCode): bool
+    {
+        $remaining = $manager->otpCooldownRemaining();
+        if ($remaining > 0) {
+            $this->addMessage(
+                "Un code vient d'être envoyé. Patientez encore {$remaining} seconde(s) avant d'en demander un nouveau.",
+                'error'
+            );
+
+            return false;
+        }
+
+        $reason = $this->otpThrottle()->acquire($email, $this->clientIp());
+        if ($reason !== null) {
+            $this->log('error', "Envoi OTP refusé (plafond horaire atteint, motif : {$reason}).");
+            $this->addMessage('Trop de demandes de code. Merci de réessayer plus tard.', 'error');
+
+            return false;
+        }
+
+        if ($newCode) {
+            $manager->resetEmailVerification();
+        }
+
+        $code = $manager->getOrGenerateEmailVerificationCode($email);
+
+        if (!$this->sendOtpEmail($email, $code)) {
+            $this->addMessage("Erreur technique lors de l'envoi du code.", 'error');
+
+            return false;
+        }
+
+        $manager->markOtpSent();
+
+        return true;
+    }
+
+    /**
+     * Construit le limiteur d'envois OTP (fichier JSON dans `user://data/simple-shop/`).
+     */
+    private function otpThrottle(): OtpThrottle
+    {
+        $config = $this->grav['config'];
+        $dir    = $this->grav['locator']->findResource('user://data/simple-shop', true, true);
+
+        return new OtpThrottle(
+            $dir . '/otp-throttle.json',
+            $this->unsubscribeSecret(),
+            (int) $config->get('plugins.simple-shop.otp.max_per_email_hour', 5),
+            (int) $config->get('plugins.simple-shop.otp.max_per_ip_hour', 20)
+        );
+    }
+
+    /**
+     * Adresse IP du client (Grav tient compte de `system.http_x_forwarded`).
+     */
+    private function clientIp(): string
+    {
+        return (string) $this->grav['uri']->ip();
     }
 
     /**

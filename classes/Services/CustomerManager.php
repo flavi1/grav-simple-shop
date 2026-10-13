@@ -274,12 +274,53 @@ class CustomerManager
     }
 
     /**
-     * Vérifie si un nouveau code peut être demandé (anti-spam / délai minimal de 60s).
+     * Délai minimal (en secondes) entre deux envois de code pour une même
+     * session. Configurable : `plugins.simple-shop.otp.resend_delay`.
+     */
+    public function otpResendDelay(): int
+    {
+        return max(0, (int) $this->grav['config']->get('plugins.simple-shop.otp.resend_delay', 60));
+    }
+
+    /**
+     * Secondes à attendre avant de pouvoir redemander un code (0 = tout de suite).
+     */
+    public function otpCooldownRemaining(): int
+    {
+        $lastSent = (int) ($this->session->shop_order->email_verification_last_sent ?? 0);
+
+        return max(0, $this->otpResendDelay() - (time() - $lastSent));
+    }
+
+    /**
+     * Vérifie si un nouveau code peut être demandé (anti-spam : délai minimal
+     * entre deux envois, 60 s par défaut).
      */
     public function canRequestNewOtp(): bool
     {
-        $lastSent = $this->session->shop_order->email_verification_last_sent ?? 0;
-        return (time() - $lastSent) >= 60;
+        return $this->otpCooldownRemaining() === 0;
+    }
+
+    /**
+     * Mémorise l'instant du dernier envoi effectif d'un code (point de départ
+     * du délai anti-spam). À appeler après chaque e-mail réellement envoyé.
+     */
+    public function markOtpSent(): void
+    {
+        $this->session->shop_order->email_verification_last_sent = time();
+    }
+
+    /**
+     * Indique si un code encore valide (non expiré) a déjà été émis pour cette
+     * adresse. Sert à ne pas renvoyer d'e-mail à chaque rechargement de page.
+     */
+    public function hasPendingOtp(string $targetEmail): bool
+    {
+        $code      = $this->session->shop_order->email_verification_code ?? null;
+        $target    = $this->session->shop_order->email_verification_target ?? '';
+        $expiresAt = (int) ($this->session->shop_order->email_verification_expires_at ?? 0);
+
+        return !empty($code) && $target === $targetEmail && time() <= $expiresAt;
     }
 
     /**
@@ -305,7 +346,6 @@ class CustomerManager
             $this->session->shop_order->email_verified = false;
             $this->session->shop_order->email_verification_attempts = 0;
             $this->session->shop_order->email_verification_expires_at = time() + 600; // TTL 10 minutes
-            $this->session->shop_order->email_verification_last_sent = time();
 
             return $code;
         }
