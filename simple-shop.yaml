@@ -13,6 +13,7 @@ routes:
   validation: '/checkout/email'
   delivery: '/checkout/delivery'
   payment: '/checkout/payment'
+  payment_return: '/checkout/payment-return'
   confirmation: '/checkout/confirmation'
   identify: '/identify'
   account: '/mon-compte'

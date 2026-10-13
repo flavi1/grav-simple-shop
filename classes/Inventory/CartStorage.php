@@ -281,8 +281,24 @@ class CartStorage
         return true;
     }
     
-    public static function toOrder(): string
+    public static function toOrder(?string $paymentReference = null, ?bool &$created = null): string
     {
+        $created = true;
+
+        // IDEMPOTENCE : si ce paiement a déjà donné lieu à une commande
+        // (rechargement de la page de retour, retour arrière, double clic),
+        // on renvoie la commande existante SANS rien recréer (ni déstockage,
+        // ni événement) ; l'appelant sait via `$created` qu'il ne doit pas
+        // renvoyer d'e-mails.
+        if ($paymentReference !== null && $paymentReference !== '') {
+            $existing = self::findOrderByPaymentReference($paymentReference);
+            if ($existing !== null) {
+                $created = false;
+
+                return $existing;
+            }
+        }
+
         $session = Grav::instance()['session'];
         if (!isset($session->shop_order)) {
             throw new \RuntimeException('Session de commande expirée.');
@@ -333,6 +349,17 @@ class CartStorage
                 ':total'    => $totalAmount
             ]);
 
+            // Rattachement du paiement à la commande : la clé primaire garantit
+            // qu'un même paiement ne crée jamais deux commandes (deux requêtes
+            // simultanées : la seconde échoue ici et est traitée plus bas).
+            if ($paymentReference !== null && $paymentReference !== '') {
+                $stmtPay = $db->prepare("
+                    INSERT INTO order_payment (payment_reference, order_reference)
+                    VALUES (:pay, :ref)
+                ");
+                $stmtPay->execute([':pay' => $paymentReference, ':ref' => $orderReference]);
+            }
+
             // Insertion des articles de la commande
             $stmtItem = $db->prepare("
                 INSERT INTO order_item (order_reference, product_route, title, price, quantity)
@@ -355,6 +382,18 @@ class CartStorage
             $db->commit();
         } catch (\Exception $e) {
             $db->rollBack();
+
+            // Course perdue contre une requête simultanée portant sur le même
+            // paiement : la commande existe déjà, on la renvoie.
+            if ($paymentReference !== null && $paymentReference !== '') {
+                $existing = self::findOrderByPaymentReference($paymentReference);
+                if ($existing !== null) {
+                    $created = false;
+
+                    return $existing;
+                }
+            }
+
             throw new \RuntimeException("Erreur lors de la persistance de la commande : " . $e->getMessage());
         }
 
@@ -377,5 +416,20 @@ class CartStorage
         unset($session->shop_order);
 
         return $orderReference;
+    }
+
+    /**
+     * Retrouve la commande déjà créée pour une référence de paiement.
+     *
+     * @return string|null La référence de commande, ou null s'il n'y en a pas.
+     */
+    public static function findOrderByPaymentReference(string $paymentReference): ?string
+    {
+        $db = InventoryManager::getDatabase();
+        $stmt = $db->prepare("SELECT order_reference FROM order_payment WHERE payment_reference = :pay");
+        $stmt->execute([':pay' => $paymentReference]);
+        $ref = $stmt->fetchColumn();
+
+        return $ref !== false ? (string) $ref : null;
     }
 }

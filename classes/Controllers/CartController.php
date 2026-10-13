@@ -8,6 +8,7 @@ use Grav\Common\Utils;
 use Grav\Plugin\Mvc\AbstractController;
 use Grav\Plugin\Mvc\Response;
 use Grav\Plugin\SimpleShop\Delivery\ZoneResolver;
+use Grav\Plugin\SimpleShop\Gateways\RedirectPaymentGatewayInterface;
 use Grav\Plugin\SimpleShop\Delivery\ShippingManager;
 use Grav\Plugin\SimpleShop\Inventory\CartStorage;
 use Grav\Plugin\SimpleShop\Inventory\InventoryManager;
@@ -115,6 +116,120 @@ class CartController extends AbstractController
         }
 
         return $adjustments;
+    }
+
+    /**
+     * Total à régler (articles + livraison), recalculé côté serveur.
+     *
+     * @param array|object $shippingData Livraison choisie (clé `price`).
+     */
+    private function computeBillingTotal($shippingData): float
+    {
+        $shippingData = (array) $shippingData;
+        $subtotal = 0.0;
+        foreach (CartStorage::getCart() as $item) {
+            $subtotal += ($item['price'] ?? 0.0) * ($item['quantity'] ?? 0);
+        }
+
+        return $subtotal + (float) ($shippingData['price'] ?? 0);
+    }
+
+    /**
+     * Étape commune après un paiement vérifié : création IDEMPOTENTE de la
+     * commande, e-mails (une seule fois), puis redirection serveur vers la
+     * confirmation (plus de page auto-soumise en JavaScript).
+     *
+     * @param array $paymentResult Résultat de la passerelle
+     *                             (`payment_reference` rend la création idempotente).
+     */
+    private function finalizeOrder(array $paymentResult): Response
+    {
+        $config = $this->grav['config']->get('plugins.simple-shop');
+        $reference = (string) ($paymentResult['payment_reference'] ?? '');
+        $created = true;
+
+        try {
+            $orderNumber = CartStorage::toOrder($reference !== '' ? $reference : null, $created);
+        } catch (\Throwable $e) {
+            // Paiement vérifié mais commande non enregistrée : cas grave,
+            // journalisé avec la référence de paiement pour reprise manuelle.
+            $this->grav['log']->error('[SimpleShop] Paiement vérifié mais commande non créée (paiement '
+                . ($reference !== '' ? $reference : 'sans référence') . ') : ' . $e->getMessage());
+            $this->addMessage(
+                "Votre paiement a été reçu mais votre commande n'a pas pu être enregistrée. "
+                . "Ne payez pas une seconde fois : contactez-nous"
+                . ($reference !== '' ? " en indiquant la référence de paiement {$reference}." : '.'),
+                'error'
+            );
+
+            return $this->redirect($this->grav['base_url_absolute'] . ($config['routes']['cart'] ?? '/cart'), 303);
+        }
+
+        // E-mails de commande : uniquement à la création (jamais si la
+        // commande existait déjà). Volontairement non bloquant.
+        if ($created) {
+            $this->sendOrderEmails($orderNumber);
+        }
+
+        if (isset($this->session->shop_order)) {
+            unset($this->session->shop_order->payment_sub_step, $this->session->shop_order->selected_gateway);
+        }
+        $this->session->shop_last_order = $orderNumber;
+
+        $confirmationRoute = $config['routes']['confirmation'] ?? '/checkout/confirmation';
+
+        return $this->redirect($this->grav['base_url_absolute'] . $confirmationRoute, 303);
+    }
+
+    /**
+     * Point de retour des paiements avec redirection (page hébergée, 3-D
+     * Secure…). Le retour est TOUJOURS vérifié auprès de la passerelle avant
+     * de créer la commande (voir RedirectPaymentGatewayInterface).
+     */
+    public function step3PaymentReturn(): Response
+    {
+        $config = $this->grav['config']->get('plugins.simple-shop');
+        $cartUrl = $this->grav['base_url_absolute'] . ($config['routes']['cart'] ?? '/cart');
+        $paymentUrl = $this->grav['base_url_absolute'] . ($config['routes']['payment'] ?? '/checkout/payment');
+
+        $order = $this->session->shop_order ?? null;
+        $query = $this->request()->getQueryParams();
+
+        if (!$order || empty($order->selected_gateway)) {
+            // Session perdue pendant le paiement (cookie supprimé, expiration).
+            $ref = (string) ($query['payment_intent'] ?? $query['session_id'] ?? '');
+            $this->grav['log']->error('[SimpleShop] Retour de paiement sans session' . ($ref !== '' ? " (référence {$ref})" : '') . '.');
+            $this->addMessage(
+                "Votre session a expiré pendant le paiement. Si une somme a été débitée, ne payez pas une seconde fois : "
+                . "contactez-nous" . ($ref !== '' ? " en indiquant la référence {$ref}." : '.'),
+                'error'
+            );
+
+            return $this->redirect($cartUrl, 303);
+        }
+
+        $gateways = [];
+        $this->grav->fireEvent('onSimpleShopRegisterGateways', new Event(['gateways' => &$gateways]));
+        $gateway = $gateways[$order->selected_gateway] ?? null;
+
+        if (!$gateway instanceof RedirectPaymentGatewayInterface) {
+            return $this->redirect($paymentUrl, 303);
+        }
+
+        $result = $gateway->confirmReturn($query, (array) $order);
+
+        if (!empty($result['success'])) {
+            return $this->finalizeOrder($result);
+        }
+
+        $order->payment_sub_step = 'billing';
+        if (!empty($result['cancelled'])) {
+            $this->addMessage("Le paiement a été annulé. Vous pouvez choisir un autre moyen de paiement ou réessayer.", 'notice');
+        } else {
+            $this->addMessage("Le paiement n'a pas abouti : " . ($result['error'] ?? 'raison inconnue.'), 'error');
+        }
+
+        return $this->redirect($paymentUrl, 303);
     }
 
     /**
@@ -580,38 +695,39 @@ class CartController extends AbstractController
 				$result = $gateway->processPayment($_POST);
 
 				if ($result['success']) {
-					// Transformation du panier en commande persistée et récupération de son ID
-					$orderNumber = CartStorage::toOrder();
-
-					// Envoi des e-mails de commande (confirmation client +
-					// notification vendeur). Volontairement non bloquant :
-					// un échec d'envoi ne doit jamais empêcher l'affichage
-					// de la confirmation au client (commande déjà persistée).
-					$this->sendOrderEmails($orderNumber);
-
-					// Nettoyage de l'état temporaire du paiement
-					unset($order->payment_sub_step);
-					unset($order->selected_gateway);
-
-					// Préparation d'une redirection POST simulée (ou route directe) vers l'étape 4 (Confirmation)
-					$confirmationRoute = $config['routes']['confirmation'] ?? '/checkout/confirmation';
-
-					$confirmationUrl = $this->grav['base_url_absolute'] . $confirmationRoute;
-					$safeOrderId = htmlspecialchars($orderNumber, ENT_QUOTES);
-
-					$html  = "<!DOCTYPE html><html><head><meta charset='utf-8'><title>Redirection...</title></head><body>";
-					$html .= "<form id='redirect_form' method='POST' action='" . $confirmationUrl . "'>";
-					$html .= "<input type='hidden' name='order_id' value='" . $safeOrderId . "'>";
-					$html .= "</form><script>document.getElementById('redirect_form').submit();</script>";
-					$html .= "</body></html>";
-
-					return $this->html($html)->useDefaultLayout(false);
+					return $this->finalizeOrder($result);
 				} else {
 					// Échec du paiement : retour au Temps 1 avec le message d'erreur
 					$this->addMessage("Le paiement a échoué : " . ($result['error'] ?? 'Raison inconnue.'), 'error');
 					$order->payment_sub_step = 'billing';
 					return $this->redirect($this->grav['uri']->route());
 				}
+			}
+
+			// --- Paiement hébergé (mode sans JavaScript, ou méthode à redirection) ---
+			if ($action === 'start_hosted_payment') {
+				$currentGatewayKey = $order->selected_gateway ?? null;
+				$gateway = $currentGatewayKey ? ($gateways[$currentGatewayKey] ?? null) : null;
+
+				if (!$gateway instanceof RedirectPaymentGatewayInterface) {
+					$order->payment_sub_step = 'billing';
+					$this->addMessage("Ce moyen de paiement ne permet pas le paiement sans JavaScript.", 'error');
+					return $this->redirect($this->grav['uri']->route());
+				}
+
+				// Total recalculé côté serveur au moment du paiement.
+				$order->billing_total = $this->computeBillingTotal($shippingData);
+
+				$returnUrl = $this->grav['base_url_absolute']
+					. ($config['routes']['payment_return'] ?? '/checkout/payment-return');
+
+				$started = $gateway->startHostedPayment((array) $order, $returnUrl);
+				if (!empty($started['url'])) {
+					return $this->redirect((string) $started['url'], 303);
+				}
+
+				$this->addMessage("Impossible de démarrer le paiement : " . ($started['error'] ?? 'erreur inconnue.'), 'error');
+				return $this->redirect($this->grav['uri']->route());
 			}
 
 			// --- Action : Retour en arrière au Temps 1 ---
@@ -638,11 +754,7 @@ class CartController extends AbstractController
 
 		// Récupération du panier pour le calcul du total de facturation
 		$cart = CartStorage::getCart();
-		$subtotal = 0;
-		foreach ($cart as $item) {
-			$subtotal += ($item['price'] ?? 0.0) * ($item['quantity'] ?? 0);
-		}
-		$order->billing_total = $subtotal + ($shippingData['price'] ?? 0);
+		$order->billing_total = $this->computeBillingTotal($shippingData);
 
 		$gatewayHtml = '';
 		if ($subStep === 'gateway_form' && !empty($order->selected_gateway)) {
@@ -674,13 +786,17 @@ class CartController extends AbstractController
 
     public function step4ConfirmationOrder(): Response 
 	{
-		$orderReference = filter_input(INPUT_POST, 'order_id', FILTER_DEFAULT) 
-			?? filter_input(INPUT_GET, 'order_id', FILTER_DEFAULT);
+		// La référence vient de la SESSION (posée par finalizeOrder() quand la
+		// commande vient d'être créée), jamais de l'URL : sinon n'importe qui
+		// connaissant ou devinant une référence verrait nom et adresse du
+		// client. Un éventuel paramètre `order_id` n'est accepté que s'il
+		// correspond à la commande de cette session.
+		$orderReference = (string) ($this->session->shop_last_order ?? '');
+		$requested = (string) ($this->post('order_id', FILTER_DEFAULT, $this->get('order_id', FILTER_DEFAULT, '')) ?? '');
 
-		if (!$orderReference) {
-			$this->addMessage("Aucune référence de commande spécifiée.", 'error');
-			$this->grav->redirect($this->grav['base_url_absolute'] . '/cart');
-			exit;
+		if ($orderReference === '' || ($requested !== '' && $requested !== $orderReference)) {
+			$this->addMessage("Aucune commande à afficher pour cette session.", 'error');
+			return $this->redirect($this->grav['base_url_absolute'] . '/cart');
 		}
 
 		$db = InventoryManager::getDatabase();
