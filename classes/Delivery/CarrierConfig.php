@@ -59,6 +59,16 @@ class CarrierConfig
                 $errors[] = "{$where} : enabled doit valoir true ou false.";
             }
 
+            foreach (['fixed', 'percent'] as $m) {
+                $v = $carrier['margin'][$m] ?? null;
+                if ($v !== null && (!is_numeric($v) || $v < 0)) {
+                    $errors[] = "{$where} : margin.{$m} doit être un nombre positif ou nul.";
+                }
+            }
+            if (isset($carrier['margin']) && !is_array($carrier['margin'])) {
+                $errors[] = "{$where} : margin doit être un bloc (fixed, percent).";
+            }
+
             foreach (['max_weight', 'max_thickness'] as $limit) {
                 $v = $carrier['constraints'][$limit] ?? null;
                 if ($v !== null && !is_numeric($v)) {

@@ -26,6 +26,14 @@ delivery:
   allowed_zones:
     - FR-METRO
   unsupported_message: ''
+  # Les prix de carriers.yaml sont saisis hors taxe (`ht`, la TVA du site est ajoutée) ou toutes taxes comprises (`ttc`).
+  prices_entered: ht
+  # Lien de suivi du colis envoyé au client ({number} = numéro de suivi ; https obligatoire). Valable pour Colissimo et la lettre suivie.
+  tracking_url: 'https://www.laposte.fr/outils/suivre-vos-envois?code={number}'
+  # Emballage ajouté à chaque commande pour choisir le transporteur (valeurs de départ, à ajuster par pesée).
+  packaging:
+    weight: 40            # grammes
+    thickness: 6          # millimètres
   # Plancher légal des frais de livraison de livres (loi Darcos, en vigueur depuis le 7/10/2023).
   # Montants TTC ; le seuil se compare au prix des livres de la commande, hors livraison.
   book_law:

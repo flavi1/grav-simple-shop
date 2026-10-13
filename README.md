@@ -87,6 +87,17 @@ créée et l'incident est journalisé pour rapprochement manuel. Configuration p
   (3,00 €) ; à partir de `threshold`, minimum `at_or_above` (0,01 €). Appliqué dans `ShippingManager::getAvailableCarriers` ;
   un mode peut s'en exclure avec `legal_floor: false` (retrait sur place). À faire valider juridiquement.
 
+### Prix de livraison (`carriers.yaml`)
+
+Chaîne de calcul d'un mode : **prix du palier (HT par défaut, `delivery.prices_entered`) + marge** (`margin: {fixed, percent}` sur le mode ; pas de marge sur un palier à 0)
+**→ TVA du site → plancher légal (Darcos) → arrondi au centime**. L'emballage (`delivery.packaging`, 40 g et 6 mm par défaut) est ajouté au poids et à l'épaisseur du panier
+(les épaisseurs des exemplaires s'additionnent) avant le choix des modes. Voir `ShippingManager::priceTtc()`.
+
+### Suivi de colis
+
+Numéro saisi dans Admin2 (`PATCH /orders/{reference}/tracking`, table `order_tracking`), repris dans l'e-mail « expédiée » avec le lien `delivery.tracking_url`
+(défaut : suivi La Poste). À saisir avant de passer la commande en « Expédiée ».
+
 ## Commandes, factures, événements
 
 - `Orders\OrderManager` : statuts (`paid`, `processing`, `shipped`,

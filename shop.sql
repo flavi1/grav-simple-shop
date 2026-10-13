@@ -100,3 +100,12 @@ CREATE TABLE IF NOT EXISTS order_status_history (
     FOREIGN KEY(order_reference) REFERENCES "order"(order_reference) ON DELETE CASCADE
 );
 CREATE INDEX IF NOT EXISTS idx_order_status_history_order ON order_status_history(order_reference);
+
+-- 8. Numéro de suivi du colis (saisi dans l'administration, repris dans l'e-mail « expédiée »)
+CREATE TABLE IF NOT EXISTS order_tracking (
+    order_reference TEXT PRIMARY KEY,
+    tracking_number TEXT NOT NULL,
+    updated_by TEXT,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY(order_reference) REFERENCES "order"(order_reference) ON DELETE CASCADE
+);

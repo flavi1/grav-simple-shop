@@ -229,7 +229,14 @@ class OrderMailer
      */
     private function buildOrderVars(array $orderData, array $orderItems, string $siteName): array
     {
+        $tracking = \Grav\Plugin\SimpleShop\Orders\OrderManager::getTracking((string) ($orderData['order_reference'] ?? ''));
+
         return [
+            'tracking_number' => $tracking,
+            'tracking_url'    => $tracking === null ? null : \Grav\Plugin\SimpleShop\Orders\OrderManager::trackingUrl(
+                $tracking,
+                (array) $this->grav['config']->get('plugins.simple-shop', [])
+            ),
             'site_name'       => $siteName,
             'order_reference' => $orderData['order_reference'] ?? '',
             'order_date'      => $orderData['created_at'] ?? '',

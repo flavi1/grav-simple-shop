@@ -115,6 +115,21 @@ form:
           type: textarea
           label: Message si la destination n'est pas desservie
           help: "Laissez vide pour le message par défaut."
+        delivery.prices_entered:
+          type: select
+          label: "Prix de carriers.yaml"
+          help: "Hors taxe : la TVA du site (5,5 %) est ajoutée automatiquement, avant le plancher légal."
+          default: ht
+          options: { ht: "Hors taxe (HT)", ttc: "Toutes taxes comprises (TTC)" }
+        delivery.packaging.weight:
+          type: number
+          label: "Poids de l'emballage par commande (g)"
+          help: "Valeur de départ non vérifiée : à ajuster en pesant votre emballage habituel."
+          default: 40
+        delivery.packaging.thickness:
+          type: number
+          label: "Épaisseur de l'emballage par commande (mm)"
+          default: 6
         delivery.book_law.enabled:
           type: toggle
           label: "Plancher légal des frais de livraison de livres (loi Darcos)"

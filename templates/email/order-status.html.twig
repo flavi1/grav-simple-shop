@@ -9,6 +9,7 @@
     order_items) plus :
       - new_status       (string) Clé technique du statut (shipped, cancelled…).
       - new_status_label (string) Libellé lisible (« Expédiée »…).
+      - tracking_number / tracking_url (?string) Suivi du colis, s'il a été saisi dans l'administration.
 #}
 {% extends 'email/base.html.twig' %}
 
@@ -22,6 +23,12 @@
     Bonne nouvelle : votre commande <strong>{{ order_reference }}</strong> a été <strong>expédiée</strong>.
     {% if shipping.name|default('') %}Mode de livraison : {{ shipping.name }}.{% endif %}
 </p>
+{% if tracking_number %}
+<p>
+    Numéro de suivi : <strong>{{ tracking_number }}</strong><br>
+    <a href="{{ tracking_url }}">Suivre mon colis</a>
+</p>
+{% endif %}
 {% elseif new_status == 'cancelled' %}
 <p>
     Votre commande <strong>{{ order_reference }}</strong> a été <strong>annulée</strong>.
