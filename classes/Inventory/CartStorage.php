@@ -358,6 +358,14 @@ class CartStorage
             throw new \RuntimeException("Erreur lors de la persistance de la commande : " . $e->getMessage());
         }
 
+        // Déstockage automatique (décision : option « a ») : le panier vient
+        // d'être supprimé, donc sa réservation disparaît ; le stock physique
+        // (`product_quantity`) baisse au même instant. Un échec d'écriture est
+        // journalisé mais ne remet pas en cause la commande déjà enregistrée.
+        foreach ($cartItems as $route => $item) {
+            InventoryManager::decrementPhysicalStock((string) $route, (int) ($item['quantity'] ?? 0));
+        }
+
         // Déclenchement de l'événement `onSimpleShopOrderStatusChanged` dès la
         // création de la commande (statut initial 'paid', voir
         // OrderManager::fireStatusChangedEvent()). Tout écouteur tiers
