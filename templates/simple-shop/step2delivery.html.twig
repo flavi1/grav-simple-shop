@@ -8,7 +8,72 @@
     <div class="delivery-layout">
         {# Colonne Principale : Sélection du Transporteur #}
         <div class="delivery-main">
-            {% if carriers is empty %}
+            {% if pickup is defined and pickup %}
+                {# ---------- Sous-étape : choix du point de retrait (sans JavaScript) ---------- #}
+                <h2 id="pickup-title">Choisissez votre point de retrait</h2>
+                <p>
+                    <strong>{{ pickup.carrier.name }}</strong> —
+                    {{ pickup.carrier.price == 0 ? 'Gratuit' : pickup.carrier.price|number_format(2, ',', ' ') ~ ' €' }}
+                </p>
+
+                {% if pickup.error %}
+                    <div class="delivery-error-box" role="alert"><p>{{ pickup.error }}</p></div>
+                {% else %}
+                    <form action="{{ base_url_absolute ~ grav.uri.path() }}" method="GET" class="pickup-search" aria-labelledby="pickup-title">
+                        <fieldset>
+                            <legend>Chercher près d'une autre adresse</legend>
+                            <label for="pickup_zip">Code postal</label>
+                            <input type="text" id="pickup_zip" name="pickup_zip" inputmode="numeric" pattern="[0-9]{5}" maxlength="5" value="{{ pickup.search['postal-code'] }}" required>
+                            <label for="pickup_city">Commune</label>
+                            <input type="text" id="pickup_city" name="pickup_city" maxlength="50" value="{{ pickup.search.city }}" required>
+                            <button type="submit" class="btn">Rechercher</button>
+                        </fieldset>
+                    </form>
+
+                    {% if pickup.points is empty %}
+                        <div class="delivery-error-box" role="status">
+                            <p>Aucun point de retrait n'a été trouvé près de {{ pickup.search['postal-code'] }} {{ pickup.search.city }}. Essayez une autre commune ou choisissez un autre mode de livraison.</p>
+                        </div>
+                    {% else %}
+                        <form action="{{ base_url_absolute ~ grav.uri.path() }}" method="POST" class="delivery-form pickup-form">
+                            {{ nonce_field('shop-delivery-action')|raw }}
+                            <input type="hidden" name="action" value="select_pickup">
+                            <fieldset class="carriers-list">
+                                <legend>Points de retrait proches de {{ pickup.search['postal-code'] }} {{ pickup.search.city }}</legend>
+                                {% for point in pickup.points %}
+                                    <label class="carrier-option">
+                                        <span class="carrier-input-wrapper">
+                                            <input type="radio" name="pickup_point" value="{{ point.id }}" {% if loop.first %}checked{% endif %} required>
+                                        </span>
+                                        <span class="carrier-details">
+                                            <strong class="carrier-name">{{ point.name }}</strong>
+                                            <span class="carrier-description field-help">
+                                                {{ point.street }}, {{ point['postal-code'] }} {{ point.city }}
+                                                {% if point.distance_m is not null and point.distance_m >= 0 %} — à {{ point.distance_m < 1000 ? point.distance_m ~ ' m' : (point.distance_m / 1000)|number_format(1, ',', ' ') ~ ' km' }}{% endif %}
+                                            </span>
+                                            {% if point.hours %}
+                                                <span class="field-help">
+                                                    {% for day, text in point.hours %}{{ day }} {{ text }}{% if not loop.last %} · {% endif %}{% endfor %}
+                                                </span>
+                                            {% endif %}
+                                        </span>
+                                    </label>
+                                {% endfor %}
+                            </fieldset>
+                            <div class="form-actions">
+                                <button type="submit" class="btn btn-submit-delivery">Valider ce point et continuer vers le paiement</button>
+                            </div>
+                        </form>
+                    {% endif %}
+                {% endif %}
+
+                <form action="{{ base_url_absolute ~ grav.uri.path() }}" method="POST" class="delivery-form">
+                    {{ nonce_field('shop-delivery-action')|raw }}
+                    <input type="hidden" name="action" value="change_shipping">
+                    <button type="submit" class="btn btn-back">Choisir un autre mode de livraison</button>
+                </form>
+
+            {% elseif carriers is empty %}
                 <div class="delivery-error-box">
                     <p>Désolé, aucun mode de livraison n'est disponible pour votre destination ou le gabarit de votre commande.</p>
                     <p class="field-help">Veuillez vérifier votre adresse ou contacter notre service client.</p>
@@ -30,7 +95,7 @@
                                 </span>
                                 <span class="carrier-details">
                                     <strong class="carrier-name">{{ carrier.name }}</strong>
-                                    <span class="carrier-description field-help">{{ carrier.description }}</span>
+                                    <span class="carrier-description field-help">{{ carrier.description }}{% if carrier.requires_pickup_point %} Vous choisirez le point de retrait à l'étape suivante.{% endif %}</span>
                                 </span>
                                 <span class="carrier-price">
                                     {% if carrier.price == 0 %}
@@ -48,7 +113,7 @@
                             « Retour à la validation de l'e-mail
                         </a>
                         <button type="submit" class="btn btn-submit-delivery">
-                            Continuer vers le paiement
+                            {{ carriers[current_shipping.key|default('')].requires_pickup_point|default(false) ? 'Choisir le point de retrait' : 'Continuer vers le paiement' }}
                         </button>
                     </div>
                 </form>

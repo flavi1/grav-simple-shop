@@ -534,30 +534,68 @@ class CartController extends AbstractController
 		$zone = ZoneResolver::resolve($customerData);
 		$availableCarriers = $shippingManager->getAvailableCarriers($zone, $metrics);
 
+		$order = $this->session->shop_order;
+
 		if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 			
 			$action = filter_input(INPUT_POST, 'action', FILTER_DEFAULT);
 			$nonce = filter_input(INPUT_POST, 'nonce', FILTER_DEFAULT);
-			
-			if ($action === 'select_shipping') {
-				if (!$nonce || !Utils::verifyNonce($nonce, 'shop-delivery-action')) {
-					$this->addMessage("Votre session de livraison a expiré, veuillez réessayer.", 'error');
-					$this->grav->redirect($absoluteDeliveryUrl);
-					exit;
-				}
 
+			if (in_array($action, ['select_shipping', 'select_pickup', 'change_shipping'], true)
+				&& (!$nonce || !Utils::verifyNonce($nonce, 'shop-delivery-action'))) {
+				$this->addMessage("Votre session de livraison a expiré, veuillez réessayer.", 'error');
+				return $this->redirect($absoluteDeliveryUrl);
+			}
+
+			if ($action === 'select_shipping') {
 				$selectedCarrierKey = filter_input(INPUT_POST, 'shipping_method', FILTER_DEFAULT);
 
 				if (!$selectedCarrierKey || !isset($availableCarriers[$selectedCarrierKey])) {
 					$this->addMessage("Veuillez sélectionner un mode de livraison valide parmi les options proposées.", 'error');
-					$this->grav->redirect($absoluteDeliveryUrl);
-					exit;
+					return $this->redirect($absoluteDeliveryUrl);
 				}
 
-				$this->session->shop_order->shipping = $availableCarriers[$selectedCarrierKey];
-				
-				$this->grav->redirect($this->grav['base_url_absolute'] . $nextStepRoute);
-				exit;
+				$selected = $availableCarriers[$selectedCarrierKey];
+
+				if (!empty($selected['requires_pickup_point'])) {
+					// Mode « point de retrait » : le client choisit le point à la sous-étape suivante (même page).
+					// Un choix déjà fait pour ce même mode est conservé tant qu'il reste valable.
+					$current = (array) ($order->shipping ?? []);
+					$order->pending_shipping = $selected;
+					if (($current['key'] ?? null) !== $selectedCarrierKey) {
+						unset($order->shipping);
+					}
+					return $this->redirect($absoluteDeliveryUrl);
+				}
+
+				unset($order->pending_shipping, $order->pickup_cache);
+				$order->shipping = $selected;
+
+				return $this->redirect($this->grav['base_url_absolute'] . $nextStepRoute);
+			}
+
+			if ($action === 'change_shipping') {
+				unset($order->pending_shipping);
+				return $this->redirect($absoluteDeliveryUrl);
+			}
+
+			if ($action === 'select_pickup') {
+				$pending = (array) ($order->pending_shipping ?? []);
+				$cache = (array) ($order->pickup_cache ?? []);
+				$pointId = trim((string) filter_input(INPUT_POST, 'pickup_point', FILTER_DEFAULT));
+
+				// Le point doit figurer dans la dernière liste proposée par le transporteur (jamais une valeur libre).
+				$point = ($pending && ($cache['mode'] ?? null) === ($pending['key'] ?? null)) ? ($cache['points'][$pointId] ?? null) : null;
+
+				if (!$pending || !isset($availableCarriers[$pending['key'] ?? '']) || $point === null) {
+					$this->addMessage("Veuillez choisir un point de retrait dans la liste proposée.", 'error');
+					return $this->redirect($absoluteDeliveryUrl);
+				}
+
+				$order->shipping = $availableCarriers[$pending['key']] + ['pickup_point' => $point];
+				unset($order->pending_shipping, $order->pickup_cache);
+
+				return $this->redirect($this->grav['base_url_absolute'] . $nextStepRoute);
 			}
 		}
 
@@ -565,7 +603,45 @@ class CartController extends AbstractController
 		$twig->twig_vars['customer'] = $customerData;
 		$twig->twig_vars['cart_metrics'] = $metrics;
 		$twig->twig_vars['carriers'] = $availableCarriers;
-		$twig->twig_vars['current_shipping'] = $this->session->shop_order->shipping ?? [];
+		$twig->twig_vars['current_shipping'] = $order->shipping ?? [];
+
+		// Sous-étape « choix du point de retrait ».
+		$pending = (array) ($order->pending_shipping ?? []);
+		if ($pending && isset($availableCarriers[$pending['key'] ?? ''])) {
+			$search = [
+				'postal-code' => preg_match('/^\d{5}$/', (string) ($_GET['pickup_zip'] ?? '')) ? (string) $_GET['pickup_zip'] : (string) ($customerData['postal-code'] ?? ''),
+				'city'        => trim((string) ($_GET['pickup_city'] ?? '')) !== '' ? mb_substr(trim((string) $_GET['pickup_city']), 0, 50) : (string) ($customerData['city'] ?? ''),
+				'street'      => (string) ($customerData['street'] ?? ''),
+				'country'     => 'FR',
+			];
+			if (isset($_GET['pickup_zip'])) {
+				$search['street'] = ''; // recherche sur une autre commune : l'adresse du client ne s'applique plus
+			}
+
+			$points = [];
+			$error = null;
+			try {
+				$points = $shippingManager->findPickupPoints($pending['key'], $search, $metrics);
+			} catch (\Throwable $e) {
+				$this->grav['log']->error('[SimpleShop] Points de retrait indisponibles (' . $pending['key'] . ') : ' . $e->getMessage());
+				$error = "Le service des points de retrait est momentanément indisponible. Vous pouvez choisir un autre mode de livraison.";
+			}
+
+			$order->pickup_cache = [
+				'mode'   => $pending['key'],
+				'points' => array_column($points, null, 'id'),
+			];
+
+			$twig->twig_vars['pickup'] = [
+				'carrier' => $availableCarriers[$pending['key']],
+				'points'  => $points,
+				'search'  => $search,
+				'error'   => $error,
+			];
+		} else {
+			unset($order->pending_shipping);
+		}
+
         return $this->renderStep('step2delivery');
     }
 
@@ -600,6 +676,9 @@ class CartController extends AbstractController
 			return $this->redirect($absoluteCartUrl);
 		}
 		if (empty($shippingData['key']) || !isset($shippingData['price'])) {
+			return $this->redirect($this->grav['base_url_absolute'] . $deliveryRoute);
+		}
+		if (!empty($shippingData['requires_pickup_point']) && empty($shippingData['pickup_point']['id'])) {
 			return $this->redirect($this->grav['base_url_absolute'] . $deliveryRoute);
 		}
 		if (!$emailVerified) {

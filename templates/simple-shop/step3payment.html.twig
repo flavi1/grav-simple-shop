@@ -22,6 +22,7 @@
             <h3>Mode de livraison choisi <a href="{{ routes.step2 }}" class="edit-link">Modifier</a></h3>
             <p>
                 <strong>{{ shipping.name }}</strong> ({{ shipping.description }}) — {{ shipping.price == 0 ? 'Gratuit' : shipping.price ~ ' €' }}
+                {% if shipping.pickup_point is defined and shipping.pickup_point %}<br>{% include 'partials/simple-shop/pickup_point.html.twig' with {point: shipping.pickup_point} %}{% endif %}
             </p>
             
 			<h3>Votre commande <a href="{{ routes.step1 }}" class="edit-link">Modifier</a></h3>

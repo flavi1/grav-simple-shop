@@ -8,18 +8,42 @@ use Grav\Common\Data\Data;
 
 class ShippingManager
 {
+    /** @var array<string, array> Entrées de carriers.yaml (modes manuels et surcharges de modes de fournisseurs). */
     protected $carriersConfig = [];
+
+    /** @var CarrierProviderInterface[] */
+    protected $providers = [];
+
+    /** @var array<string, array>|null Cache des modes assemblés. */
+    private $modes = null;
 
     public function __construct()
     {
         $grav = Grav::instance();
         // Chemin exact vers le fichier de configuration personnalisé
-        $filePath = Grav::instance()['locator']->findResource('user://config/plugins/simple-shop/carriers.yaml');
-        
+        $filePath = $grav['locator']->findResource('user://config/plugins/simple-shop/carriers.yaml');
+
         if ($filePath && file_exists($filePath)) {
             $data = json_decode( json_encode( \Symfony\Component\Yaml\Yaml::parseFile($filePath) ), true);
             $this->carriersConfig = $data['carriers'] ?? [];
         }
+
+        // Fournisseurs (plugins transporteur), voir CarrierProviderInterface.
+        $providers = [];
+        $grav->fireEvent('onSimpleShopRegisterCarriers', new \RocketTheme\Toolbox\Event\Event(['carriers' => &$providers]));
+        $this->providers = array_filter((array) $providers, static fn ($p) => $p instanceof CarrierProviderInterface);
+    }
+
+    /** @return CarrierProviderInterface[] Fournisseurs enregistrés (id => objet). */
+    public function getProviders(): array
+    {
+        return $this->providers;
+    }
+
+    /** Tous les modes (manuels et de fournisseurs), actifs ou non, pour l'administration. @return array<string, array> */
+    public function getModes(): array
+    {
+        return $this->modes ??= CarrierCatalog::build($this->providers, $this->carriersConfig);
     }
 
     /**
@@ -119,68 +143,111 @@ class ShippingManager
     }
 
     /**
-     * Filtre et retourne les transporteurs éligibles avec leur tarif calculé
+     * Prix d'un mode pour un panier, avec le détail du calcul (utilisé aussi par le simulateur d'administration).
+     *
+     * @param array $mode    Mode normalisé (CarrierCatalog).
+     * @param array $metrics `subtotal` (€ TTC de livres), `weight` (g), `thickness` (mm).
+     *
+     * @return array|null null = mode inéligible (désactivé, indisponible, hors contraintes, aucun palier) ;
+     *         sinon price (TTC final), grid_price (base saisie), after_margin, vat_rate, price_before_floor, floor, free_applied.
+     */
+    public static function quoteMode(array $mode, string $zone, array $metrics, array $config, bool $ignoreEnabled = false): ?array
+    {
+        if ((!$ignoreEnabled && empty($mode['enabled'])) || empty($mode['available'])) {
+            return null;
+        }
+
+        $constraints = $mode['constraints'] ?? [];
+        if (!empty($constraints['max_weight']) && $metrics['weight'] > $constraints['max_weight']) {
+            return null;
+        }
+        if (!empty($constraints['max_thickness']) && $metrics['thickness'] > $constraints['max_thickness']) {
+            return null;
+        }
+
+        $matched = null;
+        foreach ((array) ($mode['rules'] ?? []) as $rule) {
+            if (($rule['zone'] ?? null) !== $zone) {
+                continue;
+            }
+            if ($metrics['subtotal'] < ($rule['min_basket'] ?? 0) || $metrics['subtotal'] > ($rule['max_basket'] ?? 999999)) {
+                continue;
+            }
+            if ($metrics['weight'] < ($rule['min_weight'] ?? 0) || $metrics['weight'] > ($rule['max_weight'] ?? 9999999)) {
+                continue;
+            }
+            if (!empty($rule['max_thickness']) && $metrics['thickness'] > $rule['max_thickness']) {
+                continue;
+            }
+            $matched = (float) $rule['price'];
+            break; // première règle valide
+        }
+        if ($matched === null) {
+            return null;
+        }
+
+        $freeApplied = !empty($mode['free_from']) && $metrics['subtotal'] >= $mode['free_from'];
+        $grid = $freeApplied ? 0.0 : $matched;
+        $before = self::priceTtc($grid, (array) ($mode['margin'] ?? []), $config);
+
+        // Plancher légal des frais de livraison de livres (loi Darcos). `legal_floor: false` : retrait sur place,
+        // qui n'est pas une livraison au sens de la loi (à n'utiliser que pour cela ; voir LegalShippingFloor).
+        $floor = ($mode['legal_floor'] ?? true) === false ? 0.0 : LegalShippingFloor::minimum((float) $metrics['subtotal'], $config);
+
+        return [
+            'price'              => round(max($before, $floor), 2),
+            'grid_price'         => $matched,
+            'after_margin'       => $grid > 0
+                ? round($grid * (1 + max(0.0, (float) ($mode['margin']['percent'] ?? 0)) / 100) + max(0.0, (float) ($mode['margin']['fixed'] ?? 0)), 4)
+                : 0.0,
+            'vat_rate'           => self::pricesEnteredHt($config) ? \Grav\Plugin\SimpleShop\Services\TaxManager::defaultRate($config) : 0.0,
+            'price_before_floor' => $before,
+            'floor'              => $floor,
+            'free_applied'       => $freeApplied,
+        ];
+    }
+
+    /**
+     * Filtre et retourne les modes éligibles avec leur tarif calculé (TTC).
      */
     public function getAvailableCarriers(string $zone, array $metrics): array
     {
         $available = [];
         $shopConfig = (array) Grav::instance()['config']->get('plugins.simple-shop', []);
 
-        foreach ($this->carriersConfig as $key => $carrier) {
-            if (!($carrier['enabled'] ?? false)) {
+        foreach ($this->getModes() as $key => $mode) {
+            $quote = self::quoteMode($mode, $zone, $metrics, $shopConfig);
+            if ($quote === null) {
                 continue;
             }
 
-            // 1. Vérification des contraintes globales du transporteur
-            $constraints = $carrier['constraints'] ?? [];
-            if (!empty($constraints['max_weight']) && $metrics['weight'] > $constraints['max_weight']) {
-                continue;
-            }
-            if (!empty($constraints['max_thickness']) && $metrics['thickness'] > $constraints['max_thickness']) {
-                continue;
-            }
-
-            // 2. Recherche d'une règle (palier) correspondante
-            $matchedPrice = null;
-            $rules = $carrier['rules'] ?? [];
-
-            foreach ($rules as $rule) {
-                if ($rule['zone'] !== $zone) {
-                    continue;
-                }
-                if ($metrics['subtotal'] < ($rule['min_basket'] ?? 0) || $metrics['subtotal'] > ($rule['max_basket'] ?? 999999)) {
-                    continue;
-                }
-                if ($metrics['weight'] < ($rule['min_weight'] ?? 0) || $metrics['weight'] > ($rule['max_weight'] ?? 9999999)) {
-                    continue;
-                }
-                if (!empty($rule['max_thickness']) && $metrics['thickness'] > $rule['max_thickness']) {
-                    continue;
-                }
-
-                // Une règle correspond à tous les critères !
-                $matchedPrice = self::priceTtc((float) $rule['price'], (array) ($carrier['margin'] ?? []), $shopConfig);
-                break; // On prend la première règle valide trouvée
-            }
-
-            // Si un tarif a pu être calculé pour ce transporteur, on l'ajoute aux options
-            if ($matchedPrice !== null) {
-                // $matchedPrice est TTC (grille + marge + TVA). Plancher légal des frais de livraison de livres (loi Darcos).
-                // `legal_floor: false` : retrait sur place, qui n'est pas une livraison au sens de la loi
-                // (à n'utiliser que pour cela ; voir LegalShippingFloor).
-                $price = ($carrier['legal_floor'] ?? true) === false
-                    ? $matchedPrice
-                    : LegalShippingFloor::apply($matchedPrice, (float) $metrics['subtotal'], $shopConfig);
-
-                $available[$key] = [
-                    'key'         => $key,
-                    'name'        => $carrier['name'],
-                    'description' => $carrier['description'],
-                    'price'       => $price
-                ];
-            }
+            $available[$key] = [
+                'key'                   => $key,
+                'name'                  => $mode['name'],
+                'description'           => $mode['description'],
+                'price'                 => $quote['price'],
+                'provider'              => $mode['provider'],
+                'requires_pickup_point' => $mode['requires_pickup_point'],
+            ];
         }
 
         return $available;
+    }
+
+    /**
+     * Points de retrait pour un mode de fournisseur.
+     *
+     * @return array[] Points normalisés (voir CarrierProviderInterface::findPickupPoints()).
+     *
+     * @throws CarrierUnavailable Si le mode n'existe pas ou si le service est indisponible.
+     */
+    public function findPickupPoints(string $modeKey, array $address, array $metrics): array
+    {
+        $mode = $this->getModes()[$modeKey] ?? null;
+        if ($mode === null || $mode['provider'] === null || !$mode['requires_pickup_point'] || !isset($this->providers[$mode['provider']])) {
+            throw new CarrierUnavailable("Mode sans point de retrait : {$modeKey}");
+        }
+
+        return $this->providers[$mode['provider']]->findPickupPoints($mode['local_key'], $address, $metrics);
     }
 }
