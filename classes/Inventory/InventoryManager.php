@@ -317,13 +317,15 @@ class InventoryManager
 
         // --- Vérification du marqueur de dernière application du schéma ---
         $markerPath = dirname($dbPath) . '/.shop-schema-applied';
-        $sqlMtime = (int) filemtime($sqlSource);
+        // Marqueur = date de shop.sql + empreinte des colonnes ajoutées : une nouvelle colonne rejoue la migration
+        // même si shop.sql n'a pas changé.
+        $sqlMtime = filemtime($sqlSource) . '-' . substr(md5(json_encode(self::ADDED_COLUMNS)), 0, 8);
         $lastAppliedMtime = null;
 
         if (file_exists($markerPath)) {
             $rawMarker = @file_get_contents($markerPath);
             if ($rawMarker !== false && trim($rawMarker) !== '') {
-                $lastAppliedMtime = (int) trim($rawMarker);
+                $lastAppliedMtime = trim($rawMarker);
             }
         }
 
@@ -367,7 +369,7 @@ class InventoryManager
         // Migration appliquée avec succès : on mémorise le mtime de shop.sql
         // pour que les prochains appels sautent cette exécution tant que le
         // fichier ne change pas.
-        @file_put_contents($markerPath, (string) $sqlMtime);
+        @file_put_contents($markerPath, $sqlMtime);
 
         return $db;
     }

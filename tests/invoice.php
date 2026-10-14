@@ -127,8 +127,11 @@ assert(in_array('unit_ttc_cents', $cols, true) && in_array('tax_bp', $cols, true
 $row = $db->query('SELECT total_amount, total_cents FROM "order"')->fetch(PDO::FETCH_ASSOC);
 assert((float) $row['total_amount'] === 28.9 && $row['total_cents'] === null, 'ancienne commande intacte, centimes vides');
 $db = null;
-unlink(dirname($dbPath) . '/.shop-schema-applied');
+// Base déjà migrée avec un ancien marqueur (date seule, avant les colonnes) : la migration doit se rejouer.
+file_put_contents(dirname($dbPath) . '/.shop-schema-applied', (string) filemtime(__DIR__ . '/../shop.sql'));
+assert(strpos(file_get_contents(dirname($dbPath) . '/.shop-schema-applied'), '-') === false);
 \Grav\Plugin\SimpleShop\Inventory\InventoryManager::getDatabase();   // migration rejouée sans erreur
+assert(strpos(file_get_contents(dirname($dbPath) . '/.shop-schema-applied'), '-') !== false, 'nouveau marqueur (date + colonnes)');
 assert(!array_filter($grav['log']->lines, fn ($l) => $l[0] === 'error'), 'aucune erreur de migration');
 
 echo "OK\n";
