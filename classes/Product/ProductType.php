@@ -15,6 +15,8 @@ use Grav\Plugin\SimpleShop\Pricing\Price;
  *       shipping: …                                             # facultatif ; une réponse null = produit non expédié
  *       presentation: …                                         # facultatif : ['label' => …, 'image' => …]
  *       options: …                                              # facultatif : options acceptées dans le panier
+ *       price_fields: [product_price, …]                        # champs de la fiche qui contiennent un prix saisi
+ *                                                               # (défaut : product_price) — convertis si la base HT/TTC du site change
  *
  * Contrat des réponses (vérifié ici) : price → Price|null ; stock → int|null (null = illimité) ;
  * shipping → array{weight_g:int, thickness_mm:int}|null ; presentation → array{label:string, image:?string} ; options → array.
@@ -31,9 +33,16 @@ final class ProductType
         'options'           => [GenericProduct::class, 'options'],
     ];
 
-    /** @param array<string, string> $handlers clé => « Classe::méthode » (déjà vérifiés). */
-    public function __construct(public readonly string $name, private array $handlers = [], public readonly ?string $taxCode = null)
-    {
+    /**
+     * @param array<string, string> $handlers    clé => « Classe::méthode » (déjà vérifiés).
+     * @param string[]              $priceFields Champs de la fiche contenant un prix saisi (HT ou TTC).
+     */
+    public function __construct(
+        public readonly string $name,
+        private array $handlers = [],
+        public readonly ?string $taxCode = null,
+        public readonly array $priceFields = ['product_price']
+    ) {
     }
 
     public function price($page, array $options, PriceContext $ctx): ?Price

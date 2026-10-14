@@ -42,8 +42,9 @@ delivery:
 # Devise du site (code ISO 4217). Tous les montants (produits, livraison, commandes) sont dans cette devise.
 currency: EUR
 
-# Taxes. Les prix des fiches produit sont saisis HORS TAXE ; le panier, le paiement et
-# les factures sont en TTC. Un seul code pour tout le site (produits et livraison).
+# Taxes. Les prix des fiches produit sont saisis HT ou TTC (`prices_entered`, surchargeable par fiche avec
+# `price_entered_as`) ; le panier, le paiement et les factures sont en TTC. Changer `prices_entered` convertit une fois
+# les fiches existantes (Product\PriceBasisMigration). Un seul code pour tout le site (produits et livraison).
 taxes:
   prices_entered: ht      # ht | ttc
   default: TVA_5_5

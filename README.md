@@ -111,6 +111,10 @@ shop:
   (point ou virgule), stockés en centimes. Une ancienne valeur HT à plus de 2 décimales (ex. 12.2749) garde son TTC d'origine (12,95 €),
   qui devient la référence. Panier, paiement, commandes et factures restent en TTC. Devise : `currency` (défaut `EUR`).
   `shop_price_ttc(prix_ht)` (Twig) reste disponible mais ignore le type de produit : préférer `shop_price`.
+- **Changement de base HT ↔ TTC** (`taxes.prices_entered`) : au premier passage, les fiches sans `price_entered_as` sont converties
+  une fois (`Product\PriceBasisMigration`, événement `onPagesInitialized`) : chaque champ de prix déclaré par le type (`shop.price_fields`,
+  défaut `product_price`) est réécrit dans la nouvelle base — de HT vers TTC, le prix public est inchangé. Base déjà appliquée :
+  `user://data/simple-shop/.prices-basis` (absente = `ht`). Les prix de livraison ont leur propre réglage (`delivery.prices_entered`).
 - **Configuration** : `taxes.prices_entered` (`ht`|`ttc`), `taxes.default` (code unique pour tout le site, livraison comprise),
   `taxes.rates` (ex. `TVA_5_5`, `TVA_20`). L'ancienne clé `vat_rate` n'est plus lue.
 - **Contraintes globales** (`Delivery/ShippingConstraints`, bloc `constraints` de `carriers.yaml`, écran Boutique > Transporteurs) :

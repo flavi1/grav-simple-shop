@@ -76,6 +76,7 @@ namespace SimpleShopTest {
     {
         public function __construct(public string $route, public array $header, public string $template = 'book', public ?string $file = null) {}
         public function header() { return (object) $this->header; }
+        public function modifyHeader($key, $value): void { $this->header[$key] = $value; }
         public function title(): string { return (string) ($this->header['title'] ?? $this->route); }
         public function published(): bool { return ($this->header['published'] ?? true) !== false; }
         public function template(): string { return $this->template; }

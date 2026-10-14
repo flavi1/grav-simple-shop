@@ -30,6 +30,7 @@ class SimpleShopPlugin extends Plugin
     {
         return [
             'onPluginsInitialized'     => [['onPluginsInitialized', 0]],
+            'onPagesInitialized'       => [['onPagesInitialized', 0]],
             'onMvcRegisterRoutes'      => [['onMvcRegisterRoutes', 0]], // <-- Abonnement au nouvel événement de routage MVC
             'onSimpleShopOrderStatusChanged' => [['onOrderStatusChanged', 0]],
             // Administration (Grav 2.0 : plugin `api` + Admin2)
@@ -49,6 +50,30 @@ class SimpleShopPlugin extends Plugin
 
         // `onTwigSiteVariables` est déjà abonné dans getSubscribedEvents() :
         // ne PAS le réabonner via enable() (le listener s'exécuterait deux fois).
+    }
+
+    /**
+     * Base de saisie des prix (HT/TTC) changée dans la configuration : conversion unique des fiches produit
+     * (voir Product\PriceBasisMigration ; sans effet tant que la base ne change pas).
+     */
+    public function onPagesInitialized(): void
+    {
+        try {
+            $dataDir = $this->grav['locator']->findResource('user://data/simple-shop', true, true);
+            $config = (array) $this->config->get('plugins.simple-shop', []);
+            $log = $this->grav['log'];
+            $done = \Grav\Plugin\SimpleShop\Product\PriceBasisMigration::run(
+                $this->grav['pages']->all(),
+                (string) $dataDir,
+                $config,
+                static fn (string $level, string $message) => $log->$level($message)
+            );
+            if ($done !== null && $done['pages'] > 0) {
+                \Grav\Common\Cache::clearCache('cache-only');
+            }
+        } catch (\Throwable $e) {
+            $this->grav['log']->error('[SimpleShop] Conversion des prix des fiches : ' . $e->getMessage());
+        }
     }
 
     /**

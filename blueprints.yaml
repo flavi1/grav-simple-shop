@@ -50,7 +50,7 @@ form:
     taxes_fieldset:
       type: fieldset
       title: Taxes
-      help: "Les prix des fiches produit sont saisis hors taxe ; la boutique affiche, encaisse et facture en TTC."
+      help: "Les prix des fiches produit sont saisis HT ou TTC (réglage ci-dessous, modifiable par fiche) ; la boutique affiche, encaisse et facture en TTC. Changer ce réglage convertit une fois les fiches existantes (prix TTC inchangé)."
       fields:
         taxes.prices_entered:
           type: select

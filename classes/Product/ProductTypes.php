@@ -139,7 +139,10 @@ final class ProductTypes
             $handlers[$key] = $ref;
         }
 
-        return new ProductType($name, $handlers, isset($shop['tax']) && $shop['tax'] !== '' ? (string) $shop['tax'] : null);
+        $fields = array_values(array_filter((array) ($shop['price_fields'] ?? ['product_price']),
+            static fn ($f) => is_string($f) && preg_match('/^[A-Za-z0-9_]+$/', $f)));
+
+        return new ProductType($name, $handlers, isset($shop['tax']) && $shop['tax'] !== '' ? (string) $shop['tax'] : null, $fields ?: ['product_price']);
     }
 
     /** Dossiers de blueprints de pages de Grav (flux `blueprints://pages` et blueprints du thème actif). */
