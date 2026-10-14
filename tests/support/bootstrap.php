@@ -20,7 +20,7 @@ namespace Grav\Common {
         public static function instance(): self { return self::$instance ??= new self(); }
         public static function reset(): void { self::$instance = null; }
         public function offsetExists($o): bool { return isset($this->c[$o]); }
-        public function offsetGet($o): mixed { return $this->c[$o]; }
+        public function offsetGet($o): mixed { return $this->c[$o] ?? null; }
         public function offsetSet($o, $v): void { $this->c[$o] = $v; }
         public function offsetUnset($o): void { unset($this->c[$o]); }
         public function fireEvent($name, $event = null)
@@ -133,8 +133,12 @@ namespace SimpleShopTest {
             if ($uri === 'user://data') {
                 return $this->data;
             }
+            if ($uri === 'theme://blueprints') {
+                return dirname($this->plugins) . '/themes/bookstore/blueprints';   // types de produits du thème du site
+            }
             return false;
         }
+        public function findResources($uri, $absolute = true, $all = false): array { return []; }
     }
 
     final class FakeLog
@@ -176,6 +180,7 @@ namespace SimpleShopTest {
         }
 
         Grav::reset();
+        \Grav\Plugin\SimpleShop\Product\ProductTypes::reset();
         $grav = Grav::instance();
         $config = \Symfony\Component\Yaml\Yaml::parseFile($plugins . '/simple-shop/simple-shop.yaml');
         $config = array_replace_recursive($config, $configOverrides);
@@ -213,6 +218,8 @@ namespace {
     if (is_file($plugins . '/simple-shop/vendor/autoload.php')) {
         require $plugins . '/simple-shop/vendor/autoload.php';   // Factur-X, FPDF/FPDI
     }
+    // Thème du site : déclare le type de produit « book » (Grav\Theme\Bookstore::bookPrice…). NoJs est doublé plus haut.
+    require dirname($plugins) . '/themes/bookstore/bookstore.php';
     spl_autoload_register(function ($c) use ($plugins) {
         $map = [
             'Grav\\Plugin\\SimpleShop\\'            => $plugins . '/simple-shop/classes/',

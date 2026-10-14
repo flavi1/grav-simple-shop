@@ -39,6 +39,9 @@ delivery:
     url: 'https://data.geopf.fr/geocodage/search'
     timeout: 4            # secondes
 
+# Devise du site (code ISO 4217). Tous les montants (produits, livraison, commandes) sont dans cette devise.
+currency: EUR
+
 # Taxes. Les prix des fiches produit sont saisis HORS TAXE ; le panier, le paiement et
 # les factures sont en TTC. Un seul code pour tout le site (produits et livraison).
 taxes:

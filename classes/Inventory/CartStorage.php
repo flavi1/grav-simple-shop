@@ -50,12 +50,14 @@ class CartStorage
             $page = $pages->dispatch($item['product_route']);
             if (!$page) continue;
 
-            $header = $page->header();
+            // Libellé et image : présentation du type de produit (blueprint `shop.presentation`).
+            $type = \Grav\Plugin\SimpleShop\Product\ProductTypes::forPage($page);
+            $presentation = $type ? $type->presentation($page, []) : ['label' => $page->title(), 'image' => null];
             $structuredCart[$item['product_route']] = [
-                'title' => $page->title(),
+                'title' => $presentation['label'],
                 'price' => InventoryManager::getProductPrice($item['product_route']) ?? 0.0,
                 'quantity' => (int)$item['quantity'],
-                'cover_path' => !empty($header->book_cover) ? current($header->book_cover)['path'] : null
+                'cover_path' => $presentation['image'],
             ];
         }
 

@@ -76,16 +76,46 @@ Au démarrage du paiement, la passerelle enregistre un **instantané** de la com
 déstockage identique. Le montant encaissé et le total recalculé du panier doivent correspondre, sinon la commande n'est pas
 créée et l'incident est journalisé pour rapprochement manuel. Configuration pas à pas : `private/prompts/TODO.md`.
 
+## Types de produits
+
+Le plugin ne connaît aucun métier (livres, formations…). Un **type de produit** se déclare dans le blueprint de page du thème
+ou d'un plugin, par un bloc `shop:` dont chaque clé désigne une méthode statique `Classe::méthode` :
+
+```yaml
+# themes/bookstore/blueprints/book.yaml
+shop:
+  price_calculation: 'Grav\Theme\Bookstore::bookPrice'      # obligatoire : fn($page, array $options, PriceContext $ctx): ?Price
+  shipping: 'Grav\Theme\Bookstore::bookShipping'            # fn($page, array $options): ?array{weight_g, thickness_mm} (null = rien à expédier)
+  presentation: 'Grav\Theme\Bookstore::bookPresentation'    # fn($page, array $options): array{label, image}
+  # stock: …   options: …                                    # facultatifs
+  tax: TVA_5_5                                               # code de taxe du type (sinon taxes.default)
+```
+
+- Une page est de ce type si son gabarit porte le nom du blueprint (`book.md` → `book`). Une clé absente reprend le
+  comportement générique (`Product\GenericProduct` : `product_price`, `product_quantity`, `weight` en g, `thickness` en mm, pas d'options).
+- **Repli** : une page dont le gabarit n'est pas un type déclaré mais qui a un `product_price` est un produit générique (type `default`).
+- **Contrat du prix** (`Pricing\Price`) : montants HT et TTC en centimes, devise, code et taux de taxe (points de base),
+  base de saisie (`ht`|`ttc`). Un résultat `null` = pas vendable maintenant. Le contexte (`Product\PriceContext`) fournit la date,
+  la quantité, la devise du site, la taxe du type et la base de saisie par défaut.
+- **Découverte et cache** (`Product\ProductTypes`) : blueprints du thème actif et flux `blueprints://pages`, liste gardée en cache
+  tant que les fichiers ne changent pas. Une méthode introuvable est journalisée et listée par l'API (`product-types`) ; un type dont
+  le `price_calculation` est introuvable n'est pas chargé.
+- Le cœur passe toujours par `Product\Catalog` (`resolve`, `price`, `context`) et jamais par les champs d'une fiche.
+- **Twig** : `shop_price(route)` → `Price` ou `null` ; filtre `shop_money` (`{{ shop_price(page.route).unitTtc|shop_money }}` → « 12,95 € »).
+  `get_product_shop_data(route)` ajoute le stock disponible. La zone d'achat `partials/simple-shop/buy-zone.html.twig` est neutre ;
+  un thème la surcharge au même chemin (bookstore : libellés de prévente).
+
 ## Taxes et frais de livraison
 
-- **Prix HT.** Les prix des fiches produit (`product_price`) sont saisis hors taxe, jusqu'à 4 décimales. `InventoryManager::getProductData`
-  les convertit en TTC (`TaxManager::toTtc`, arrondi au centime) : panier, paiement, commandes et factures restent en TTC.
-  Dans Twig, `shop_price_ttc(prix_ht)` donne le TTC.
+- **Prix.** Saisis HT ou TTC (`taxes.prices_entered`, surchargeable par fiche avec `price_entered_as`), au plus 2 décimales
+  (point ou virgule), stockés en centimes. Une ancienne valeur HT à plus de 2 décimales (ex. 12.2749) garde son TTC d'origine (12,95 €),
+  qui devient la référence. Panier, paiement, commandes et factures restent en TTC. Devise : `currency` (défaut `EUR`).
+  `shop_price_ttc(prix_ht)` (Twig) reste disponible mais ignore le type de produit : préférer `shop_price`.
 - **Configuration** : `taxes.prices_entered` (`ht`|`ttc`), `taxes.default` (code unique pour tout le site, livraison comprise),
   `taxes.rates` (ex. `TVA_5_5`, `TVA_20`). L'ancienne clé `vat_rate` n'est plus lue.
 - **Contraintes globales** (`Delivery/ShippingConstraints`, bloc `constraints` de `carriers.yaml`, écran Boutique > Transporteurs) :
   lois et offres sur le prix de livraison, sans rien de propre à un type de produit. Une contrainte = nom, types d'articles concernés
-  (`product_types` ; type d'un article = `product_type` de sa fiche, sinon son gabarit, ex. `book`), modes exclus (`except_modes`) et
+  (`product_types` ; type d'un article = son type de produit, ex. `book`, ou `default` pour un produit générique), modes exclus (`except_modes`) et
   règles (poids du colis de/à, montant TTC des articles concernés de/à, effet `minimum` | `maximum` | `fixed`, valeur € TTC, commentaire).
   Ordre d'application = ordre de la liste ; dans une contrainte, la première règle qui correspond s'applique ; bornes incluses.
   Exemple livré pour ce site : la loi Darcos (livres : 3,00 € sous 35 €, 0,01 € au-delà, retrait sur place exclu).

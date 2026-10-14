@@ -62,15 +62,6 @@ class ShippingManager
         return $this->constraintsStored;
     }
 
-    /**
-     * Type d'un produit pour les contraintes globales : `product_type` de la fiche, sinon nom de son gabarit (ex. book).
-     */
-    public static function productType(array $header, string $template): string
-    {
-        $type = trim((string) ($header['product_type'] ?? ''));
-
-        return $type !== '' ? $type : $template;
-    }
 
     /** Tous les modes (manuels et de fournisseurs), actifs ou non, pour l'administration. @return array<string, array> */
     public function getModes(): array
@@ -93,46 +84,37 @@ class ShippingManager
         $subtotals = [];
         $packaging = self::packaging((array) $grav['config']->get('plugins.simple-shop', []));
 
-		foreach ($cartItems as $route => $item) {
-			$basketSubtotal += ($item['price'] * $item['quantity']);
-			$type = '';
+        $shippable = 0;
+        foreach ($cartItems as $route => $item) {
+            $line = $item['price'] * $item['quantity'];
+            $basketSubtotal += $line;
+            $typeName = '';
 
-			// Recherche de la page produit Grav
-			$page = $pages->dispatch($route);
-			
-			if ($page) {
-				$header = (array)$page->header();
-				$type = self::productType($header, (string) $page->template());
-				
-				// Si les données sont à la racine (comme dans book.yaml) 
-				// ou imbriquées dans un sous-tableau 'shop'
-				$shopMeta = $header['shop'] ?? $header;
-
-				// Extraction du poids (conversion cm/g ou fallback à 100g)
-				$weight = (int)($shopMeta['weight'] ?? 100);
-				$totalWeight += ($weight * $item['quantity']);
-
-				// Extraction de l'épaisseur
-				// Note : Votre blueprint stocke l'épaisseur en cm (ex: 2.3).
-				// Si votre grille de transporteur attend des mm, pensez à multiplier par 10 :
-				$thickness = (float)($shopMeta['thickness'] ?? 0);
-				// Les exemplaires sont empilés : l'épaisseur s'additionne.
-				$stackThickness += (int) round($thickness * 10) * (int) $item['quantity'];
-			} else {
-				// Fallback si la page produit physique n'est pas résolue
-				$totalWeight += (100 * $item['quantity']);
-			}
-			$subtotals[$type] = ($subtotals[$type] ?? 0) + $item['price'] * $item['quantity'];
-		}
+            // Poids et épaisseur viennent du type de produit (blueprint `shop.shipping`, défaut : weight en g, thickness en mm).
+            $page = $pages->dispatch($route);
+            $type = $page ? \Grav\Plugin\SimpleShop\Product\ProductTypes::forPage($page) : null;
+            if ($type !== null) {
+                $typeName = $type->name;
+                $metrics = $type->shipping($page, (array) ($item['options'] ?? []));
+                if ($metrics !== null) {
+                    $shippable += (int) $item['quantity'];
+                    $totalWeight += $metrics['weight_g'] * (int) $item['quantity'];
+                    // Les exemplaires sont empilés : l'épaisseur s'additionne.
+                    $stackThickness += $metrics['thickness_mm'] * (int) $item['quantity'];
+                }
+            }
+            $subtotals[$typeName] = ($subtotals[$typeName] ?? 0) + $line;
+        }
 
         // Emballage : poids fixe et surépaisseur par commande (valeurs de départ, réglables).
-        if ($cartItems !== []) {
+        if ($shippable > 0) {
             $totalWeight += $packaging['weight'];
             $stackThickness += $packaging['thickness'];
         }
 
         return [
             'subtotal'  => $basketSubtotal,
+            'shippable' => $shippable,
             'subtotals' => $subtotals,
             'weight'    => $totalWeight,
             'thickness' => $stackThickness

@@ -39,6 +39,14 @@ form:
       help: "Adresse e-mail recevant une notification à chaque nouvelle commande (voir OrderMailer::sendSellerNotification()). Laissez vide pour utiliser automatiquement l'e-mail de l'auteur du site (site.author.email)."
       default: ''
 
+    currency:
+      type: text
+      label: Devise
+      help: "Code ISO 4217 (EUR, CHF…). Tous les montants de la boutique sont dans cette devise."
+      default: EUR
+      validate:
+        pattern: '[A-Z]{3}'
+
     taxes_fieldset:
       type: fieldset
       title: Taxes
@@ -54,7 +62,7 @@ form:
         taxes.default:
           type: text
           label: Code de la taxe appliquée à tout le site
-          help: "Doit correspondre à un code de la liste ci-dessous (ex. TVA_5_5). Livres : TVA à 5,5 %, y compris pour les frais de livraison."
+          help: "Doit correspondre à un code de la liste ci-dessous (ex. TVA_5_5). Un type de produit peut imposer le sien (`shop.tax` de son blueprint, ex. book → TVA_5_5) ; la livraison suit ce code."
           default: TVA_5_5
         taxes.rates:
           type: list

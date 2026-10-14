@@ -246,24 +246,15 @@ class ShopApiController extends AbstractApiController
     }
 
     /**
-     * Types de produits du catalogue (pour les contraintes globales) : `product_type` des fiches à prix, sinon leur gabarit.
+     * Types de produits (blueprints qui déclarent `shop.price_calculation`), plus ceux cités par les contraintes.
      *
      * @return string[]
      */
     private function productTypes(array $constraints): array
     {
-        $types = [];
-        try {
-            $pages = $this->grav['pages'];
-            $pages->init();
-            foreach ($pages->all() as $page) {
-                $header = (array) $page->header();
-                if (isset($header['product_price'])) {
-                    $types[] = ShippingManager::productType($header, (string) $page->template());
-                }
-            }
-        } catch (\Throwable $e) {
-            $this->grav['log']->warning('[SimpleShop][API] Types de produits illisibles : ' . $e->getMessage());
+        $types = array_keys(\Grav\Plugin\SimpleShop\Product\ProductTypes::all());
+        foreach (\Grav\Plugin\SimpleShop\Product\ProductTypes::errors() as $error) {
+            $this->grav['log']->warning('[SimpleShop] ' . $error);
         }
         foreach ($constraints as $c) {
             $types = array_merge($types, $c['product_types']);

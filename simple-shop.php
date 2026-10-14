@@ -237,8 +237,25 @@ class SimpleShopPlugin extends Plugin
         );
         $this->grav['twig']->twig->addFunction($f);
 
-        // Prix TTC d'un montant saisi dans une fiche produit (prix saisis hors
-        // taxe, voir TaxManager) : shop_price_ttc(header.product_price).
+        // Prix d'un produit tel que calculé par son type (blueprint `shop.price_calculation`) : shop_price(page.route)
+        // → Price (unitTtc, unitHt…) ou null ; affichage : {{ shop_price(page.route).unitTtc|shop_money }}.
+        $this->grav['twig']->twig->addFunction(new \Twig\TwigFunction(
+            'shop_price',
+            static fn ($route) => is_string($route) && $route !== '' ? \Grav\Plugin\SimpleShop\Product\Catalog::price($route) : null
+        ));
+        $this->grav['twig']->twig->addFilter(new \Twig\TwigFilter(
+            'shop_money',
+            static function ($money): string {
+                if (!$money instanceof \Grav\Plugin\SimpleShop\Pricing\Money) {
+                    return '';
+                }
+                $symbols = ['EUR' => '€', 'USD' => '$', 'GBP' => '£', 'CHF' => 'CHF'];
+
+                return number_format($money->toFloat(), 2, ',', "\u{202F}") . "\u{00A0}" . ($symbols[$money->currency] ?? $money->currency);
+            }
+        ));
+
+        // Ancienne aide (à éviter) : prix TTC d'un montant saisi dans une fiche, sans passer par le type de produit.
         $this->grav['twig']->twig->addFunction(new \Twig\TwigFunction(
             'shop_price_ttc',
             static function ($value) {

@@ -4,7 +4,7 @@
 namespace Grav\Plugin\SimpleShop\Inventory;
 
 use Grav\Common\Grav;
-use Grav\Plugin\SimpleShop\Services\TaxManager;
+use Grav\Plugin\SimpleShop\Product\Catalog;
 
 class InventoryManager
 {
@@ -16,62 +16,41 @@ class InventoryManager
      */
     public static function getProductData(string $productRoute)
     {
-        $grav = Grav::instance();
         $db = self::getDatabase();
-        
+
         // 1. Nettoyage préventif des paniers expirés
         $db->exec("DELETE FROM cart WHERE expires_at < datetime('now')");
 
-        // 2. Récupération de la page Grav
-        $grav['pages']->init();
-        $page = $grav['pages']->dispatch($productRoute);
-
-        if (!$page || !$page->published()) {
+        // 2. Produit et type de produit (blueprint `shop.*`, voir Product\ProductTypes) : prix et stock viennent du type,
+        //    jamais directement des champs de la fiche.
+        $resolved = Catalog::resolve($productRoute);
+        if ($resolved === null) {
             return false;
         }
+        [$page, $type] = $resolved;
 
-        $header = $page->header();
+        try {
+            $price = $type->price($page, [], Catalog::context($type));
+            $stockPhysical = $type->stock($page, []);
+        } catch (\Throwable $e) {
+            Grav::instance()['log']->error("[SimpleShop] Produit {$productRoute} : " . $e->getMessage());
 
-        // Sécurité : Si la modalité de vente n'est pas "Vendre ici", le produit n'est pas achetable
-        $salesMethod = $header->sales_method ?? 'sell_here';
-        if ($salesMethod !== 'sell_here') {
             return false;
         }
+        if ($price === null) {
+            return false;   // pas vendable maintenant (hors vente, prévente sans prix…)
+        }
 
-        // Détermination du prix de base
-        $price = isset($header->product_price) ? (float)$header->product_price : 0.00;
+        $data = [
+            'product_price'    => $price->unitTtc->toFloat(),
+            'product_price_ht' => $price->unitHt->toFloat(),
+            'price'            => $price,
+            'product_type'     => $type->name,
+        ];
 
-
-		// Règle Prévente : Si la date de publication est dans le futur
-		if (isset($header->publication_date) && !empty($header->publication_date)) {
-			$pubDate = strtotime($header->publication_date);
-			$today = strtotime(date('Y-m-d'));
-
-			if ($pubDate > $today) {
-				// Si un prix de prévente existe, on l'applique. Sinon, vente impossible.
-				if (isset($header->product_presale_price) && $header->product_presale_price !== '') {
-					$price = (float)$header->product_presale_price;
-				} else {
-					return false;
-				}
-			}
-		}
-
-        // Les prix des fiches produit sont saisis hors taxe (TaxManager) : tout
-        // le reste de la boutique (panier, paiement, commande) travaille en TTC.
-        $priceHt = $price;
-        $price = TaxManager::toTtc($price);
-
-        // Alignement du stock physique selon book.yaml
-        $stockPhysical = isset($header->product_quantity) ? (int)$header->product_quantity : 0;
-
-        // Gestion du stock infini (-1)
-        if ($stockPhysical === -1) {
-            return [
-                'product_price'         => $price,
-                'product_price_ht'      => $priceHt,
-                'product_virtual_stock' => -1
-            ];
+        // Stock illimité
+        if ($stockPhysical === null) {
+            return $data + ['product_virtual_stock' => -1];
         }
 
         // 3. Calcul de la somme des paniers actifs pour ce produit
@@ -85,11 +64,7 @@ class InventoryManager
         $reserved = (int)$stmt->fetchColumn();
         $stmt->closeCursor();
 
-        return [
-            'product_price'         => $price,
-            'product_price_ht'      => $priceHt,
-            'product_virtual_stock' => max(0, $stockPhysical - $reserved)
-        ];
+        return $data + ['product_virtual_stock' => max(0, $stockPhysical - $reserved)];
     }
 
     /**
