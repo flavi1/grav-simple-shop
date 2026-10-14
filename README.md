@@ -83,23 +83,25 @@ créée et l'incident est journalisé pour rapprochement manuel. Configuration p
   Dans Twig, `shop_price_ttc(prix_ht)` donne le TTC.
 - **Configuration** : `taxes.prices_entered` (`ht`|`ttc`), `taxes.default` (code unique pour tout le site, livraison comprise),
   `taxes.rates` (ex. `TVA_5_5`, `TVA_20`). L'ancienne clé `vat_rate` n'est plus lue.
-- **Loi Darcos** (`delivery.book_law`, classe `Delivery/LegalShippingFloor`) : sous `threshold` € TTC de livres, frais minimum `below`
-  (3,00 €) ; à partir de `threshold`, minimum `at_or_above` (0,01 €). Appliqué dans `ShippingManager::getAvailableCarriers` ;
-  un mode peut s'en exclure avec `legal_floor: false` (retrait sur place). À faire valider juridiquement.
+- **Contraintes globales** (`Delivery/ShippingConstraints`, bloc `constraints` de `carriers.yaml`, écran Boutique > Transporteurs) :
+  lois et offres sur le prix de livraison, sans rien de propre à un type de produit. Une contrainte = nom, types d'articles concernés
+  (`product_types` ; type d'un article = `product_type` de sa fiche, sinon son gabarit, ex. `book`), modes exclus (`except_modes`) et
+  règles (poids du colis de/à, montant TTC des articles concernés de/à, effet `minimum` | `maximum` | `fixed`, valeur € TTC, commentaire).
+  Ordre d'application = ordre de la liste ; dans une contrainte, la première règle qui correspond s'applique ; bornes incluses.
+  Exemple livré pour ce site : la loi Darcos (livres : 3,00 € sous 35 €, 0,01 € au-delà, retrait sur place exclu).
+  Ancien réglage `delivery.book_law` + `legal_floor: false` : converti automatiquement (lecture, puis écrit à la première sauvegarde).
 
 ### Prix de livraison (`carriers.yaml`)
 
 Chaque mode a un **type de calcul** (`pricing`) :
-- `flat` — **forfait** : un seul prix (`flat_price`), quel que soit le colis ; pas de marge. Un forfait à 0 soumis au plancher légal
-  donne exactement le minimum Darcos (c'est le préréglage « Livres France », clé `livres_france`, proposé une fois dans l'administration ;
-  son état est noté dans le bloc `setup.books_preset` de `carriers.yaml` : `applied` ou `dismissed`) ;
+- `flat` — **forfait** : un seul prix (`flat_price`), quel que soit le colis ; pas de marge (0 = gratuit, avant les contraintes globales) ;
 - `provider` — **tarif du plugin** transporteur (modes `fournisseur.mode` seulement), grille livrée et mise à jour avec le plugin ;
 - `grid` — **grille personnalisée** (`rules`), importable / exportable en CSV depuis l'administration
   (colonnes `zone;poids_de_g;poids_jusqua_g;panier_de_eur;panier_jusqua_eur;epaisseur_max_mm;prix_eur`, séparateur `;`, virgule décimale).
 Sans `pricing` : `grid` pour un mode manuel, `provider` pour un mode de plugin (ou `grid` si sa grille est surchargée).
 
 Chaîne de calcul d'un mode : **prix du palier ou du forfait (HT par défaut, `delivery.prices_entered`) + marge** (`margin: {fixed, percent}` sur le mode ; pas de marge sur un palier à 0)
-**→ TVA du site → plancher légal (Darcos) → arrondi au centime**. L'emballage (`delivery.packaging`, 40 g et 6 mm par défaut) est ajouté au poids et à l'épaisseur du panier
+**→ TVA du site → « offert dès » du mode → contraintes globales → arrondi au centime**. L'emballage (`delivery.packaging`, 40 g et 6 mm par défaut) est ajouté au poids et à l'épaisseur du panier
 (les épaisseurs des exemplaires s'additionnent) avant le choix des modes. Voir `ShippingManager::priceTtc()`.
 
 ### Suivi de colis
@@ -159,7 +161,7 @@ API (préfixe `/api/v1/simple-shop`), permissions `api.simple-shop.read` /
 `GET /orders`, `GET /orders/export`, `GET /orders/{reference}`,
 `PATCH /orders/{reference}/status`, `PATCH /orders/{reference}/invoice-status`,
 `GET /orders/{reference}/invoice`, `GET|PUT /carriers`, `PUT|DELETE /carriers/{key}`, `POST /carriers/simulate`,
-`POST /carriers/preset` (`{action: apply|dismiss, disable_others}`), `POST /carriers/providers/{id}/test`, `GET|POST /bans`,
+`PUT /carrier-constraints` (`{constraints: [...]}`), `POST /carriers/providers/{id}/test`, `GET|POST /bans`,
 `DELETE /bans/{email}`.
 
 ## Configuration et données

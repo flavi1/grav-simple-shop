@@ -34,13 +34,9 @@ delivery:
   packaging:
     weight: 40            # grammes
     thickness: 6          # millimètres
-  # Plancher légal des frais de livraison de livres (loi Darcos, en vigueur depuis le 7/10/2023).
-  # Montants TTC ; le seuil se compare au prix des livres de la commande, hors livraison.
-  book_law:
-    enabled: true
-    threshold: 35.00      # en dessous : frais minimum « below » ; à partir de : « at_or_above »
-    below: 3.00
-    at_or_above: 0.01
+  # Lois et offres sur le prix de livraison (ex. plancher des frais de livraison de livres) : « contraintes globales »,
+  # bloc `constraints` de carriers.yaml, réglées dans Admin2 > Boutique > Transporteurs. L'ancienne clé `book_law`
+  # n'est plus lue que pour convertir une configuration existante.
 
 # Taxes. Les prix des fiches produit sont saisis HORS TAXE ; le panier, le paiement et
 # les factures sont en TTC. Un seul code pour tout le site (produits et livraison).

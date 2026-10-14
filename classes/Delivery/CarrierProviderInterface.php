@@ -17,7 +17,7 @@ namespace Grav\Plugin\SimpleShop\Delivery;
  * comme pour les passerelles de paiement).
  *
  * Le fournisseur DÉCRIT ses modes (valeurs par défaut) et sait chercher des points de retrait. Le cœur
- * reste propriétaire de tout le reste : marge, offre « gratuit dès X € », TVA, plancher légal, arrondi,
+ * reste propriétaire de tout le reste : marge, offre « gratuit dès X € », TVA, contraintes globales (ShippingConstraints), arrondi,
  * réglages modifiés dans l'administration (ils se superposent aux valeurs par défaut du fournisseur).
  */
 interface CarrierProviderInterface
@@ -33,7 +33,7 @@ interface CarrierProviderInterface
 
     /**
      * Modes proposés, indexés par clé locale (sans le préfixe `<id>.`), au format d'une entrée de `carriers.yaml` :
-     * name, description, enabled, legal_floor, margin{fixed,percent}, free_from, constraints{max_weight,max_thickness},
+     * name, description, enabled, margin{fixed,percent}, free_from, constraints{max_weight,max_thickness},
      * rules[] (zone, min/max_basket, min/max_weight, max_thickness, price), plus :
      *   - requires_pickup_point (bool) : le client doit choisir un point de retrait ;
      *   - available (bool) : faux tant que le mode ne peut pas fonctionner (clés d'API absentes…) ;

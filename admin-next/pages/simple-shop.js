@@ -8,7 +8,7 @@
  * Trois onglets, tous servis par l'API /simple-shop/* (ShopApiController) :
  *   - Commandes     : liste filtrable, détail, changement de statut + historique,
  *                     facture (statut e-reporting, PDF), export CSV comptable ;
- *   - Transporteurs : édition du YAML des modes de livraison (validé côté serveur) ;
+ *   - Transporteurs : modes (forfait, tarif du plugin, grille), contraintes globales, simulateur, YAML avancé ;
  *   - Bannis        : liste des adresses e-mail bannies.
  *
  * Aucune donnée n'est insérée via innerHTML : tout passe par textContent
@@ -191,7 +191,11 @@
         '.ss details.ss-grid-details>*:not(summary){margin-left:.9rem;margin-right:.9rem}',
         '.ss-choice label{font-size:.875rem}',
         '.ss-pricing-body{margin:.2rem 0 .6rem}',
-        '.ss-preset{margin:.6rem 0 1rem}.ss-preset h4{margin:0 0 .4rem}',
+        '.ss fieldset.ss-constraint{border:1px solid var(--border,#e5e7eb);border-radius:.5rem;margin:.8rem 0;padding:.6rem .9rem;min-width:0}',
+        '.ss fieldset.ss-constraint>legend{font-weight:600;padding:0 .3rem}',
+        '.ss fieldset.ss-constraint fieldset,.ss fieldset.ss-sim-types{border:0;padding:0;margin:.4rem 0;min-width:0}',
+        '.ss fieldset.ss-constraint fieldset>legend,.ss fieldset.ss-sim-types>legend{font-size:.8rem;padding:0}',
+        '.ss input.ss-comment{width:18rem}',
         '@media (prefers-reduced-motion:no-preference){.ss details{transition:none}}'
     ].join('\n');
 
@@ -502,7 +506,7 @@
             var data = null;
             var modesBox = h('div');
             var providersBox = h('div');
-            var infoBox = h('div', { role: 'note' });
+            var infoBox = h('div');
             var simBox = h('div');
             var yamlBox = h('div');
 
@@ -512,7 +516,11 @@
             }
 
             var sProviders = section('ss-s-providers', 'Transporteurs connectés', 'Plugins transporteur installés. Leurs identifiants (clés d’API) se saisissent dans la page du plugin.');
-            var sModes = section('ss-s-modes', 'Modes de livraison', 'Pour chaque mode, choisissez un forfait, le tarif du transporteur ou votre propre grille. Les prix sont saisis hors taxe : la TVA est ajoutée automatiquement, puis le plancher légal.');
+            var sModes = section('ss-s-modes', 'Modes de livraison', 'Pour chaque mode, choisissez un forfait, le tarif du transporteur ou votre propre grille. Les prix sont saisis hors taxe : la TVA est ajoutée automatiquement, puis les contraintes globales.');
+            var sCons = section('ss-s-cons', 'Contraintes globales', 'Lois et offres qui s’imposent à tous les modes (sauf ceux exclus), dans l’ordre de la liste, après le calcul du mode (TVA comprise). Dans une contrainte, la première règle qui correspond s’applique ; bornes incluses, case vide = sans limite. Le commentaire explique la règle ; il apparaît dans le simulateur.');
+            var consBox = h('div');
+            var consStatus = h('p', { class: 'ss-done', role: 'status', tabindex: '-1' });
+            sCons.appendChild(consBox);
             var sSim = section('ss-s-sim', 'Simulateur', 'Vérifiez le prix que verrait un client pour un colis donné.');
             var sYaml = h('details', { class: 'ss-advanced' }, h('summary', {}, 'Mode avancé : fichier YAML'));
 
@@ -530,6 +538,7 @@
             this.body.appendChild(infoBox);
             this.body.appendChild(sProviders);
             this.body.appendChild(sModes);
+            this.body.appendChild(sCons);
             this.body.appendChild(sSim);
             this.body.appendChild(sYaml);
 
@@ -545,8 +554,14 @@
                     drawInfo();
                     drawProviders();
                     drawModes();
+                    drawConstraints();
                     if (simRefresh) { simRefresh(); } else { drawSimulator(); }
                     drawYaml();
+                    if (after && after.constraints) {
+                        consStatus.className = 'ss-done';
+                        consStatus.textContent = after.constraints;
+                        consStatus.focus();
+                    }
                     if (after && after.message) {
                         var ed = after.key ? editors[after.key] : null;
                         if (ed) {
@@ -559,22 +574,13 @@
                 }).catch(function (e) { self.fail(e); });
             }
 
-            // ----- Encart : TVA, emballage, plancher légal -----
+            // ----- Rappel : TVA et emballage -----
             function drawInfo() {
-                var law = (data.legal || {}).book_law || {};
-                var pct = ((data.legal || {}).vat_rate || 0) * 100;
+                var pct = ((data.tax || {}).vat_rate || 0) * 100;
                 var pack = (data.settings || {}).packaging || {};
-                var ht = (data.settings || {}).prices_entered === 'ht';
                 infoBox.innerHTML = '';
-                infoBox.appendChild(h('div', { class: 'ss-msg ok' },
-                    h('p', { style: 'margin:0 0 .4rem' }, h('strong', {}, 'Plancher légal (loi Darcos) : '),
-                        law.enabled
-                            ? 'les frais de livraison de livres ne peuvent pas être inférieurs à ' + money(law.below) + ' TTC pour une commande de livres de moins de '
-                                + money(law.threshold) + ' TTC, ni à ' + money(law.at_or_above) + ' TTC au-delà. Un mode peut y échapper (retrait sur place).'
-                            : 'désactivé.'),
-                    h('p', { style: 'margin:0' }, 'Prix saisis ' + (ht ? 'hors taxe, TVA ' : 'toutes taxes comprises (TVA ')
-                        + pct.toLocaleString('fr-FR') + ' %' + (ht ? ' ajoutée automatiquement' : ')') + '. Emballage ajouté à chaque colis : '
-                        + pack.weight + ' g et ' + pack.thickness + ' mm. Ces réglages, le seuil et les montants du plancher : Plugins > Simple Shop > Livraison.')));
+                infoBox.appendChild(h('p', { class: 'ss-muted' }, 'Prix saisis ' + (isHt() ? 'hors taxe, TVA ' + pct.toLocaleString('fr-FR') + ' % ajoutée automatiquement' : 'toutes taxes comprises')
+                    + '. Emballage ajouté à chaque colis : ' + pack.weight + ' g et ' + pack.thickness + ' mm (Plugins > Simple Shop > Livraison).'));
             }
 
             // ----- Fournisseurs -----
@@ -605,8 +611,6 @@
                 modesStatus.textContent = '';
                 editors = {};
                 draftHolder.innerHTML = '';
-                var preset = presetCard();
-                if (preset) { modesBox.appendChild(preset); }
                 data.modes.forEach(function (m) {
                     var ed = modeEditor(m, false);
                     editors[m.key] = ed;
@@ -752,7 +756,6 @@
                 inputs.mpercent.id = uidp + '-mpercent';
                 inputs.free = numInput(m.free_from);
                 inputs.free.id = uidp + '-free';
-                inputs.floor = h('input', { type: 'checkbox', id: uidp + '-floor', checked: m.legal_floor !== false });
                 inputs.maxw = numInput(m.constraints.max_weight);
                 inputs.maxw.id = uidp + '-maxw';
                 inputs.maxt = numInput(m.constraints.max_thickness);
@@ -775,12 +778,8 @@
                     }));
 
                 // ----- Forfait -----
-                var law = (data.legal || {}).book_law || {};
                 var flatBlock = h('div', {},
-                    field('Prix du forfait (€ ' + taxLabel() + ')', inputs.flat,
-                        law.enabled
-                            ? '0 = le minimum légal : ' + money(law.below) + ' TTC sous ' + money(law.threshold) + ' de livres, ' + money(law.at_or_above) + ' au-delà.'
-                            : null));
+                    field('Prix du forfait (€ ' + taxLabel() + ')', inputs.flat, '0 = gratuit, avant les contraintes globales (qui peuvent imposer un minimum).'));
 
                 // ----- Grille du plugin (lecture seule) -----
                 var providerRules = pricing === 'provider' ? (m.rules || []) : null;
@@ -935,7 +934,6 @@
                         name: inputs.name.value,
                         description: inputs.description.value,
                         enabled: inputs.enabled.checked,
-                        legal_floor: inputs.floor.checked,
                         pricing: pricing,
                         flat_price: pricing === 'flat' ? v(inputs.flat) : null,
                         margin: { fixed: v(inputs.mfixed), percent: v(inputs.mpercent) },
@@ -992,12 +990,10 @@
                     marginFieldset,
                     h('fieldset', {}, h('legend', {}, 'Règles'),
                         h('div', { class: 'ss-inline' },
-                            field('Offert dès (€ de livres TTC)', inputs.free, 'Vide = jamais. Au-dessus, la livraison est offerte, au plancher légal près.'),
+                            field('Offert dès (€ d’articles TTC)', inputs.free, 'Vide = jamais. Au-dessus, la livraison du mode est offerte, sous réserve des contraintes globales.'),
                             field('Poids maximal du colis (g)', inputs.maxw, 'Vide = illimité.'),
                             field('Épaisseur maximale (mm)', inputs.maxt, 'Vide = illimité.')),
-                        h('div', { class: 'ss-field-row ss-check' }, inputs.floor,
-                            h('label', { for: uidp + '-floor' }, 'Appliquer le plancher légal des frais de livraison de livres')),
-                        h('p', { class: 'ss-muted' }, 'À décocher uniquement pour un retrait sur place, qui n’est pas une livraison.')),
+                        h('p', { class: 'ss-muted' }, 'Les contraintes globales (plus bas) s’appliquent ensuite ; un mode peut en être exclu.')),
                     errors,
                     h('div', { class: 'ss-bar' }, saveBtn, extraBtn),
                     status);
@@ -1028,39 +1024,6 @@
                 };
             }
 
-            // ----- Préréglage « Livres France » (proposé tant qu'il n'est ni appliqué ni écarté) -----
-            function presetCard() {
-                if (((data.setup || {}).books_preset || '') !== 'pending') { return null; }
-                var law = (data.legal || {}).book_law || {};
-                var disable = h('input', { type: 'checkbox', id: 'ss-preset-disable' });
-                var cardStatus = h('div', { role: 'alert' });
-                function send(action) {
-                    cardStatus.innerHTML = '';
-                    api('POST', '/carriers/preset', { action: action, disable_others: disable.checked })
-                        .then(function (res) {
-                            return action === 'apply'
-                                ? reload({ key: res.data.key, message: 'Préréglage « Livres France » appliqué : mode « Livraison » créé.' + (disable.checked ? ' Les autres modes sont désactivés.' : '') })
-                                : reload({ message: 'Préréglage écarté : il ne sera plus proposé.' });
-                        })
-                        .catch(function (e) {
-                            cardStatus.appendChild(h('div', { class: 'ss-msg err' }, e.message,
-                                e.details && e.details.length ? h('ul', { class: 'ss-list' }, e.details.map(function (d) { return h('li', {}, d); })) : null));
-                        });
-                }
-
-                return h('section', { class: 'ss-card ss-preset', 'aria-labelledby': 'ss-preset-title' },
-                    h('h4', { id: 'ss-preset-title' }, 'Préréglage proposé : « Livres France »'),
-                    h('p', {}, law.enabled
-                        ? 'Un seul mode, au minimum fixé par la loi : ' + money(law.below) + ' pour moins de ' + money(law.threshold) + ' de livres, '
-                            + money(law.at_or_above) + ' au-delà, quel que soit le poids. C’est ce que pratiquent la plupart des librairies en ligne ; la différence avec le coût réel d’envoi est à votre charge.'
-                        : 'Le plancher légal est désactivé (Plugins > Simple Shop > Livraison) : ce préréglage n’est pas applicable.'),
-                    h('div', { class: 'ss-field-row ss-check' }, disable, h('label', { for: 'ss-preset-disable' }, 'Désactiver les autres modes (réactivables à tout moment)')),
-                    cardStatus,
-                    h('div', { class: 'ss-bar' },
-                        h('button', { class: 'ss-btn ss-primary', type: 'button', disabled: !law.enabled, onclick: function () { send('apply'); } }, 'Appliquer le préréglage'),
-                        h('button', { class: 'ss-btn', type: 'button', onclick: function () { send('dismiss'); } }, 'Non merci')));
-            }
-
             function newModeForm() {
                 var nameInput = h('input', { type: 'text', id: 'ss-new-mode-name', maxlength: '80' });
                 var btn = h('button', { class: 'ss-btn', type: 'button', onclick: function () {
@@ -1069,7 +1032,7 @@
                     var base = slug(name), key = base, i = 2;
                     var existing = data.modes.map(function (x) { return x.key; });
                     while (existing.indexOf(key) !== -1) { key = base + '_' + (i++); }
-                    var draft = { key: key, source: 'manual', provider: null, name: name, description: '', enabled: false, legal_floor: true,
+                    var draft = { key: key, source: 'manual', provider: null, name: name, description: '', enabled: false,
                         pricing: 'flat', flat_price: null, margin: { fixed: 0, percent: 0 }, free_from: null,
                         constraints: { max_weight: null, max_thickness: null }, rules: [], available: true };
                     var ed = modeEditor(draft, true);
@@ -1082,6 +1045,141 @@
                     h('h4', {}, 'Ajouter un mode manuel'),
                     h('p', { class: 'ss-muted' }, 'Le nouveau mode s’ouvre à la fin de la liste ci-dessus ; il n’est créé qu’après « Créer le mode ».'),
                     h('div', { class: 'ss-bar' }, h('div', { class: 'ss-field-row' }, h('label', { for: 'ss-new-mode-name' }, 'Nom du nouveau mode'), nameInput), btn));
+            }
+
+            // ----- Contraintes globales (lois, offres commerciales) -----
+            var EFFECTS = { minimum: 'Minimum', maximum: 'Maximum', fixed: 'Prix imposé' };
+            var consModel = null;     // copie de travail de data.constraints
+            var consDirty = false;    // modifications non enregistrées (conservées lors d'un rechargement)
+
+            function cloneConstraints(list) { return JSON.parse(JSON.stringify(list || [])); }
+            function emptyRule() { return { min_weight: null, max_weight: null, min_amount: null, max_amount: null, type: 'minimum', value: null, comment: '' }; }
+
+            function drawConstraints(focusSelector) {
+                if (consModel === null || !consDirty) {
+                    consModel = cloneConstraints(data.constraints);
+                }
+                consBox.innerHTML = '';
+                function touch() { consDirty = true; }
+                function bindNum(obj, key, attrs) {
+                    var input = numInput(obj[key], attrs);
+                    input.addEventListener('input', function () { obj[key] = input.value === '' ? null : input.value; touch(); });
+                    return input;
+                }
+
+                if (!consModel.length) {
+                    consBox.appendChild(h('p', { class: 'ss-muted' }, 'Aucune contrainte : le prix de chaque mode s’applique tel quel.'));
+                }
+
+                consModel.forEach(function (c, i) {
+                    var cid = 'ss-c-' + i;
+                    var legend = h('legend', {}, (i + 1) + '. ' + (c.name || 'Sans nom'));
+                    var name = h('input', { type: 'text', id: cid + '-name', value: c.name || '', maxlength: '80', required: true });
+                    name.addEventListener('input', function () { c.name = name.value; legend.textContent = (i + 1) + '. ' + (name.value || 'Sans nom'); touch(); });
+
+                    var types = (data.product_types || []).slice();
+                    (c.product_types || []).forEach(function (t) { if (types.indexOf(t) === -1) { types.push(t); } });
+                    var typeBoxes = types.map(function (t, k) {
+                        var box = h('input', { type: 'checkbox', id: cid + '-t-' + k, value: t, checked: (c.product_types || []).indexOf(t) > -1, onchange: function () {
+                            c.product_types = typeBoxes.filter(function (b) { return b.checked; }).map(function (b) { return b.value; });
+                            touch();
+                        } });
+                        return box;
+                    });
+                    var modeBoxes = data.modes.map(function (m, k) {
+                        return h('input', { type: 'checkbox', id: cid + '-m-' + k, value: m.key, checked: (c.except_modes || []).indexOf(m.key) > -1, onchange: function () {
+                            c.except_modes = modeBoxes.filter(function (b) { return b.checked; }).map(function (b) { return b.value; });
+                            touch();
+                        } });
+                    });
+
+                    var tbody = h('tbody', {}, (c.rules || []).map(function (r, j) {
+                        var n = ' (contrainte ' + (i + 1) + ', règle ' + (j + 1) + ')';
+                        var effect = h('select', { 'aria-label': 'Effet' + n, onchange: function () { r.type = effect.value; touch(); } },
+                            Object.keys(EFFECTS).map(function (k) { return h('option', { value: k, selected: k === r.type }, EFFECTS[k]); }));
+                        var comment = h('input', { type: 'text', value: r.comment || '', maxlength: '300', 'aria-label': 'Commentaire' + n, class: 'ss-comment' });
+                        comment.addEventListener('input', function () { r.comment = comment.value; touch(); });
+                        var value = bindNum(r, 'value', { aria: 'Valeur (€ TTC)' + n });
+                        value.required = true;
+                        return h('tr', {},
+                            h('td', {}, bindNum(r, 'min_weight', { aria: 'Poids à partir de (g)' + n, placeholder: '—' })),
+                            h('td', {}, bindNum(r, 'max_weight', { aria: 'Poids jusqu’à (g)' + n, placeholder: '—' })),
+                            h('td', {}, bindNum(r, 'min_amount', { aria: 'Montant à partir de (€ TTC)' + n, placeholder: '—' })),
+                            h('td', {}, bindNum(r, 'max_amount', { aria: 'Montant jusqu’à (€ TTC)' + n, placeholder: '—' })),
+                            h('td', {}, effect), h('td', {}, value), h('td', {}, comment),
+                            h('td', {}, h('button', { class: 'ss-btn', type: 'button', 'aria-label': 'Supprimer la règle' + n, onclick: function () {
+                                c.rules.splice(j, 1); touch(); drawConstraints('#' + cid + '-addrule');
+                            } }, 'Supprimer')));
+                    }));
+
+                    function move(delta) {
+                        var to = i + delta;
+                        if (to < 0 || to >= consModel.length) { return; }
+                        consModel.splice(to, 0, consModel.splice(i, 1)[0]);
+                        touch();
+                        drawConstraints('#ss-c-' + to + (delta < 0 ? '-up' : '-down'));
+                    }
+
+                    consBox.appendChild(h('fieldset', { class: 'ss-constraint', id: cid }, legend,
+                        field('Nom de la contrainte', name),
+                        types.length
+                            ? h('fieldset', {}, h('legend', {}, 'Articles concernés'),
+                                h('div', { class: 'ss-inline' }, typeBoxes.map(function (b, k) { return h('div', { class: 'ss-field-row ss-check' }, b, h('label', { for: b.id }, types[k])); })),
+                                h('p', { class: 'ss-muted' }, 'Aucun coché : tous les articles. Le montant comparé est celui des articles concernés (TTC) ; une contrainte limitée à des types ne s’applique que si le panier en contient.'))
+                            : null,
+                        h('fieldset', {}, h('legend', {}, 'Modes non concernés'),
+                            h('div', { class: 'ss-inline' }, modeBoxes.map(function (b, k) { return h('div', { class: 'ss-field-row ss-check' }, b, h('label', { for: b.id }, data.modes[k].name)); }))),
+                        h('div', { class: 'ss-table-scroll', role: 'region', tabindex: '0', 'aria-label': 'Règles de la contrainte ' + (i + 1) + ', défilement horizontal' },
+                            h('table', {},
+                                h('caption', { class: 'ss-sr' }, 'Règles de la contrainte ' + (c.name || (i + 1))),
+                                h('thead', {}, h('tr', {}, ['Poids de (g)', 'Jusqu’à (g)', 'Montant de (€ TTC)', 'Jusqu’à (€ TTC)', 'Effet', 'Valeur (€ TTC)', 'Commentaire', ''].map(function (t) { return h('th', { scope: 'col' }, t); }))),
+                                tbody)),
+                        h('p', { class: 'ss-muted' }, 'Effet : « Minimum », le prix ne descend pas sous la valeur ; « Maximum », il ne la dépasse pas ; « Prix imposé », il est remplacé par la valeur.'),
+                        h('div', { class: 'ss-bar' },
+                            h('button', { class: 'ss-btn', type: 'button', id: cid + '-addrule', onclick: function () {
+                                c.rules = c.rules || [];
+                                c.rules.push(emptyRule()); touch();
+                                drawConstraints('#' + cid + ' tbody tr:last-child input');
+                            } }, 'Ajouter une règle'),
+                            h('button', { class: 'ss-btn', type: 'button', id: cid + '-up', disabled: i === 0, onclick: function () { move(-1); } }, 'Monter'),
+                            h('button', { class: 'ss-btn', type: 'button', id: cid + '-down', disabled: i === consModel.length - 1, onclick: function () { move(1); } }, 'Descendre'),
+                            h('button', { class: 'ss-btn', type: 'button', onclick: function () {
+                                if (!window.confirm('Supprimer la contrainte « ' + (c.name || (i + 1)) + ' » ? (effectif après « Enregistrer les contraintes »)')) { return; }
+                                consModel.splice(i, 1); touch(); drawConstraints('#ss-c-add');
+                            } }, 'Supprimer cette contrainte'))));
+                });
+
+                var consErrors = h('div', { role: 'alert' });
+                var saveBtn = h('button', { class: 'ss-btn ss-primary', type: 'button', onclick: function () {
+                    consErrors.innerHTML = '';
+                    saveBtn.disabled = true;
+                    consStatus.className = 'ss-form-status';
+                    consStatus.textContent = 'Enregistrement…';
+                    api('PUT', '/carrier-constraints', { constraints: consModel })
+                        .then(function () { consDirty = false; return reload({ constraints: 'Contraintes enregistrées.' }); })
+                        .catch(function (e) {
+                            consStatus.textContent = '';
+                            consErrors.appendChild(h('div', { class: 'ss-msg err' }, e.message,
+                                e.details && e.details.length ? h('ul', { class: 'ss-list' }, e.details.map(function (d) { return h('li', {}, d); })) : null));
+                            saveBtn.disabled = false;
+                        });
+                } }, 'Enregistrer les contraintes');
+                consBox.appendChild(h('div', { class: 'ss-bar' },
+                    h('button', { class: 'ss-btn', type: 'button', id: 'ss-c-add', onclick: function () {
+                        consModel.push({ name: '', product_types: [], except_modes: [], rules: [emptyRule()] });
+                        touch();
+                        drawConstraints('#ss-c-' + (consModel.length - 1) + '-name');
+                    } }, 'Ajouter une contrainte'),
+                    saveBtn,
+                    consDirty ? h('span', { class: 'ss-muted' }, 'Modifications non enregistrées.') : null));
+                consBox.appendChild(consErrors);
+                consBox.appendChild(consStatus);
+
+                if (focusSelector) {
+                    var target = consBox.querySelector(focusSelector) || consBox.querySelector('#ss-c-add');
+                    if (target && target.disabled) { target = consBox.querySelector('#ss-c-add'); }
+                    if (target) { target.focus(); }
+                }
             }
 
             function slug(name) {
@@ -1100,12 +1198,14 @@
                     subtotal: h('input', { type: 'number', id: 'ss-sim-s', min: '0', step: 'any', value: '12.95', required: true }),
                     zone: h('select', { id: 'ss-sim-z' }, zoneOptions.map(function (z) { return h('option', { value: z }, z); }))
                 };
+                var simTypes = (data.product_types || []).map(function (t, k) { return h('input', { type: 'checkbox', id: 'ss-sim-type-' + k, value: t, checked: true }); });
                 var out = h('div', { 'aria-live': 'polite' });
                 var hasResult = false;
                 simRefresh = function () { if (hasResult) { run(); } };
                 function run() {
                     out.textContent = 'Calcul…';
-                    api('POST', '/carriers/simulate', { weight: f.weight.value, thickness: f.thickness.value, subtotal: f.subtotal.value, zone: f.zone.value })
+                    api('POST', '/carriers/simulate', { weight: f.weight.value, thickness: f.thickness.value, subtotal: f.subtotal.value, zone: f.zone.value,
+                        types: simTypes.filter(function (b) { return b.checked; }).map(function (b) { return b.value; }) })
                         .then(function (res) { hasResult = true; drawResult(res.data); })
                         .catch(function (e) { out.innerHTML = ''; self.fail(e); });
                 }
@@ -1113,11 +1213,25 @@
                     h('div', { class: 'ss-bar' },
                         h('div', { class: 'ss-field-row' }, h('label', { for: 'ss-sim-w' }, 'Poids du colis, emballage compris (g)'), f.weight),
                         h('div', { class: 'ss-field-row' }, h('label', { for: 'ss-sim-t' }, 'Épaisseur (mm)'), f.thickness),
-                        h('div', { class: 'ss-field-row' }, h('label', { for: 'ss-sim-s' }, 'Montant des livres (€ TTC)'), f.subtotal),
+                        h('div', { class: 'ss-field-row' }, h('label', { for: 'ss-sim-s' }, 'Montant des articles (€ TTC)'), f.subtotal),
                         h('div', { class: 'ss-field-row' }, h('label', { for: 'ss-sim-z' }, 'Zone'), f.zone),
-                        h('button', { class: 'ss-btn ss-primary', type: 'submit' }, 'Calculer')));
+                        h('button', { class: 'ss-btn ss-primary', type: 'submit' }, 'Calculer')),
+                    simTypes.length ? h('fieldset', { class: 'ss-sim-types' }, h('legend', {}, 'Le panier contient des articles de type'),
+                        h('div', { class: 'ss-inline' }, simTypes.map(function (b) { return h('div', { class: 'ss-field-row ss-check' }, b, h('label', { for: b.id }, b.value)); }))) : null);
                 simBox.appendChild(form);
                 simBox.appendChild(out);
+
+                function remarks(r) {
+                    var q = r.quote, items = [];
+                    if (r.reason) { items.push(r.reason); }
+                    if (q && q.free_applied) { items.push('Offert dès le seuil du mode.'); }
+                    (q ? q.constraints || [] : []).forEach(function (c) {
+                        var effect = c.after !== c.before ? ' : ' + money(c.before) + ' → ' + money(c.after) : ' : sans effet (' + money(c.before) + ')';
+                        items.push('« ' + c.name + ' »' + effect + (c.comment ? ' — ' + c.comment : ''));
+                    });
+                    if (r.pickup) { items.push('Le client choisit un point de retrait.'); }
+                    return items.length > 1 ? h('ul', { class: 'ss-list' }, items.map(function (t) { return h('li', {}, t); })) : (items[0] || '');
+                }
 
                 function drawResult(res) {
                     var ht = (data.settings || {}).prices_entered === 'ht';
@@ -1125,7 +1239,7 @@
                     out.appendChild(h('div', { class: 'ss-table-scroll', role: 'region', tabindex: '0', 'aria-label': 'Résultat de la simulation' },
                         h('table', {},
                             h('caption', { class: 'ss-sr' }, 'Prix de chaque mode pour ce colis'),
-                            h('thead', {}, h('tr', {}, ['Mode', 'Proposé au client', 'Grille (' + (ht ? 'HT' : 'TTC') + ')', 'Avec marge', 'Avant plancher (TTC)', 'Plancher légal', 'Prix TTC', 'Remarque'].map(function (t) { return h('th', { scope: 'col' }, t); }))),
+                            h('thead', {}, h('tr', {}, ['Mode', 'Proposé au client', 'Grille ou forfait (' + (ht ? 'HT' : 'TTC') + ')', 'Avec marge', 'Avant contraintes (TTC)', 'Prix TTC', 'Contraintes et remarques'].map(function (t) { return h('th', { scope: 'col' }, t); }))),
                             h('tbody', {}, res.rows.map(function (r) {
                                 var q = r.quote;
                                 return h('tr', {},
@@ -1133,10 +1247,9 @@
                                     h('td', {}, r.offered ? 'Oui' : 'Non'),
                                     h('td', { class: 'ss-num' }, q ? money(q.grid_price) : '—'),
                                     h('td', { class: 'ss-num' }, q ? money(q.after_margin) : '—'),
-                                    h('td', { class: 'ss-num' }, q ? money(q.price_before_floor) : '—'),
-                                    h('td', { class: 'ss-num' }, q ? (q.floor > 0 ? money(q.floor) : 'aucun') : '—'),
+                                    h('td', { class: 'ss-num' }, q ? money(q.price_before_constraints) : '—'),
                                     h('td', { class: 'ss-num' }, q ? h('strong', {}, money(q.price)) : '—'),
-                                    h('td', {}, r.reason || (q && q.free_applied ? 'Offert dès le seuil du mode.' : (q && q.price > q.price_before_floor ? 'Relevé au plancher légal.' : (r.pickup ? 'Le client choisit un point de retrait.' : '')))));
+                                    h('td', {}, remarks(r)));
                             })))));
                 }
             }

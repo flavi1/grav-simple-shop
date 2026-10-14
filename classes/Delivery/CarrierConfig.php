@@ -44,8 +44,8 @@ class CarrierConfig
         }
 
         $errors = [];
-        if (isset($data['setup']) && !is_array($data['setup'])) {
-            $errors[] = 'setup doit être un bloc (réglages de première configuration).';
+        foreach (ShippingConstraints::validate($data['constraints'] ?? null) as $e) {
+            $errors[] = 'Contraintes globales : ' . $e;
         }
 
         foreach ($data['carriers'] as $key => $carrier) {
@@ -77,6 +77,7 @@ class CarrierConfig
             if (($carrier['pricing'] ?? null) === 'flat' && strpos((string) $key, '.') === false && !isset($carrier['flat_price'])) {
                 $errors[] = "{$where} : un forfait (pricing: flat) demande un prix (flat_price).";
             }
+            // Ancien réglage, remplacé par `except_modes` des contraintes globales (encore lu pour la conversion).
             if (isset($carrier['legal_floor']) && !is_bool($carrier['legal_floor'])) {
                 $errors[] = "{$where} : legal_floor doit valoir true ou false.";
             }
@@ -144,15 +145,15 @@ class CarrierConfig
      * édité à la main ne sont pas conservés).
      *
      * @param array<string, array> $carriers
-     * @param array                $setup    Bloc `setup` (ex. préréglage « Livres France » proposé ou écarté).
+     * @param array|null           $constraints Bloc `constraints` (ShippingConstraints::toStorage) ; null = absent.
      */
-    public static function dump(array $carriers, array $setup = []): string
+    public static function dump(array $carriers, ?array $constraints = null): string
     {
         $header = "# Modes de livraison — écrit par l'administration (Boutique > Transporteurs).\n"
             . "# Prix hors taxe par défaut (plugins.simple-shop.delivery.prices_entered). Les modes d'un plugin transporteur\n"
             . "# (clé « fournisseur.mode ») ne contiennent que les valeurs modifiées par rapport aux réglages du plugin.\n\n";
 
-        $data = $setup !== [] ? ['setup' => $setup, 'carriers' => $carriers] : ['carriers' => $carriers];
+        $data = $constraints !== null ? ['constraints' => $constraints, 'carriers' => $carriers] : ['carriers' => $carriers];
 
         return $header . Yaml::dump($data, 6, 2, Yaml::DUMP_OBJECT_AS_MAP);
     }

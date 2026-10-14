@@ -17,6 +17,12 @@ class ShippingManager
     /** @var array<string, array>|null Cache des modes assemblés. */
     private $modes = null;
 
+    /** @var array[] Contraintes globales (ShippingConstraints), dans l'ordre d'application. */
+    protected $constraints = [];
+
+    /** Vrai si carriers.yaml contient déjà un bloc `constraints` (sinon : conversion de l'ancien réglage). */
+    protected $constraintsStored = false;
+
     public function __construct()
     {
         $grav = Grav::instance();
@@ -26,6 +32,13 @@ class ShippingManager
         if ($filePath && file_exists($filePath)) {
             $data = json_decode( json_encode( \Symfony\Component\Yaml\Yaml::parseFile($filePath) ), true);
             $this->carriersConfig = $data['carriers'] ?? [];
+            $this->constraintsStored = is_array($data) && array_key_exists('constraints', $data);
+            if ($this->constraintsStored) {
+                $this->constraints = ShippingConstraints::normalize($data['constraints']);
+            }
+        }
+        if (!$this->constraintsStored) {
+            $this->constraints = ShippingConstraints::fromLegacy((array) $grav['config']->get('plugins.simple-shop', []), $this->carriersConfig);
         }
 
         // Fournisseurs (plugins transporteur), voir CarrierProviderInterface.
@@ -38,6 +51,28 @@ class ShippingManager
     public function getProviders(): array
     {
         return $this->providers;
+    }
+
+    /** @return array[] Contraintes globales normalisées, dans l'ordre d'application. */
+    public function getConstraints(): array
+    {
+        return $this->constraints;
+    }
+
+    /** Les contraintes viennent-elles de carriers.yaml (et non de l'ancien réglage `delivery.book_law`) ? */
+    public function constraintsStored(): bool
+    {
+        return $this->constraintsStored;
+    }
+
+    /**
+     * Type d'un produit pour les contraintes globales : `product_type` de la fiche, sinon nom de son gabarit (ex. book).
+     */
+    public static function productType(array $header, string $template): string
+    {
+        $type = trim((string) ($header['product_type'] ?? ''));
+
+        return $type !== '' ? $type : $template;
     }
 
     /** Tous les modes (manuels et de fournisseurs), actifs ou non, pour l'administration. @return array<string, array> */
@@ -58,16 +93,19 @@ class ShippingManager
         $totalWeight = 0;
         $stackThickness = 0;
         $basketSubtotal = 0;
+        $subtotals = [];
         $packaging = self::packaging((array) $grav['config']->get('plugins.simple-shop', []));
 
 		foreach ($cartItems as $route => $item) {
 			$basketSubtotal += ($item['price'] * $item['quantity']);
+			$type = '';
 
 			// Recherche de la page produit Grav
 			$page = $pages->dispatch($route);
 			
 			if ($page) {
 				$header = (array)$page->header();
+				$type = self::productType($header, (string) $page->template());
 				
 				// Si les données sont à la racine (comme dans book.yaml) 
 				// ou imbriquées dans un sous-tableau 'shop'
@@ -87,6 +125,7 @@ class ShippingManager
 				// Fallback si la page produit physique n'est pas résolue
 				$totalWeight += (100 * $item['quantity']);
 			}
+			$subtotals[$type] = ($subtotals[$type] ?? 0) + $item['price'] * $item['quantity'];
 		}
 
         // Emballage : poids fixe et surépaisseur par commande (valeurs de départ, réglables).
@@ -97,6 +136,7 @@ class ShippingManager
 
         return [
             'subtotal'  => $basketSubtotal,
+            'subtotals' => $subtotals,
             'weight'    => $totalWeight,
             'thickness' => $stackThickness
         ];
@@ -127,7 +167,7 @@ class ShippingManager
     /**
      * Prix de livraison TTC d'un palier : prix de la grille + marge (fixe et/ou en %), puis TVA du site si les prix
      * sont saisis HT. Un palier à 0 (livraison offerte) reste à 0 : la marge ne s'y ajoute pas.
-     * Le plancher légal est appliqué ensuite, sur le TTC.
+     * Les contraintes globales (ShippingConstraints) s'appliquent ensuite, sur le TTC.
      */
     public static function priceTtc(float $gridPrice, array $margin, array $config): float
     {
@@ -146,14 +186,16 @@ class ShippingManager
      * Prix d'un mode pour un panier, avec le détail du calcul (utilisé aussi par le simulateur d'administration).
      *
      * @param array $mode    Mode normalisé (CarrierCatalog).
-     * @param array $metrics `subtotal` (€ TTC de livres), `weight` (g), `thickness` (mm).
+     * @param array $metrics     `subtotal` (€ TTC, tous articles), `subtotals` (€ TTC par type), `weight` (g), `thickness` (mm).
+     * @param array $constraints Contraintes globales normalisées (ShippingConstraints).
      *
      * @return array|null null = mode inéligible (désactivé, indisponible, hors contraintes, aucun palier) ;
-     *         sinon price (TTC final), grid_price (base saisie), after_margin, vat_rate, price_before_floor, floor, free_applied.
+     *         sinon price (TTC final), grid_price (base saisie), after_margin, vat_rate, price_before_constraints,
+     *         constraints (contraintes appliquées), free_applied.
      */
-    public static function quoteMode(array $mode, string $zone, array $metrics, array $config, bool $ignoreEnabled = false): ?array
+    public static function quoteMode(array $mode, string $zone, array $metrics, array $config, bool $ignoreEnabled = false, array $constraints = []): ?array
     {
-        return self::evaluate($mode, $zone, $metrics, $config, $ignoreEnabled)['quote'];
+        return self::evaluate($mode, $zone, $metrics, $config, $ignoreEnabled, $constraints)['quote'];
     }
 
     /**
@@ -161,7 +203,7 @@ class ShippingManager
      *
      * @return array{quote: ?array, reason: string} reason vide si le mode est proposé.
      */
-    public static function evaluate(array $mode, string $zone, array $metrics, array $config, bool $ignoreEnabled = false): array
+    public static function evaluate(array $mode, string $zone, array $metrics, array $config, bool $ignoreEnabled = false, array $constraints = []): array
     {
         $no = static fn (string $reason): array => ['quote' => null, 'reason' => $reason];
 
@@ -172,12 +214,12 @@ class ShippingManager
             return $no((string) ($mode['unavailable_reason'] ?? '') ?: 'Mode indisponible.');
         }
 
-        $constraints = $mode['constraints'] ?? [];
-        if (!empty($constraints['max_weight']) && $metrics['weight'] > $constraints['max_weight']) {
-            return $no('Colis trop lourd pour ce mode (' . $constraints['max_weight'] . ' g au plus).');
+        $limits = $mode['constraints'] ?? [];
+        if (!empty($limits['max_weight']) && $metrics['weight'] > $limits['max_weight']) {
+            return $no('Colis trop lourd pour ce mode (' . $limits['max_weight'] . ' g au plus).');
         }
-        if (!empty($constraints['max_thickness']) && $metrics['thickness'] > $constraints['max_thickness']) {
-            return $no('Colis trop épais pour ce mode (' . $constraints['max_thickness'] . ' mm au plus).');
+        if (!empty($limits['max_thickness']) && $metrics['thickness'] > $limits['max_thickness']) {
+            return $no('Colis trop épais pour ce mode (' . $limits['max_thickness'] . ' mm au plus).');
         }
 
         $flat = ($mode['pricing'] ?? 'grid') === 'flat';
@@ -214,19 +256,18 @@ class ShippingManager
         $margin = $flat ? [] : (array) ($mode['margin'] ?? []);
         $before = self::priceTtc($grid, $margin, $config);
 
-        // Plancher légal des frais de livraison de livres (loi Darcos). `legal_floor: false` : retrait sur place,
-        // qui n'est pas une livraison au sens de la loi (à n'utiliser que pour cela ; voir LegalShippingFloor).
-        $floor = ($mode['legal_floor'] ?? true) === false ? 0.0 : LegalShippingFloor::minimum((float) $metrics['subtotal'], $config);
+        // Contraintes globales (lois, offres commerciales), dans l'ordre de la liste.
+        [$final, $applied] = ShippingConstraints::apply($before, (string) ($mode['key'] ?? ''), $metrics, $constraints);
 
         $quote = [
-            'price'              => round(max($before, $floor), 2),
+            'price'              => $final,
             'grid_price'         => $matched,
             'after_margin'       => $grid > 0
                 ? round($grid * (1 + max(0.0, (float) ($margin['percent'] ?? 0)) / 100) + max(0.0, (float) ($margin['fixed'] ?? 0)), 4)
                 : 0.0,
             'vat_rate'           => self::pricesEnteredHt($config) ? \Grav\Plugin\SimpleShop\Services\TaxManager::defaultRate($config) : 0.0,
-            'price_before_floor' => $before,
-            'floor'              => $floor,
+            'price_before_constraints' => $before,
+            'constraints'        => $applied,
             'free_applied'       => $freeApplied,
         ];
 
@@ -242,7 +283,7 @@ class ShippingManager
         $shopConfig = (array) Grav::instance()['config']->get('plugins.simple-shop', []);
 
         foreach ($this->getModes() as $key => $mode) {
-            $quote = self::quoteMode($mode, $zone, $metrics, $shopConfig);
+            $quote = self::quoteMode($mode, $zone, $metrics, $shopConfig, false, $this->constraints);
             if ($quote === null) {
                 continue;
             }

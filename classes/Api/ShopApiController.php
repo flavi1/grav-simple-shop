@@ -11,6 +11,7 @@ use Grav\Plugin\Api\Exceptions\ValidationException;
 use Grav\Plugin\Api\Response\ApiResponse;
 use Grav\Plugin\SimpleShop\Delivery\CarrierConfig;
 use Grav\Plugin\SimpleShop\Delivery\ModeEditor;
+use Grav\Plugin\SimpleShop\Delivery\ShippingConstraints;
 use Grav\Plugin\SimpleShop\Delivery\ShippingManager;
 use Grav\Plugin\SimpleShop\Delivery\ZoneResolver;
 use Grav\Plugin\SimpleShop\Invoicing\InvoiceManager;
@@ -234,9 +235,9 @@ class ShopApiController extends AbstractApiController
                 'prices_entered' => ShippingManager::pricesEnteredHt($config) ? 'ht' : 'ttc',
                 'packaging'      => ShippingManager::packaging($config),
             ],
-            'setup'     => ['books_preset' => $this->booksPresetState($path, $manager->getModes())],
-            'legal'     => [
-                'book_law'  => \Grav\Plugin\SimpleShop\Delivery\LegalShippingFloor::settings($config),
+            'constraints'   => $manager->getConstraints(),
+            'product_types' => $this->productTypes($manager->getConstraints()),
+            'tax'       => [
                 'vat_rate'  => \Grav\Plugin\SimpleShop\Services\TaxManager::defaultRate(),
                 'tax_code'  => \Grav\Plugin\SimpleShop\Services\TaxManager::defaultCode(),
             ],
@@ -244,70 +245,55 @@ class ShopApiController extends AbstractApiController
     }
 
     /**
-     * Préréglage « Livres France » : « pending » (à proposer) tant qu'il n'a été ni appliqué ni écarté,
-     * sinon « applied » ou « dismissed » (bloc `setup` de carriers.yaml).
+     * Types de produits du catalogue (pour les contraintes globales) : `product_type` des fiches à prix, sinon leur gabarit.
+     *
+     * @return string[]
      */
-    private function booksPresetState(string $path, array $modes): string
+    private function productTypes(array $constraints): array
     {
-        $setup = [];
-        if (is_file($path)) {
-            try {
-                $setup = (array) (\Symfony\Component\Yaml\Yaml::parseFile($path)['setup'] ?? []);
-            } catch (\Throwable $e) {
-                $setup = [];
+        $types = [];
+        try {
+            $pages = $this->grav['pages'];
+            $pages->init();
+            foreach ($pages->all() as $page) {
+                $header = (array) $page->header();
+                if (isset($header['product_price'])) {
+                    $types[] = ShippingManager::productType($header, (string) $page->template());
+                }
             }
+        } catch (\Throwable $e) {
+            $this->grav['log']->warning('[SimpleShop][API] Types de produits illisibles : ' . $e->getMessage());
         }
-        $state = (string) ($setup['books_preset'] ?? '');
-        if (in_array($state, ['applied', 'dismissed'], true)) {
-            return $state;
+        foreach ($constraints as $c) {
+            $types = array_merge($types, $c['product_types']);
         }
+        $types = array_values(array_unique(array_filter($types)));
+        sort($types);
 
-        return isset($modes[ModeEditor::BOOKS_PRESET_KEY]) ? 'applied' : 'pending';
+        return $types;
     }
 
-    /**
-     * POST /simple-shop/carriers/preset — corps : {"action": "apply"|"dismiss", "disable_others": bool}.
-     * « apply » crée le mode forfaitaire « Livres France » (et désactive les autres modes si demandé) ;
-     * « dismiss » ne le propose plus.
-     */
-    public function carriersPreset(ServerRequestInterface $request): ResponseInterface
+    /** PUT /simple-shop/carrier-constraints — corps : {"constraints": [...]} ; remplace toutes les contraintes globales. */
+    public function saveCarrierConstraints(ServerRequestInterface $request): ResponseInterface
     {
         $this->requirePermission($request, self::PERM_WRITE);
 
-        $body = $this->getRequestBody($request);
-        $action = (string) ($body['action'] ?? '');
-        if (!in_array($action, ['apply', 'dismiss'], true)) {
-            throw new ValidationException('Action inconnue.', ['action' => ['Attendu : apply ou dismiss.']]);
+        $list = $this->getRequestBody($request)['constraints'] ?? null;
+        if (!is_array($list)) {
+            throw new ValidationException('Le champ « constraints » (liste) est obligatoire.');
         }
-        $config = (array) $this->grav['config']->get('plugins.simple-shop', []);
-        $law = \Grav\Plugin\SimpleShop\Delivery\LegalShippingFloor::settings($config);
-        if ($action === 'apply' && !$law['enabled']) {
-            throw new ValidationException('Préréglage impossible.', ['preset' => [
-                'Le plancher légal est désactivé (Plugins > Simple Shop > Livraison) : ce forfait rendrait la livraison gratuite.',
-            ]]);
+        [$clean, $errors] = ShippingConstraints::sanitize($list);
+        if ($errors !== []) {
+            throw new ValidationException('Contraintes invalides.', ['constraints' => $errors]);
         }
-        $disableOthers = $action === 'apply' && filter_var($body['disable_others'] ?? false, FILTER_VALIDATE_BOOLEAN);
-        $modes = (new ShippingManager())->getModes();
 
-        $this->updateCarriersFile(function (array $carriers, array &$setup) use ($action, $law, $disableOthers, $modes): array {
-            $setup['books_preset'] = $action === 'apply' ? 'applied' : 'dismissed';
-            if ($action !== 'apply') {
-                return $carriers;
-            }
-            $carriers[ModeEditor::BOOKS_PRESET_KEY] = ModeEditor::booksPreset($law);
-            if ($disableOthers) {
-                foreach ($modes as $key => $mode) {
-                    if ($key !== ModeEditor::BOOKS_PRESET_KEY && $mode['enabled']) {
-                        $carriers[$key] = ['enabled' => false] + (is_array($carriers[$key] ?? null) ? $carriers[$key] : []);
-                        $carriers[$key]['enabled'] = false;
-                    }
-                }
-            }
+        $this->updateCarriersFile(function (array $carriers, ?array &$constraints) use ($clean): array {
+            $constraints = ShippingConstraints::toStorage($clean);
 
             return $carriers;
         });
 
-        return ApiResponse::create(['books_preset' => $action === 'apply' ? 'applied' : 'dismissed', 'key' => ModeEditor::BOOKS_PRESET_KEY]);
+        return ApiResponse::create(['constraints' => (new ShippingManager())->getConstraints()]);
     }
 
     /** @return array Vue d'un mode pour l'interface (sans les valeurs par défaut du fournisseur). */
@@ -398,15 +384,22 @@ class ShopApiController extends AbstractApiController
         $subtotal = $num(isset($body['subtotal']) ? str_replace(',', '.', (string) $body['subtotal']) : null, 1000000);
         $zone = (string) ($body['zone'] ?? 'FR-METRO');
         if ($weight === null || $thickness === null || $subtotal === null || !in_array($zone, CarrierConfig::ZONES, true)) {
-            throw new ValidationException('Paramètres de simulation invalides.', ['simulation' => ['Poids (g), épaisseur (mm), montant des livres (€ TTC) et zone sont obligatoires.']]);
+            throw new ValidationException('Paramètres de simulation invalides.', ['simulation' => ['Poids (g), épaisseur (mm), montant des articles (€ TTC) et zone sont obligatoires.']]);
+        }
+        // Types d'articles du panier simulé : le montant est attribué à chacun (aucun = article sans type).
+        $types = array_values(array_filter((array) ($body['types'] ?? []), static fn ($t) => is_string($t) && preg_match('/^[a-z0-9_.-]{1,60}$/i', $t)));
+        $subtotals = [];
+        foreach ($types ?: [''] as $t) {
+            $subtotals[$t] = $subtotal;
         }
 
         $config = (array) $this->grav['config']->get('plugins.simple-shop', []);
-        $metrics = ['weight' => (int) $weight, 'thickness' => (int) $thickness, 'subtotal' => $subtotal];
+        $metrics = ['weight' => (int) $weight, 'thickness' => (int) $thickness, 'subtotal' => $subtotal, 'subtotals' => $subtotals];
 
         $rows = [];
-        foreach ((new ShippingManager())->getModes() as $key => $mode) {
-            $r = ShippingManager::evaluate($mode, $zone, $metrics, $config, true);
+        $manager = new ShippingManager();
+        foreach ($manager->getModes() as $key => $mode) {
+            $r = ShippingManager::evaluate($mode, $zone, $metrics, $config, true, $manager->getConstraints());
             $rows[] = [
                 'key'      => $key,
                 'name'     => $mode['name'],
@@ -464,8 +457,11 @@ class ShopApiController extends AbstractApiController
         try {
             $current = is_file($path) ? \Symfony\Component\Yaml\Yaml::parseFile($path) : [];
             $carriers = is_array($current['carriers'] ?? null) ? $current['carriers'] : [];
-            $setup = is_array($current['setup'] ?? null) ? $current['setup'] : [];
-            $errors = CarrierConfig::save($path, CarrierConfig::dump($change($carriers, $setup), $setup));
+            // Sans bloc `constraints`, l'ancien réglage (delivery.book_law, legal_floor) est converti à la première écriture.
+            $constraints = is_array($current) && array_key_exists('constraints', $current)
+                ? ShippingConstraints::toStorage(ShippingConstraints::normalize($current['constraints']))
+                : ShippingConstraints::toStorage(ShippingConstraints::fromLegacy((array) $this->grav['config']->get('plugins.simple-shop', []), $carriers));
+            $errors = CarrierConfig::save($path, CarrierConfig::dump($change($carriers, $constraints), $constraints));
             if ($errors !== []) {
                 throw new ValidationException('Configuration des transporteurs invalide.', ['carriers' => $errors]);
             }

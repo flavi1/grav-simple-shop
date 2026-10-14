@@ -13,7 +13,7 @@ namespace Grav\Plugin\SimpleShop\Delivery;
 final class CarrierCatalog
 {
     /** Champs d'un mode que l'administration peut modifier (le reste vient du fournisseur). */
-    public const EDITABLE = ['name', 'description', 'enabled', 'legal_floor', 'pricing', 'flat_price', 'margin', 'free_from', 'constraints', 'rules'];
+    public const EDITABLE = ['name', 'description', 'enabled', 'pricing', 'flat_price', 'margin', 'free_from', 'constraints', 'rules'];
 
     /**
      * Types de calcul d'un mode :
@@ -97,7 +97,6 @@ final class CarrierCatalog
             'name'                  => (string) ($mode['name'] ?? $key),
             'description'           => (string) ($mode['description'] ?? ''),
             'enabled'               => (bool) ($mode['enabled'] ?? false),
-            'legal_floor'           => ($mode['legal_floor'] ?? true) !== false,
             'pricing'               => in_array($mode['pricing'] ?? null, self::PRICING, true) ? $mode['pricing'] : ($provider !== null ? 'provider' : 'grid'),
             'flat_price'            => isset($mode['flat_price']) && is_numeric($mode['flat_price']) && $mode['flat_price'] >= 0 ? (float) $mode['flat_price'] : null,
             'margin'                => [

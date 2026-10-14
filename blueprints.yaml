@@ -118,7 +118,7 @@ form:
         delivery.prices_entered:
           type: select
           label: "Prix de carriers.yaml"
-          help: "Hors taxe : la TVA du site (5,5 %) est ajoutée automatiquement, avant le plancher légal."
+          help: "Hors taxe : la TVA du site est ajoutée automatiquement, avant les contraintes globales (Boutique > Transporteurs)."
           default: ht
           options: { ht: "Hors taxe (HT)", ttc: "Toutes taxes comprises (TTC)" }
         delivery.packaging.weight:
@@ -130,30 +130,6 @@ form:
           type: number
           label: "Épaisseur de l'emballage par commande (mm)"
           default: 6
-        delivery.book_law.enabled:
-          type: toggle
-          label: "Plancher légal des frais de livraison de livres (loi Darcos)"
-          help: "Une commande de livres livrée ne peut pas avoir de livraison gratuite : minimum 3,00 € TTC sous 35 € TTC, puis 0,01 € TTC. Désactivez uniquement si la loi ne s'applique pas à votre activité."
-          highlight: 1
-          default: 1
-          options: { 1: Activé, 0: Désactivé }
-          validate: { type: bool }
-        delivery.book_law.threshold:
-          type: number
-          label: "Seuil de commande (€ TTC)"
-          help: "Au-dessous : frais minimum ci-dessous. À partir de ce montant : frais symbolique."
-          step: 0.01
-          default: 35
-        delivery.book_law.below:
-          type: number
-          label: "Frais minimum sous le seuil (€ TTC)"
-          step: 0.01
-          default: 3
-        delivery.book_law.at_or_above:
-          type: number
-          label: "Frais minimum à partir du seuil (€ TTC)"
-          step: 0.01
-          default: 0.01
 
     invoicing_fieldset:
       type: fieldset

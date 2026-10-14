@@ -1,6 +1,6 @@
 <?php
 // Tests en ligne de commande des types de calcul (forfait / tarif du plugin / grille personnalisée)
-// et du préréglage « Livres France ».
+// (les contraintes globales sont testées dans tests/constraints.php).
 // Lancement : YAML=<autoload symfony/yaml> php -d zend.assertions=1 -d assert.exception=1 tests/carriers-pricing.php
 if (getenv('YAML')) {
     require getenv('YAML');
@@ -15,7 +15,7 @@ spl_autoload_register(function ($c) {
     }
 });
 
-use Grav\Plugin\SimpleShop\Delivery\{CarrierCatalog, CarrierConfig, CarrierProviderInterface, ModeEditor, ShippingManager};
+use Grav\Plugin\SimpleShop\Delivery\{CarrierCatalog, CarrierConfig, CarrierProviderInterface, ModeEditor, ShippingConstraints, ShippingManager};
 
 final class FakeProvider implements CarrierProviderInterface
 {
@@ -35,10 +35,12 @@ final class FakeProvider implements CarrierProviderInterface
     public function testConnection(): array { return ['ok' => true, 'message' => '']; }
 }
 
-$config = ['taxes' => ['default' => 'TVA_5_5'], 'delivery' => ['prices_entered' => 'ht', 'book_law' => ['enabled' => true]]];
-$small = ['subtotal' => 12.95, 'weight' => 340, 'thickness' => 29];
-$big = ['subtotal' => 40.0, 'weight' => 900, 'thickness' => 60];
-$price = fn (array $mode, array $m) => ShippingManager::quoteMode($mode, 'FR-METRO', $m, $config)['price'] ?? null;
+$config = ['taxes' => ['default' => 'TVA_5_5'], 'delivery' => ['prices_entered' => 'ht']];
+$small = ['subtotal' => 12.95, 'subtotals' => ['book' => 12.95], 'weight' => 340, 'thickness' => 29];
+$big = ['subtotal' => 40.0, 'subtotals' => ['book' => 40.0], 'weight' => 900, 'thickness' => 60];
+$floor = ShippingConstraints::normalize([['name' => 'Plancher', 'product_types' => ['book'], 'rules' => [
+    ['max_amount' => 34.99, 'type' => 'minimum', 'value' => 3], ['min_amount' => 35, 'type' => 'minimum', 'value' => 0.01]]]]);
+$price = fn (array $mode, array $m, array $c = []) => ShippingManager::quoteMode($mode, 'FR-METRO', $m, $config, false, $c)['price'] ?? null;
 $providers = ['fake' => new FakeProvider()];
 
 // --- Catalogue : valeurs par défaut du type de calcul
@@ -57,7 +59,8 @@ $flat = CarrierCatalog::build([], ['f' => ['name' => 'Forfait', 'enabled' => tru
 assert($price($flat, $small) === 5.28, 'forfait 5 € HT → 5,28 € TTC, marge ignorée');
 assert($price($flat, $big) === 5.28, 'forfait : même prix quel que soit le poids');
 $flat['free_from'] = 35.0;
-assert($price($flat, $big) === 0.01, 'offert dès 35 € → plancher 0,01 €');
+assert($price($flat, $big) === 0.0, 'offert dès 35 €, sans contrainte : 0 €');
+assert($price($flat, $big, $floor) === 0.01, 'offert dès 35 € → plancher 0,01 €');
 // Forfait du plugin
 $cat = CarrierCatalog::build($providers, ['fake.dom' => ['pricing' => 'flat', 'flat_price' => 6]]);
 assert($price($cat['fake.dom'], $big) === 6.33);
@@ -65,11 +68,9 @@ assert($price($cat['fake.dom'], $big) === 6.33);
 $cat = CarrierCatalog::build($providers, []);
 assert($price($cat['fake.dom'], $small) === round((7 + 1) * 1.055, 2));
 
-// --- Préréglage « Livres France » : forfait 0 € soumis au plancher → 3,00 € / 0,01 €
-$preset = ModeEditor::booksPreset(['enabled' => true, 'threshold' => 35, 'below' => 3, 'at_or_above' => 0.01]);
-assert($preset['description'] === '3,00 € pour moins de 35,00 € de livres, 0,01 € au-delà.');
-$p = CarrierCatalog::build([], [ModeEditor::BOOKS_PRESET_KEY => $preset])[ModeEditor::BOOKS_PRESET_KEY];
-assert($price($p, $small) === 3.0 && $price($p, $big) === 0.01);
+// --- Forfait 0 € + plancher = 3,00 € / 0,01 € (ancien préréglage, désormais une contrainte globale)
+$zero = CarrierCatalog::build([], ['z' => ['name' => 'Z', 'enabled' => true, 'pricing' => 'flat', 'flat_price' => 0]])['z'];
+assert($price($zero, $small, $floor) === 3.0 && $price($zero, $big, $floor) === 0.01);
 
 // --- ModeEditor : validation et stockage
 $base = ['name' => 'X', 'enabled' => true, 'rules' => []];
@@ -97,7 +98,7 @@ assert(ModeEditor::toStorage($c, $defaults) === []);
 
 // --- CarrierConfig : nouveaux champs et bloc setup
 if (class_exists(\Symfony\Component\Yaml\Yaml::class)) {
-    assert(CarrierConfig::validate(CarrierConfig::dump(['f' => ['name' => 'F', 'pricing' => 'flat', 'flat_price' => 0]], ['books_preset' => 'applied'])) === []);
+    assert(CarrierConfig::validate(CarrierConfig::dump(['f' => ['name' => 'F', 'pricing' => 'flat', 'flat_price' => 0]], ShippingConstraints::toStorage($floor))) === []);
     assert(CarrierConfig::validate("carriers:\n  f: { name: F, pricing: flat }\n") !== []);
     assert(CarrierConfig::validate("carriers:\n  f: { name: F, pricing: provider, rules: [] }\n") !== []);
     assert(CarrierConfig::validate("carriers:\n  f: { name: F, pricing: autre }\n") !== []);

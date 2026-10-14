@@ -13,7 +13,7 @@ final class ModeEditor
     /**
      * Valide et normalise un mode reçu de l'interface.
      *
-     * @param array $in Champs bruts : name, description, enabled, legal_floor, pricing (flat|provider|grid), flat_price,
+     * @param array $in Champs bruts : name, description, enabled, pricing (flat|provider|grid), flat_price,
      *                  margin, free_from, constraints, rules.
      *
      * @return array{0: array, 1: string[]} [mode normalisé, erreurs en français]
@@ -58,7 +58,7 @@ final class ModeEditor
         }
         $flatPrice = $number($in['flat_price'] ?? null, 'Prix du forfait', 1000);
         if ($pricing === 'flat' && $flatPrice === null && !in_array('Prix du forfait : nombre positif attendu (au plus 1000).', $errors, true)) {
-            $errors[] = 'Le prix du forfait est obligatoire (0 = gratuit, au plancher légal près).';
+            $errors[] = 'Le prix du forfait est obligatoire (0 = gratuit, avant les contraintes globales).';
         }
 
         $margin = (array) ($in['margin'] ?? []);
@@ -119,7 +119,6 @@ final class ModeEditor
             'name'        => $name,
             'description' => $description,
             'enabled'     => filter_var($in['enabled'] ?? false, FILTER_VALIDATE_BOOLEAN),
-            'legal_floor' => filter_var($in['legal_floor'] ?? true, FILTER_VALIDATE_BOOLEAN),
             'pricing'     => $pricing,
             'flat_price'  => $pricing === 'flat' ? $flatPrice : null,
             'margin'      => [
@@ -181,30 +180,6 @@ final class ModeEditor
         }
 
         return $out;
-    }
-
-    /** Clé du mode créé par le préréglage « Livres France ». */
-    public const BOOKS_PRESET_KEY = 'livres_france';
-
-    /**
-     * Préréglage « Livres France » : un forfait à 0 € HT soumis au plancher légal, soit exactement le minimum de la loi
-     * (3 € TTC sous 35 € de livres, 0,01 € au-delà avec les réglages par défaut). Il suit donc les montants du plancher.
-     *
-     * @param array $law LegalShippingFloor::settings() : enabled, threshold, below, at_or_above.
-     */
-    public static function booksPreset(array $law): array
-    {
-        $fmt = static fn ($v): string => number_format((float) $v, 2, ',', ' ') . ' €';
-
-        return [
-            'name'        => 'Livraison',
-            'description' => $fmt($law['below'] ?? 3) . ' pour moins de ' . $fmt($law['threshold'] ?? 35) . ' de livres, '
-                . $fmt($law['at_or_above'] ?? 0.01) . ' au-delà.',
-            'enabled'     => true,
-            'legal_floor' => true,
-            'pricing'     => 'flat',
-            'flat_price'  => 0.0,
-        ];
     }
 
     /** Une clé de mode manuel est-elle valide ? (minuscules, chiffres, _ ; 2 à 40 caractères) */
