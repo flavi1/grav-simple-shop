@@ -35,8 +35,12 @@ delivery:
     weight: 40            # grammes
     thickness: 6          # millimètres
   # Lois et offres sur le prix de livraison (ex. plancher des frais de livraison de livres) : « contraintes globales »,
-  # bloc `constraints` de carriers.yaml, réglées dans Admin2 > Boutique > Transporteurs. L'ancienne clé `book_law`
-  # n'est plus lue que pour convertir une configuration existante.
+  # bloc `constraints` de carriers.yaml, réglées dans Admin2 > Boutique > Transporteurs.
+  # Géocodage (retrait sur place : distance client ↔ lieu de retrait). Service public de la Base Adresse Nationale
+  # (Géoplateforme IGN, données ouvertes, sans clé) ; tout service compatible addok peut le remplacer (https obligatoire).
+  geocoding:
+    url: 'https://data.geopf.fr/geocodage/search'
+    timeout: 4            # secondes
 
 # Taxes. Les prix des fiches produit sont saisis HORS TAXE ; le panier, le paiement et
 # les factures sont en TTC. Un seul code pour tout le site (produits et livraison).

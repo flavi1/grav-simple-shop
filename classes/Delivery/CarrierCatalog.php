@@ -75,7 +75,11 @@ final class CarrierCatalog
                 // Les entrées « fournisseur.mode » sans fournisseur actif sont ignorées (plugin désactivé).
                 continue;
             }
-            if (!in_array($def['pricing'] ?? null, ['flat', 'grid'], true)) {
+            if (($def['kind'] ?? '') === 'local_pickup') {
+                $def['pricing'] = 'flat';
+                $def['flat_price'] = $def['flat_price'] ?? 0;
+                $def['rules'] = [];
+            } elseif (!in_array($def['pricing'] ?? null, ['flat', 'grid'], true)) {
                 $def['pricing'] = 'grid';
             }
             $modes[$key] = self::normalize($def, $key, null, $key, 'manual');
@@ -89,9 +93,24 @@ final class CarrierCatalog
         $constraints = (array) ($mode['constraints'] ?? []);
         $margin = (array) ($mode['margin'] ?? []);
 
+        $address = (array) ($mode['pickup_address'] ?? []);
+        $geo = (array) ($mode['geo'] ?? []);
+        $localPickup = $provider === null && ($mode['kind'] ?? '') === 'local_pickup';
+
         return [
             'key'                   => $key,
             'provider'              => $provider,
+            // Retrait sur place : prix unique, proposé si le client est à moins de `max_distance_km` du lieu de retrait.
+            'kind'                  => $localPickup ? 'local_pickup' : 'delivery',
+            'pickup_address'        => $localPickup ? [
+                'street'      => (string) ($address['street'] ?? ''),
+                'postal_code' => (string) ($address['postal_code'] ?? ''),
+                'city'        => (string) ($address['city'] ?? ''),
+            ] : null,
+            'max_distance_km'       => $localPickup && is_numeric($mode['max_distance_km'] ?? null) ? (float) $mode['max_distance_km'] : null,
+            'geo'                   => $localPickup && is_numeric($geo['lat'] ?? null) && is_numeric($geo['lon'] ?? null)
+                ? ['lat' => (float) $geo['lat'], 'lon' => (float) $geo['lon'], 'label' => (string) ($geo['label'] ?? '')]
+                : null,
             'local_key'             => $local,
             'source'                => $source,
             'name'                  => (string) ($mode['name'] ?? $key),

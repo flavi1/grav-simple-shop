@@ -3,9 +3,8 @@
 namespace Grav\Plugin\SimpleShop\Delivery;
 
 /**
- * ANCIEN RÉGLAGE, conservé pour la conversion : la loi Darcos est désormais une contrainte globale de la
- * configuration du site (ShippingConstraints). Cette classe ne sert plus qu'à lire `delivery.book_law` dans
- * ShippingConstraints::fromLegacy() ; à retirer avec cette conversion (voir LATER.md).
+ * PLUS UTILISÉE (14/10/2026) : la loi Darcos est une contrainte globale de la configuration du site
+ * (ShippingConstraints). Fichier à supprimer : voir REMOVE.md.
  *
  * Plancher légal des frais de livraison de livres (« loi Darcos »).
  *

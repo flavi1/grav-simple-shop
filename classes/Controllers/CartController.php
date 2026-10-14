@@ -531,6 +531,9 @@ class CartController extends AbstractController
 		$shippingManager = new ShippingManager();
 
 		$metrics = $shippingManager->getCartPhysicalMetrics($cartItems);
+		if ($shippingManager->needsDestination()) {
+			$metrics['destination'] = $this->customerTown((array) $customerData);
+		}
 		$zone = ZoneResolver::resolve($customerData);
 		$availableCarriers = $shippingManager->getAvailableCarriers($zone, $metrics);
 
@@ -879,4 +882,32 @@ class CartController extends AbstractController
 
         return $this->renderStep('step4confirmationorder');
     }
+
+	/**
+	 * Commune du client géocodée (code postal + ville seulement), pour les retraits sur place.
+	 * Mise en cache dans la session pour ne pas interroger le service à chaque affichage ; null si inconnue.
+	 */
+	private function customerTown(array $customer): ?array
+	{
+		$postcode = trim((string) ($customer['postal-code'] ?? ''));
+		$city = trim((string) ($customer['city'] ?? ''));
+		$key = md5($postcode . '|' . mb_strtolower($city));
+		$cache = $this->session->shop_geo ?? null;
+		if (is_array($cache) && ($cache['key'] ?? null) === $key) {
+			return $cache['destination'];
+		}
+
+		try {
+			$destination = \Grav\Plugin\SimpleShop\Delivery\Geocoder::fromConfig((array) $this->grav['config']->get('plugins.simple-shop', []))
+				->geocodeTown($postcode, $city);
+		} catch (\Throwable $e) {
+			// Service injoignable : le retrait sur place n'est simplement pas proposé (nouvel essai au prochain affichage).
+			$this->grav['log']->warning('[SimpleShop] Géocodage de la commune du client : ' . $e->getMessage());
+
+			return null;
+		}
+		$this->session->shop_geo = ['key' => $key, 'destination' => $destination];
+
+		return $destination;
+	}
 }

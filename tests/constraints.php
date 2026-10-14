@@ -1,6 +1,5 @@
 <?php
-// Tests en ligne de commande des contraintes globales (ShippingConstraints) : conditions, ordre, types, exclusions,
-// conversion de l'ancien réglage `delivery.book_law`.
+// Tests en ligne de commande des contraintes globales (ShippingConstraints) : conditions, ordre, types, exclusions.
 // Lancement : YAML=<autoload symfony/yaml> php -d zend.assertions=1 -d assert.exception=1 tests/constraints.php
 if (getenv('YAML')) {
     require getenv('YAML');
@@ -65,13 +64,6 @@ assert($e !== []);
 [$c, $e] = SC::sanitize([['name' => 'X', 'product_types' => ['book'], 'rules' => [['type' => 'minimum', 'value' => '3,5', 'max_amount' => '34,99', 'min_weight' => '']]]]);
 assert($e === [] && $c[0]['rules'][0]['value'] === 3.5 && $c[0]['rules'][0]['max_amount'] === 34.99 && $c[0]['rules'][0]['min_weight'] === null);
 assert(SC::toStorage($c) === [['name' => 'X', 'product_types' => ['book'], 'rules' => [['max_amount' => 34.99, 'type' => 'minimum', 'value' => 3.5]]]]);
-
-// --- Conversion de l'ancien réglage
-assert(SC::fromLegacy([], []) === [], 'sans book_law : aucune contrainte (rien de propre aux livres par défaut)');
-$legacy = SC::fromLegacy(['delivery' => ['book_law' => ['enabled' => true]]], ['retrait_atelier' => ['legal_floor' => false], 'lettre' => []]);
-assert(count($legacy) === 1 && $legacy[0]['product_types'] === ['book'] && $legacy[0]['except_modes'] === ['retrait_atelier']);
-assert(SC::apply(0.0, 'lettre', $m(34.99), $legacy)[0] === 3.0 && SC::apply(0.0, 'lettre', $m(35), $legacy)[0] === 0.01);
-assert(SC::fromLegacy(['delivery' => ['book_law' => ['enabled' => false]]], []) === []);
 
 // --- Intégration au calcul d'un mode (forfait 0 € HT)
 $config = ['taxes' => ['default' => 'TVA_5_5'], 'delivery' => ['prices_entered' => 'ht']];

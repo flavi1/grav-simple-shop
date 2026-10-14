@@ -11,6 +11,7 @@ use Grav\Plugin\Api\Exceptions\ValidationException;
 use Grav\Plugin\Api\Response\ApiResponse;
 use Grav\Plugin\SimpleShop\Delivery\CarrierConfig;
 use Grav\Plugin\SimpleShop\Delivery\ModeEditor;
+use Grav\Plugin\SimpleShop\Delivery\Geocoder;
 use Grav\Plugin\SimpleShop\Delivery\ShippingConstraints;
 use Grav\Plugin\SimpleShop\Delivery\ShippingManager;
 use Grav\Plugin\SimpleShop\Delivery\ZoneResolver;
@@ -329,6 +330,10 @@ class ShopApiController extends AbstractApiController
         if ($errors !== []) {
             throw new ValidationException('Mode de livraison invalide.', ['mode' => $errors]);
         }
+        $warning = null;
+        if (($clean['kind'] ?? '') === 'local_pickup') {
+            [$clean['geo'], $warning] = $this->locatePickup($clean, $catalog[$key] ?? null);
+        }
 
         $this->updateCarriersFile(function (array $carriers) use ($key, $clean, $catalog, $isProviderMode): array {
             $entry = ModeEditor::toStorage($clean, $isProviderMode ? $catalog[$key]['provider_defaults'] : null);
@@ -343,7 +348,37 @@ class ShopApiController extends AbstractApiController
 
         $mode = (new ShippingManager())->getModes()[$key] ?? null;
 
-        return ApiResponse::create(['saved' => true, 'mode' => $mode === null ? null : $this->modeView($mode)]);
+        return ApiResponse::create(['saved' => true, 'warning' => $warning, 'mode' => $mode === null ? null : $this->modeView($mode)]);
+    }
+
+    /**
+     * Coordonnées du lieu de retrait (géocodage de son adresse). Adresse inchangée : coordonnées précédentes conservées.
+     * Adresse introuvable : erreur de saisie. Service injoignable : enregistrement sans coordonnées (mode non proposé), avec un avertissement.
+     *
+     * @return array{0: ?array, 1: ?string} [geo, avertissement]
+     */
+    private function locatePickup(array $clean, ?array $previous): array
+    {
+        $address = $clean['pickup_address'];
+        if ($address['street'] === '' || $address['postal_code'] === '' || $address['city'] === '') {
+            return [null, null];
+        }
+        if ($previous !== null && $previous['geo'] !== null && $previous['pickup_address'] == $address) {
+            return [$previous['geo'], null];
+        }
+        try {
+            $geo = Geocoder::fromConfig((array) $this->grav['config']->get('plugins.simple-shop', []))
+                ->geocodeAddress($address['street'], $address['postal_code'], $address['city']);
+        } catch (\Throwable $e) {
+            $this->grav['log']->warning('[SimpleShop][API] Géocodage du lieu de retrait : ' . $e->getMessage());
+
+            return [null, 'Le service de géocodage ne répond pas : adresse enregistrée mais non localisée, le retrait ne sera pas proposé. Réenregistrez plus tard.'];
+        }
+        if ($geo === null) {
+            throw new ValidationException('Adresse introuvable.', ['mode' => ['Le service de géocodage ne trouve pas l’adresse du lieu de retrait : vérifiez la rue, le code postal et la ville.']]);
+        }
+
+        return [$geo, null];
     }
 
     /** DELETE /simple-shop/carriers/{key} — supprime un mode manuel, ou rétablit les valeurs du plugin pour un mode de plugin. */
@@ -396,6 +431,19 @@ class ShopApiController extends AbstractApiController
         $config = (array) $this->grav['config']->get('plugins.simple-shop', []);
         $metrics = ['weight' => (int) $weight, 'thickness' => (int) $thickness, 'subtotal' => $subtotal, 'subtotals' => $subtotals];
 
+        // Commune du client (facultative) pour les retraits sur place.
+        $notice = null;
+        $postcode = trim((string) ($body['postal_code'] ?? ''));
+        $city = trim((string) ($body['city'] ?? ''));
+        if ($postcode !== '' || $city !== '') {
+            try {
+                $metrics['destination'] = Geocoder::fromConfig($config)->geocodeTown($postcode, $city);
+                $notice = $metrics['destination'] === null ? 'Commune du client introuvable.' : 'Client localisé : ' . $metrics['destination']['label'] . '.';
+            } catch (\Throwable $e) {
+                $notice = 'Service de géocodage injoignable : distance inconnue.';
+            }
+        }
+
         $rows = [];
         $manager = new ShippingManager();
         foreach ($manager->getModes() as $key => $mode) {
@@ -411,7 +459,7 @@ class ShopApiController extends AbstractApiController
             ];
         }
 
-        return ApiResponse::create(['metrics' => $metrics, 'rows' => $rows]);
+        return ApiResponse::create(['metrics' => $metrics, 'rows' => $rows, 'notice' => $notice]);
     }
 
     /** POST /simple-shop/carriers/providers/{id}/test — contrôle de connexion du plugin transporteur. */
@@ -457,10 +505,7 @@ class ShopApiController extends AbstractApiController
         try {
             $current = is_file($path) ? \Symfony\Component\Yaml\Yaml::parseFile($path) : [];
             $carriers = is_array($current['carriers'] ?? null) ? $current['carriers'] : [];
-            // Sans bloc `constraints`, l'ancien réglage (delivery.book_law, legal_floor) est converti à la première écriture.
-            $constraints = is_array($current) && array_key_exists('constraints', $current)
-                ? ShippingConstraints::toStorage(ShippingConstraints::normalize($current['constraints']))
-                : ShippingConstraints::toStorage(ShippingConstraints::fromLegacy((array) $this->grav['config']->get('plugins.simple-shop', []), $carriers));
+            $constraints = ShippingConstraints::toStorage(ShippingConstraints::normalize($current['constraints'] ?? []));
             $errors = CarrierConfig::save($path, CarrierConfig::dump($change($carriers, $constraints), $constraints));
             if ($errors !== []) {
                 throw new ValidationException('Configuration des transporteurs invalide.', ['carriers' => $errors]);

@@ -735,7 +735,105 @@
                 return { rules: rules, errors: errors };
             }
 
+            /** Retrait sur place : prix unique, adresse du lieu de retrait, distance maximale ; ni grille ni marge. */
+            function localPickupEditor(m, isNew) {
+                var uidp = nextId('ss-mode');
+                var status = h('p', { class: 'ss-form-status', role: 'status', tabindex: '-1' });
+                var errors = h('div', { role: 'alert' });
+                var addr = m.pickup_address || {};
+                var inputs = {
+                    enabled: h('input', { type: 'checkbox', id: uidp + '-enabled', checked: !!m.enabled }),
+                    name: h('input', { type: 'text', id: uidp + '-name', value: m.name || '', required: true, maxlength: '80' }),
+                    description: h('textarea', { id: uidp + '-desc', rows: '2', maxlength: '300' }),
+                    price: numInput(m.flat_price === null || m.flat_price === undefined ? 0 : m.flat_price),
+                    street: h('input', { type: 'text', id: uidp + '-street', value: addr.street || '', maxlength: '120', autocomplete: 'street-address' }),
+                    postal: h('input', { type: 'text', id: uidp + '-postal', value: addr.postal_code || '', maxlength: '5', inputmode: 'numeric', pattern: '[0-9]{5}', autocomplete: 'postal-code' }),
+                    city: h('input', { type: 'text', id: uidp + '-city', value: addr.city || '', maxlength: '120', autocomplete: 'address-level2' }),
+                    distance: numInput(m.max_distance_km)
+                };
+                inputs.description.value = m.description || '';
+                inputs.price.id = uidp + '-price';
+                inputs.distance.id = uidp + '-dist';
+
+                var located = m.geo
+                    ? h('p', { class: 'ss-muted' }, 'Lieu localisé : ' + (m.geo.label || (m.geo.lat + ', ' + m.geo.lon)) + '.')
+                    : h('p', { class: 'ss-msg err' }, (addr.street ? 'Adresse non localisée : ' : 'Saisissez l’adresse : ') + 'le retrait n’est pas proposé tant que le lieu n’est pas localisé.');
+
+                function v(i) { return i.value === '' ? null : i.value; }
+                function read() {
+                    return {
+                        kind: 'local_pickup', name: inputs.name.value, description: inputs.description.value, enabled: inputs.enabled.checked,
+                        flat_price: v(inputs.price), max_distance_km: v(inputs.distance),
+                        pickup_address: { street: inputs.street.value, postal_code: inputs.postal.value, city: inputs.city.value }
+                    };
+                }
+                function showErrors(e) {
+                    errors.innerHTML = '';
+                    status.textContent = '';
+                    errors.appendChild(h('div', { class: 'ss-msg err' }, e.message,
+                        e.details && e.details.length ? h('ul', { class: 'ss-list' }, e.details.map(function (d) { return h('li', {}, d); })) : null));
+                    errors.scrollIntoView({ block: 'nearest' });
+                }
+
+                var saveBtn = h('button', { class: 'ss-btn ss-primary', type: 'submit' }, isNew ? 'Créer le mode' : 'Enregistrer ce mode');
+                var delBtn = isNew ? null : h('button', { class: 'ss-btn', type: 'button', onclick: function () {
+                    if (!window.confirm('Supprimer le mode « ' + m.name + ' » ?')) { return; }
+                    api('DELETE', '/carriers/' + encodeURIComponent(m.key))
+                        .then(function () { return reload({ message: 'Mode « ' + m.name + ' » supprimé.' }); })
+                        .catch(showErrors);
+                } }, 'Supprimer ce mode');
+
+                var form = h('form', { class: 'ss-mode-form', onsubmit: function (ev) {
+                    ev.preventDefault();
+                    errors.innerHTML = '';
+                    saveBtn.disabled = true;
+                    status.className = 'ss-form-status';
+                    status.textContent = 'Enregistrement (localisation de l’adresse)…';
+                    api('PUT', '/carriers/' + encodeURIComponent(m.key), read())
+                        .then(function (res) {
+                            var warning = res && res.data && res.data.warning ? ' ' + res.data.warning : '';
+                            return reload({ key: m.key, message: 'Mode « ' + inputs.name.value + ' » ' + (isNew ? 'créé.' : 'enregistré.') + warning });
+                        })
+                        .catch(showErrors)
+                        .then(function () { saveBtn.disabled = false; });
+                } },
+                    h('div', { class: 'ss-field-row ss-check' }, inputs.enabled, h('label', { for: uidp + '-enabled' }, 'Proposer ce mode aux clients')),
+                    field('Nom affiché au client', inputs.name),
+                    field('Description affichée au client', inputs.description),
+                    field('Prix (€ ' + taxLabel() + ')', inputs.price, '0 = gratuit. Les contraintes globales s’appliquent ensuite, sauf si ce mode en est exclu.'),
+                    h('fieldset', {}, h('legend', {}, 'Lieu de retrait'),
+                        field('Rue', inputs.street),
+                        h('div', { class: 'ss-inline' }, field('Code postal', inputs.postal), field('Ville', inputs.city)),
+                        located),
+                    field('Distance maximale du client (km)', inputs.distance, 'Le mode n’est proposé qu’aux clients dont la commune est à au plus cette distance, à vol d’oiseau.'),
+                    h('p', { class: 'ss-muted' }, 'L’adresse est localisée par le service public de la Base Adresse Nationale ; pour un client, seuls son code postal et sa ville sont envoyés.'),
+                    errors,
+                    h('div', { class: 'ss-bar' }, saveBtn, delBtn),
+                    status);
+
+                var summary = h('summary', {},
+                    h('span', { class: 'ss-mode-name' }, m.name || 'Nouveau mode'), ' ',
+                    h('span', { class: 'ss-badge' }, 'Retrait sur place'), ' ',
+                    isNew ? null : h('span', { class: 'ss-badge ss-b-off' }, (m.max_distance_km ? 'jusqu’à ' + Number(m.max_distance_km).toLocaleString('fr-FR') + ' km' : 'distance à régler')
+                        + (m.flat_price > 0 ? ', ' + money(m.flat_price) + ' ' + taxLabel() : ', gratuit')), ' ',
+                    h('span', { class: 'ss-badge ' + (!m.geo && m.enabled ? 'ss-b-ko' : (m.enabled ? 'ss-b-on' : 'ss-b-off')) }, m.enabled ? (m.geo ? 'Actif' : 'Actif, non localisé') : 'Désactivé'));
+                var el = h('details', { class: 'ss-mode', open: isNew }, summary, form);
+
+                return {
+                    el: el,
+                    focus: function () { inputs.name.focus(); },
+                    done: function (message) {
+                        el.open = true;
+                        status.className = 'ss-form-status ss-done';
+                        status.textContent = message;
+                        status.focus();
+                        status.scrollIntoView({ block: 'center' });
+                    }
+                };
+            }
+
             function modeEditor(m, isNew) {
+                if (m.kind === 'local_pickup') { return localPickupEditor(m, isNew); }
                 var inputs = {};
                 var uidp = nextId('ss-mode');
                 var isProvider = !!m.provider;
@@ -1026,13 +1124,18 @@
 
             function newModeForm() {
                 var nameInput = h('input', { type: 'text', id: 'ss-new-mode-name', maxlength: '80' });
+                var kindSelect = h('select', { id: 'ss-new-mode-kind' },
+                    h('option', { value: 'delivery' }, 'Livraison'), h('option', { value: 'local_pickup' }, 'Retrait sur place'));
                 var btn = h('button', { class: 'ss-btn', type: 'button', onclick: function () {
                     var name = nameInput.value.trim();
                     if (!name) { nameInput.focus(); return; }
                     var base = slug(name), key = base, i = 2;
                     var existing = data.modes.map(function (x) { return x.key; });
                     while (existing.indexOf(key) !== -1) { key = base + '_' + (i++); }
-                    var draft = { key: key, source: 'manual', provider: null, name: name, description: '', enabled: false,
+                    var draft = kindSelect.value === 'local_pickup'
+                        ? { key: key, source: 'manual', provider: null, kind: 'local_pickup', name: name, description: '', enabled: false,
+                            flat_price: 0, max_distance_km: 20, pickup_address: { street: '', postal_code: '', city: '' }, geo: null, available: true }
+                        : { key: key, source: 'manual', provider: null, name: name, description: '', enabled: false,
                         pricing: 'flat', flat_price: null, margin: { fixed: 0, percent: 0 }, free_from: null,
                         constraints: { max_weight: null, max_thickness: null }, rules: [], available: true };
                     var ed = modeEditor(draft, true);
@@ -1044,7 +1147,10 @@
                 return h('div', { class: 'ss-new-mode' },
                     h('h4', {}, 'Ajouter un mode manuel'),
                     h('p', { class: 'ss-muted' }, 'Le nouveau mode s’ouvre à la fin de la liste ci-dessus ; il n’est créé qu’après « Créer le mode ».'),
-                    h('div', { class: 'ss-bar' }, h('div', { class: 'ss-field-row' }, h('label', { for: 'ss-new-mode-name' }, 'Nom du nouveau mode'), nameInput), btn));
+                    h('div', { class: 'ss-bar' },
+                        h('div', { class: 'ss-field-row' }, h('label', { for: 'ss-new-mode-name' }, 'Nom du nouveau mode'), nameInput),
+                        h('div', { class: 'ss-field-row' }, h('label', { for: 'ss-new-mode-kind' }, 'Type'), kindSelect),
+                        btn));
             }
 
             // ----- Contraintes globales (lois, offres commerciales) -----
@@ -1196,8 +1302,11 @@
                     weight: h('input', { type: 'number', id: 'ss-sim-w', min: '1', step: '1', value: '340', required: true }),
                     thickness: h('input', { type: 'number', id: 'ss-sim-t', min: '0', step: '1', value: '29', required: true }),
                     subtotal: h('input', { type: 'number', id: 'ss-sim-s', min: '0', step: 'any', value: '12.95', required: true }),
-                    zone: h('select', { id: 'ss-sim-z' }, zoneOptions.map(function (z) { return h('option', { value: z }, z); }))
+                    zone: h('select', { id: 'ss-sim-z' }, zoneOptions.map(function (z) { return h('option', { value: z }, z); })),
+                    postal: h('input', { type: 'text', id: 'ss-sim-pc', maxlength: '5', inputmode: 'numeric', size: '6' }),
+                    city: h('input', { type: 'text', id: 'ss-sim-city', maxlength: '120' })
                 };
+                var hasPickup = data.modes.some(function (m) { return m.kind === 'local_pickup'; });
                 var simTypes = (data.product_types || []).map(function (t, k) { return h('input', { type: 'checkbox', id: 'ss-sim-type-' + k, value: t, checked: true }); });
                 var out = h('div', { 'aria-live': 'polite' });
                 var hasResult = false;
@@ -1205,7 +1314,8 @@
                 function run() {
                     out.textContent = 'Calcul…';
                     api('POST', '/carriers/simulate', { weight: f.weight.value, thickness: f.thickness.value, subtotal: f.subtotal.value, zone: f.zone.value,
-                        types: simTypes.filter(function (b) { return b.checked; }).map(function (b) { return b.value; }) })
+                        types: simTypes.filter(function (b) { return b.checked; }).map(function (b) { return b.value; }),
+                        postal_code: f.postal.value, city: f.city.value })
                         .then(function (res) { hasResult = true; drawResult(res.data); })
                         .catch(function (e) { out.innerHTML = ''; self.fail(e); });
                 }
@@ -1216,6 +1326,9 @@
                         h('div', { class: 'ss-field-row' }, h('label', { for: 'ss-sim-s' }, 'Total TTC des produits (€)'), f.subtotal),
                         h('div', { class: 'ss-field-row' }, h('label', { for: 'ss-sim-z' }, 'Zone'), f.zone),
                         h('button', { class: 'ss-btn ss-primary', type: 'submit' }, 'Calculer')),
+                    hasPickup ? h('div', { class: 'ss-bar' },
+                        h('div', { class: 'ss-field-row' }, h('label', { for: 'ss-sim-pc' }, 'Code postal du client (retrait sur place)'), f.postal),
+                        h('div', { class: 'ss-field-row' }, h('label', { for: 'ss-sim-city' }, 'Ville du client'), f.city)) : null,
                     simTypes.length ? h('fieldset', { class: 'ss-sim-types' }, h('legend', {}, 'Le panier contient des produits de type (blueprint)'),
                         h('div', { class: 'ss-inline' }, simTypes.map(function (b) { return h('div', { class: 'ss-field-row ss-check' }, b, h('label', { for: b.id }, b.value)); }))) : null);
                 simBox.appendChild(form);
@@ -1230,12 +1343,14 @@
                         items.push('« ' + c.name + ' »' + effect + (c.comment ? ' — ' + c.comment : ''));
                     });
                     if (r.pickup) { items.push('Le client choisit un point de retrait.'); }
+                    if (q && q.distance_km !== undefined && q.distance_km !== null) { items.push('Client à ' + Number(q.distance_km).toLocaleString('fr-FR') + ' km du lieu de retrait.'); }
                     return items.length > 1 ? h('ul', { class: 'ss-list' }, items.map(function (t) { return h('li', {}, t); })) : (items[0] || '');
                 }
 
                 function drawResult(res) {
                     var ht = (data.settings || {}).prices_entered === 'ht';
                     out.innerHTML = '';
+                    if (res.notice) { out.appendChild(h('p', { class: 'ss-muted' }, res.notice)); }
                     out.appendChild(h('div', { class: 'ss-table-scroll', role: 'region', tabindex: '0', 'aria-label': 'Résultat de la simulation' },
                         h('table', {},
                             h('caption', { class: 'ss-sr' }, 'Prix de chaque mode pour ce colis'),

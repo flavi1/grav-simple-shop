@@ -291,42 +291,6 @@ final class ShippingConstraints
             && ($r['max_amount'] === null || $amount <= $r['max_amount'] + 1e-9);
     }
 
-    /**
-     * Ancienne configuration (`delivery.book_law` + `legal_floor: false` sur des modes) convertie en contrainte,
-     * pour les sites dont carriers.yaml n'a pas encore de bloc `constraints`. Rien si `book_law` est absent.
-     *
-     * @param array $config   Configuration du plugin simple-shop.
-     * @param array $carriers Contenu brut de `carriers:`.
-     */
-    public static function fromLegacy(array $config, array $carriers): array
-    {
-        if (!isset($config['delivery']['book_law']) || !is_array($config['delivery']['book_law'])) {
-            return [];
-        }
-        $law = LegalShippingFloor::settings($config);
-        if (!$law['enabled']) {
-            return [];
-        }
-        $except = [];
-        foreach ($carriers as $key => $c) {
-            if (is_array($c) && ($c['legal_floor'] ?? true) === false) {
-                $except[] = (string) $key;
-            }
-        }
-
-        return self::normalize([[
-            'name'          => 'Loi Darcos (frais de livraison des livres)',
-            'product_types' => ['book'],
-            'except_modes'  => $except,
-            'rules'         => [
-                ['max_amount' => round($law['threshold'] - 0.01, 2), 'type' => 'minimum', 'value' => $law['below'],
-                 'comment'    => 'Livres : frais de livraison d’au moins ' . self::euros($law['below']) . ' TTC sous ' . self::euros($law['threshold']) . ' TTC de livres.'],
-                ['min_amount' => $law['threshold'], 'type' => 'minimum', 'value' => $law['at_or_above'],
-                 'comment'    => 'Livres : livraison jamais gratuite, au moins ' . self::euros($law['at_or_above']) . ' TTC.'],
-            ],
-        ]]);
-    }
-
     private static function num($v): ?float
     {
         return is_numeric($v) && (float) $v >= 0 ? (float) $v : null;
@@ -336,10 +300,5 @@ final class ShippingConstraints
     private static function strings($v): array
     {
         return array_values(array_unique(array_filter(array_map(static fn ($s) => trim((string) $s), (array) $v), static fn ($s) => $s !== '')));
-    }
-
-    private static function euros(float $v): string
-    {
-        return number_format($v, 2, ',', ' ') . ' €';
     }
 }

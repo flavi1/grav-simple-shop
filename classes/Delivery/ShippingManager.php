@@ -20,7 +20,7 @@ class ShippingManager
     /** @var array[] Contraintes globales (ShippingConstraints), dans l'ordre d'application. */
     protected $constraints = [];
 
-    /** Vrai si carriers.yaml contient déjà un bloc `constraints` (sinon : conversion de l'ancien réglage). */
+    /** Vrai si carriers.yaml contient un bloc `constraints`. */
     protected $constraintsStored = false;
 
     public function __construct()
@@ -36,9 +36,6 @@ class ShippingManager
             if ($this->constraintsStored) {
                 $this->constraints = ShippingConstraints::normalize($data['constraints']);
             }
-        }
-        if (!$this->constraintsStored) {
-            $this->constraints = ShippingConstraints::fromLegacy((array) $grav['config']->get('plugins.simple-shop', []), $this->carriersConfig);
         }
 
         // Fournisseurs (plugins transporteur), voir CarrierProviderInterface.
@@ -59,7 +56,7 @@ class ShippingManager
         return $this->constraints;
     }
 
-    /** Les contraintes viennent-elles de carriers.yaml (et non de l'ancien réglage `delivery.book_law`) ? */
+    /** carriers.yaml contient-il un bloc `constraints` ? */
     public function constraintsStored(): bool
     {
         return $this->constraintsStored;
@@ -214,6 +211,10 @@ class ShippingManager
             return $no((string) ($mode['unavailable_reason'] ?? '') ?: 'Mode indisponible.');
         }
 
+        if (($mode['kind'] ?? 'delivery') === 'local_pickup') {
+            return self::evaluateLocalPickup($mode, $metrics, $config, $constraints);
+        }
+
         $limits = $mode['constraints'] ?? [];
         if (!empty($limits['max_weight']) && $metrics['weight'] > $limits['max_weight']) {
             return $no('Colis trop lourd pour ce mode (' . $limits['max_weight'] . ' g au plus).');
@@ -275,6 +276,56 @@ class ShippingManager
     }
 
     /**
+     * Retrait sur place : proposé si le client (commune géocodée, `metrics.destination`) est à au plus `max_distance_km`
+     * du lieu de retrait (`geo`, géocodé à l'enregistrement). Prix unique (`flat_price`, 0 par défaut), sans marge ni
+     * contrainte de colis ; les contraintes globales s'appliquent sauf exclusion du mode.
+     */
+    private static function evaluateLocalPickup(array $mode, array $metrics, array $config, array $constraints): array
+    {
+        $no = static fn (string $reason): array => ['quote' => null, 'reason' => $reason];
+        $geo = $mode['geo'] ?? null;
+        $max = (float) ($mode['max_distance_km'] ?? 0);
+        if ($geo === null || $max <= 0) {
+            return $no('Lieu de retrait non localisé : enregistrez son adresse et la distance maximale.');
+        }
+        $dest = $metrics['destination'] ?? null;
+        if (!is_array($dest) || !isset($dest['lat'], $dest['lon'])) {
+            return $no('Adresse du client non localisée : distance inconnue.');
+        }
+        $km = Geocoder::distanceKm((float) $geo['lat'], (float) $geo['lon'], (float) $dest['lat'], (float) $dest['lon']);
+        if ($km > $max) {
+            return $no('Client à ' . number_format($km, 1, ',', ' ') . ' km du lieu de retrait (au plus ' . number_format($max, 1, ',', ' ') . ' km).');
+        }
+
+        $grid = max(0.0, (float) ($mode['flat_price'] ?? 0));
+        $before = self::priceTtc($grid, [], $config);
+        [$final, $applied] = ShippingConstraints::apply($before, (string) ($mode['key'] ?? ''), $metrics, $constraints);
+
+        return ['quote' => [
+            'price'                    => $final,
+            'grid_price'               => $grid,
+            'after_margin'             => $grid,
+            'vat_rate'                 => self::pricesEnteredHt($config) ? \Grav\Plugin\SimpleShop\Services\TaxManager::defaultRate($config) : 0.0,
+            'price_before_constraints' => $before,
+            'constraints'              => $applied,
+            'free_applied'             => false,
+            'distance_km'              => round($km, 1),
+        ], 'reason' => ''];
+    }
+
+    /** Le panier peut-il avoir besoin de la position du client (un retrait sur place actif et localisé) ? */
+    public function needsDestination(): bool
+    {
+        foreach ($this->getModes() as $mode) {
+            if ($mode['kind'] === 'local_pickup' && $mode['enabled'] && $mode['geo'] !== null) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
      * Filtre et retourne les modes éligibles avec leur tarif calculé (TTC).
      */
     public function getAvailableCarriers(string $zone, array $metrics): array
@@ -295,6 +346,8 @@ class ShippingManager
                 'price'                 => $quote['price'],
                 'provider'              => $mode['provider'],
                 'requires_pickup_point' => $mode['requires_pickup_point'],
+                'kind'                  => $mode['kind'],
+                'distance_km'           => $quote['distance_km'] ?? null,
             ];
         }
 

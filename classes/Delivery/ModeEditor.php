@@ -20,6 +20,9 @@ final class ModeEditor
      */
     public static function sanitize(array $in, bool $isProviderMode): array
     {
+        if (!$isProviderMode && ($in['kind'] ?? '') === 'local_pickup') {
+            return self::sanitizeLocalPickup($in);
+        }
         $errors = [];
 
         $name = trim((string) ($in['name'] ?? ''));
@@ -140,6 +143,74 @@ final class ModeEditor
     }
 
     /**
+     * Retrait sur place : nom, description, actif, prix unique (0 = gratuit), adresse du lieu de retrait, distance maximale.
+     * L'adresse et la distance sont obligatoires pour un mode actif.
+     *
+     * @return array{0: array, 1: string[]}
+     */
+    public static function sanitizeLocalPickup(array $in): array
+    {
+        $errors = [];
+        $name = trim((string) ($in['name'] ?? ''));
+        if ($name === '' || mb_strlen($name) > 80) {
+            $errors[] = 'Le nom du mode est obligatoire (80 caractères au plus).';
+        }
+        $description = trim((string) ($in['description'] ?? ''));
+        if (mb_strlen($description) > 300) {
+            $errors[] = 'La description ne peut pas dépasser 300 caractères.';
+        }
+        $enabled = filter_var($in['enabled'] ?? false, FILTER_VALIDATE_BOOLEAN);
+
+        $num = static function ($v, string $label, float $max) use (&$errors): ?float {
+            if ($v === null || $v === '') {
+                return null;
+            }
+            $v = is_string($v) ? str_replace(',', '.', trim($v)) : $v;
+            if (!is_numeric($v) || (float) $v < 0 || (float) $v > $max) {
+                $errors[] = "{$label} : nombre positif attendu (au plus {$max}).";
+
+                return null;
+            }
+
+            return round((float) $v, 4);
+        };
+        $price = $num($in['flat_price'] ?? null, 'Prix', 1000) ?? 0.0;
+        $distance = $num($in['max_distance_km'] ?? null, 'Distance maximale (km)', 1000);
+
+        $address = (array) ($in['pickup_address'] ?? []);
+        $clean = [
+            'street'      => trim((string) ($address['street'] ?? '')),
+            'postal_code' => trim((string) ($address['postal_code'] ?? '')),
+            'city'        => trim((string) ($address['city'] ?? '')),
+        ];
+        foreach ($clean as $v) {
+            if (mb_strlen($v) > 120) {
+                $errors[] = 'Adresse du lieu de retrait : 120 caractères au plus par champ.';
+                break;
+            }
+        }
+        if ($clean['postal_code'] !== '' && !preg_match('/^\d{5}$/', $clean['postal_code'])) {
+            $errors[] = 'Code postal du lieu de retrait : 5 chiffres.';
+        }
+        if ($enabled && ($clean['street'] === '' || $clean['postal_code'] === '' || $clean['city'] === '')) {
+            $errors[] = 'Un retrait sur place actif demande l’adresse complète du lieu de retrait (rue, code postal, ville).';
+        }
+        if ($enabled && ($distance === null || $distance <= 0)) {
+            $errors[] = 'Un retrait sur place actif demande une distance maximale (km) supérieure à 0.';
+        }
+
+        return [[
+            'name'            => $name,
+            'description'     => $description,
+            'enabled'         => $enabled,
+            'kind'            => 'local_pickup',
+            'flat_price'      => $price,
+            'pickup_address'  => $clean,
+            'max_distance_km' => $distance,
+        ], $errors];
+    }
+
+    /**
      * Entrée à écrire dans carriers.yaml.
      * Mode manuel : tous les champs. Mode de fournisseur : seulement ceux qui diffèrent des valeurs du fournisseur.
      *
@@ -148,6 +219,9 @@ final class ModeEditor
      */
     public static function toStorage(array $clean, ?array $defaults): array
     {
+        if (($clean['kind'] ?? '') === 'local_pickup') {
+            return $clean;
+        }
         if ($defaults === null) {
             $out = $clean;
             if ($out['free_from'] === null) {

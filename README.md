@@ -89,7 +89,10 @@ créée et l'incident est journalisé pour rapprochement manuel. Configuration p
   règles (poids du colis de/à, montant TTC des articles concernés de/à, effet `minimum` | `maximum` | `fixed`, valeur € TTC, commentaire).
   Ordre d'application = ordre de la liste ; dans une contrainte, la première règle qui correspond s'applique ; bornes incluses.
   Exemple livré pour ce site : la loi Darcos (livres : 3,00 € sous 35 €, 0,01 € au-delà, retrait sur place exclu).
-  Ancien réglage `delivery.book_law` + `legal_floor: false` : converti automatiquement (lecture, puis écrit à la première sauvegarde).
+- **Retrait sur place** (mode manuel `kind: local_pickup`) : prix unique (`flat_price`, 0 par défaut), adresse du lieu de retrait
+  (`pickup_address` : street, postal_code, city) et distance maximale (`max_distance_km`). L'adresse est géocodée à l'enregistrement (`geo`) ;
+  le mode n'est proposé que si la commune du client (code postal + ville, géocodés une fois par session) est à au plus cette distance, à vol d'oiseau.
+  Géocodeur : `delivery.geocoding.url` (service public de la Base Adresse Nationale par défaut, `Delivery/Geocoder`).
 
 ### Prix de livraison (`carriers.yaml`)
 

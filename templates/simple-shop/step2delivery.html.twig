@@ -95,7 +95,7 @@
                                 </span>
                                 <span class="carrier-details">
                                     <strong class="carrier-name">{{ carrier.name }}</strong>
-                                    <span class="carrier-description field-help">{{ carrier.description }}{% if carrier.requires_pickup_point %} Vous choisirez le point de retrait à l'étape suivante.{% endif %}</span>
+                                    <span class="carrier-description field-help">{{ carrier.description }}{% if carrier.requires_pickup_point %} Vous choisirez le point de retrait à l'étape suivante.{% endif %}{% if carrier.distance_km is defined and carrier.distance_km is not null %} À environ {{ carrier.distance_km|number_format(0, ',', ' ') }} km de chez vous.{% endif %}</span>
                                 </span>
                                 <span class="carrier-price">
                                     {% if carrier.price == 0 %}

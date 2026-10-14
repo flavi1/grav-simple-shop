@@ -130,6 +130,16 @@ form:
           type: number
           label: "Épaisseur de l'emballage par commande (mm)"
           default: 6
+        delivery.geocoding.url:
+          type: url
+          label: "Service de géocodage (retrait sur place)"
+          help: "Sert à mesurer la distance entre le client (sa commune seulement) et le lieu de retrait. Par défaut : service public de la Base Adresse Nationale (données ouvertes, sans clé). Un géocodeur compatible addok auto-hébergé peut le remplacer. https obligatoire."
+          default: 'https://data.geopf.fr/geocodage/search'
+        delivery.geocoding.timeout:
+          type: number
+          label: "Délai maximal du géocodage (s)"
+          default: 4
+          validate: { min: 1, max: 20 }
 
     invoicing_fieldset:
       type: fieldset

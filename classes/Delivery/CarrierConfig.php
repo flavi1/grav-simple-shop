@@ -77,9 +77,19 @@ class CarrierConfig
             if (($carrier['pricing'] ?? null) === 'flat' && strpos((string) $key, '.') === false && !isset($carrier['flat_price'])) {
                 $errors[] = "{$where} : un forfait (pricing: flat) demande un prix (flat_price).";
             }
-            // Ancien réglage, remplacé par `except_modes` des contraintes globales (encore lu pour la conversion).
-            if (isset($carrier['legal_floor']) && !is_bool($carrier['legal_floor'])) {
-                $errors[] = "{$where} : legal_floor doit valoir true ou false.";
+            if (isset($carrier['kind']) && !in_array($carrier['kind'], ['delivery', 'local_pickup'], true)) {
+                $errors[] = "{$where} : kind doit valoir delivery ou local_pickup (retrait sur place).";
+            }
+            if (($carrier['kind'] ?? '') === 'local_pickup') {
+                if (strpos((string) $key, '.') !== false) {
+                    $errors[] = "{$where} : le retrait sur place est un mode manuel (clé sans point).";
+                }
+                if (isset($carrier['max_distance_km']) && (!is_numeric($carrier['max_distance_km']) || $carrier['max_distance_km'] < 0)) {
+                    $errors[] = "{$where} : max_distance_km doit être un nombre positif.";
+                }
+                if (isset($carrier['pickup_address']) && !is_array($carrier['pickup_address'])) {
+                    $errors[] = "{$where} : pickup_address doit être un bloc (street, postal_code, city).";
+                }
             }
             if (isset($carrier['enabled']) && !is_bool($carrier['enabled']) && !in_array($carrier['enabled'], [0, 1], true)) {
                 $errors[] = "{$where} : enabled doit valoir true ou false.";
