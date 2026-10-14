@@ -13,7 +13,7 @@
                 <h2 id="pickup-title">Choisissez votre point de retrait</h2>
                 <p>
                     <strong>{{ pickup.carrier.name }}</strong> —
-                    {{ pickup.carrier.price == 0 ? 'Gratuit' : pickup.carrier.price|number_format(2, ',', ' ') ~ ' €' }}
+                    {{ pickup.carrier.price == 0 ? 'Gratuit' : pickup.carrier.price|number_format(2, ',', ' ') ~ ' €' }}{% if pickup.carrier.price != 0 %} <small class="price-tax">TTC</small>{% endif %}
                 </p>
 
                 {% if pickup.error %}
@@ -87,9 +87,10 @@
                     {{ nonce_field('shop-delivery-action')|raw }}
                     <input type="hidden" name="action" value="select_shipping">
 
-                    {# Du moins cher au plus cher (déjà trié par ShippingManager ; tri repris ici par sûreté), le moins cher toujours présélectionné. #}
+                    {# Du moins cher au plus cher (déjà trié par ShippingManager ; tri repris ici par sûreté).
+                       Présélection : dernier choix du client pour ce même panier, sinon le moins cher (CartController). #}
                     {% set carriers = carriers|sort((a, b) => a.price <=> b.price) %}
-                    {% set selected_key = carriers|keys|first %}
+                    {% set selected_key = preselected_shipping is defined and carriers[preselected_shipping] is defined ? preselected_shipping : carriers|keys|first %}
                     <div class="carriers-list">
                         {% for key, carrier in carriers %}
                             <label class="carrier-option {% if selected_key == key %}is-selected{% endif %}">
@@ -105,7 +106,7 @@
                                     {% if carrier.price == 0 %}
                                         <span class="price-free">Gratuit</span>
                                     {% else %}
-                                        {{ carrier.price|number_format(2, ',', ' ') }} €
+                                        {{ carrier.price|number_format(2, ',', ' ') }} € <small class="price-tax">TTC</small>
                                     {% endif %}
                                 </span>
                             </label>
@@ -130,7 +131,7 @@
                 <h3>Résumé de la commande</h3>
                 <div class="summary-row">
                     <span>Articles :</span>
-                    <strong>{{ cart_metrics.subtotal|number_format(2, ',', ' ') }} €</strong>
+                    <strong>{{ cart_metrics.subtotal|number_format(2, ',', ' ') }} € <small class="price-tax">TTC</small></strong>
                 </div>
                 <div class="summary-row field-help">
                     <span>Poids estimé :</span>

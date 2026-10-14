@@ -85,6 +85,15 @@ $r = $call('step2Delivery', '/checkout/delivery', ['action' => 'select_shipping'
 assert($redirect($r) === 'https://shop.test/checkout/delivery', 'mode inconnu refusé');
 $r = $call('step2Delivery', '/checkout/delivery', ['action' => 'select_shipping', 'shipping_method' => 'colis', 'nonce' => 'nonce-shop-delivery-action']);
 assert($redirect($r) === 'https://shop.test/checkout/payment');
+// Retour sur l'étape livraison : le choix du client (plus cher) reste coché pour ce panier ; panier modifié → le moins cher.
+$call('step2Delivery', '/checkout/delivery');
+assert($grav['twig']->twig_vars['preselected_shipping'] === 'colis', 'dernier choix conservé pour le même panier');
+$call('step1Cart', '/cart', ['action' => 'update_quantity', 'product_route' => '/livres/un-livre', 'quantity' => '3', 'nonce' => 'nonce-shop-cart-action']);
+$call('step2Delivery', '/checkout/delivery');
+assert($grav['twig']->twig_vars['preselected_shipping'] === array_key_first($grav['twig']->twig_vars['carriers']), 'panier modifié : le moins cher');
+$call('step1Cart', '/cart', ['action' => 'update_quantity', 'product_route' => '/livres/un-livre', 'quantity' => '2', 'nonce' => 'nonce-shop-cart-action']);
+$r = $call('step2Delivery', '/checkout/delivery', ['action' => 'select_shipping', 'shipping_method' => 'colis', 'nonce' => 'nonce-shop-delivery-action']);
+assert($redirect($r) === 'https://shop.test/checkout/payment');
 
 // --- 4. Facturation et paiement de test (échec, puis succès)
 $r = $call('step3Payment', '/checkout/payment');

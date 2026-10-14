@@ -130,6 +130,18 @@ class CartController extends AbstractController
         return $adjustments;
     }
 
+    /** Empreinte du contenu du panier (produits et quantités) : un choix de livraison ne vaut que pour ce panier. */
+    private function cartFingerprint(array $cartItems): string
+    {
+        $lines = [];
+        foreach ($cartItems as $route => $item) {
+            $lines[(string) $route] = (int) ($item['quantity'] ?? 0);
+        }
+        ksort($lines);
+
+        return md5(json_encode($lines));
+    }
+
     /**
      * Total à régler (articles + livraison), recalculé côté serveur.
      *
@@ -553,6 +565,8 @@ class CartController extends AbstractController
 				}
 
 				$selected = $availableCarriers[$selectedCarrierKey];
+				// Dernier choix du client, retenu tant que le panier ne change pas (présélection au retour sur cette étape).
+				$order->shipping_choice = ['key' => $selectedCarrierKey, 'cart' => $this->cartFingerprint($cartItems)];
 
 				if (!empty($selected['requires_pickup_point'])) {
 					// Mode « point de retrait » : le client choisit le point à la sous-étape suivante (même page).
@@ -601,6 +615,11 @@ class CartController extends AbstractController
 		$twig->twig_vars['cart_metrics'] = $metrics;
 		$twig->twig_vars['carriers'] = $availableCarriers;
 		$twig->twig_vars['current_shipping'] = $order->shipping ?? [];
+		// Présélection : le dernier choix du client pour ce même panier s'il est encore proposé, sinon le moins cher.
+		$choice = (array) ($order->shipping_choice ?? []);
+		$twig->twig_vars['preselected_shipping'] = (($choice['cart'] ?? null) === $this->cartFingerprint($cartItems) && isset($availableCarriers[$choice['key'] ?? '']))
+			? $choice['key']
+			: array_key_first($availableCarriers);
 
 		// Sous-étape « choix du point de retrait ».
 		$pending = (array) ($order->pending_shipping ?? []);
