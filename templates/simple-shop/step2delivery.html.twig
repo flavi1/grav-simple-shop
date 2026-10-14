@@ -82,17 +82,19 @@
             {% else %}
                 <h2>Choisissez votre mode de transport</h2>
                 
-                <form action="{{ base_url_absolute ~ grav.uri.path() }}" method="POST" class="delivery-form">
+                {# autocomplete="off" : le navigateur ne restaure pas un ancien choix (retour arrière, rechargement). #}
+                <form action="{{ base_url_absolute ~ grav.uri.path() }}" method="POST" class="delivery-form" autocomplete="off">
                     {{ nonce_field('shop-delivery-action')|raw }}
                     <input type="hidden" name="action" value="select_shipping">
 
-                    {# Modes triés du moins cher au plus cher ; présélection : le choix déjà fait s'il est encore proposé, sinon le moins cher. #}
-                    {% set selected_key = (current_shipping.key is defined and carriers[current_shipping.key] is defined) ? current_shipping.key : carriers|keys|first %}
+                    {# Du moins cher au plus cher (déjà trié par ShippingManager ; tri repris ici par sûreté), le moins cher toujours présélectionné. #}
+                    {% set carriers = carriers|sort((a, b) => a.price <=> b.price) %}
+                    {% set selected_key = carriers|keys|first %}
                     <div class="carriers-list">
                         {% for key, carrier in carriers %}
                             <label class="carrier-option {% if selected_key == key %}is-selected{% endif %}">
                                 <span class="carrier-input-wrapper">
-                                    <input type="radio" name="shipping_method" value="{{ key }}" 
+                                    <input type="radio" name="shipping_method" value="{{ key }}" autocomplete="off"
                                            {% if selected_key == key %}checked{% endif %} required>
                                 </span>
                                 <span class="carrier-details">
@@ -115,7 +117,7 @@
                             « Retour à la validation de l'e-mail
                         </a>
                         <button type="submit" class="btn btn-submit-delivery">
-                            {{ carriers[current_shipping.key|default('')].requires_pickup_point|default(false) ? 'Choisir le point de retrait' : 'Continuer vers le paiement' }}
+                            Continuer
                         </button>
                     </div>
                 </form>
