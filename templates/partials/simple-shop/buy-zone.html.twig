@@ -12,7 +12,7 @@
 
         {% block shop_price %}
             <div class="product-price" style="font-size: 1.4rem; font-weight: bold; margin-bottom: 0.5rem;">
-                {{ price.unitTtc|shop_money }}
+                {{ price.unitTtc|shop_money }} <small class="price-tax">TTC</small>
             </div>
         {% endblock %}
 

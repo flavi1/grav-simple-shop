@@ -217,3 +217,11 @@
 .btn-submit-checkout:hover {
     background: #222;
 }
+
+/* Mention « TTC » discrète après les prix du site public */
+.price-tax {
+    font-size: 0.7em;
+    font-weight: normal;
+    opacity: 0.75;
+    letter-spacing: 0.02em;
+}

@@ -21,7 +21,7 @@
 
             <h3>Mode de livraison choisi <a href="{{ routes.step2 }}" class="edit-link">Modifier</a></h3>
             <p>
-                <strong>{{ shipping.name }}</strong> ({{ shipping.description }}) — {{ shipping.price == 0 ? 'Gratuit' : shipping.price ~ ' €' }}
+                <strong>{{ shipping.name }}</strong> ({{ shipping.description }}) — {{ shipping.price == 0 ? 'Gratuit' : shipping.price|number_format(2, ',', ' ') ~ ' €' }}{% if shipping.price != 0 %} <small class="price-tax">TTC</small>{% endif %}
                 {% if shipping.pickup_point is defined and shipping.pickup_point %}<br>{% include 'partials/simple-shop/pickup_point.html.twig' with {point: shipping.pickup_point} %}{% endif %}
             </p>
             
@@ -45,22 +45,22 @@
 								<strong>{{ item.title }}</strong>
 							</td>
 							<td style="text-align: center; padding: 0.5rem 0;">{{ item.quantity }}</td>
-							<td style="text-align: right; padding: 0.5rem 0;">{{ item_total|number_format(2, ',', ' ') }} €</td>
+							<td style="text-align: right; padding: 0.5rem 0;">{{ item_total|number_format(2, ',', ' ') }} € <small class="price-tax">TTC</small></td>
 						</tr>
 					{% endfor %}
 					
 					{# Lignes de totalisation #}
 					<tr style="font-size: 0.95rem;">
 						<td colspan="2" style="padding-top: 1rem; text-align: right; color: #666;">Sous-total :</td>
-						<td style="padding-top: 1rem; text-align: right; color: #666;">{{ subtotal|number_format(2, ',', ' ') }} €</td>
+						<td style="padding-top: 1rem; text-align: right; color: #666;">{{ subtotal|number_format(2, ',', ' ') }} € <small class="price-tax">TTC</small></td>
 					</tr>
 					<tr style="font-size: 0.95rem;">
 						<td colspan="2" style="padding: 0.25rem 0; text-align: right; color: #666;">Frais de port ({{ shipping.label }}) :</td>
-						<td style="padding: 0.25rem 0; text-align: right; color: #666;">{{ shipping.price == 0 ? 'Gratuit' : shipping.price|number_format(2, ',', ' ') ~ ' €' }}</td>
+						<td style="padding: 0.25rem 0; text-align: right; color: #666;">{{ shipping.price == 0 ? 'Gratuit' : shipping.price|number_format(2, ',', ' ') ~ ' €' }}{% if shipping.price != 0 %} <small class="price-tax">TTC</small>{% endif %}</td>
 					</tr>
 					<tr style="font-size: 1.2rem; font-weight: bold;">
 						<td colspan="2" style="padding-top: 0.5rem; text-align: right;">Total TTC :</td>
-						<td style="padding-top: 0.5rem; text-align: right; color: #e74c3c;">{{ (subtotal + shipping.price)|number_format(2, ',', ' ') }} €</td>
+						<td style="padding-top: 0.5rem; text-align: right; color: #e74c3c;">{{ (subtotal + shipping.price)|number_format(2, ',', ' ') }} € <small class="price-tax">TTC</small></td>
 					</tr>
 				</tbody>
 			</table>
