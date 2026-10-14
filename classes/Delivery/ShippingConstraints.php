@@ -151,8 +151,8 @@ final class ShippingConstraints
                 $rule = [
                     'min_weight' => $number($r['min_weight'] ?? null, "{$rw}, poids minimal", 10000000),
                     'max_weight' => $number($r['max_weight'] ?? null, "{$rw}, poids maximal", 10000000),
-                    'min_amount' => $number($r['min_amount'] ?? null, "{$rw}, montant minimal", 10000000),
-                    'max_amount' => $number($r['max_amount'] ?? null, "{$rw}, montant maximal", 10000000),
+                    'min_amount' => $number($r['min_amount'] ?? null, "{$rw}, total TTC minimal", 10000000),
+                    'max_amount' => $number($r['max_amount'] ?? null, "{$rw}, total TTC maximal", 10000000),
                     'type'       => $type,
                     'value'      => $value ?? 0.0,
                     'comment'    => trim((string) ($r['comment'] ?? '')),
@@ -164,7 +164,7 @@ final class ShippingConstraints
                     $errors[] = "{$rw} : le poids minimal dépasse le poids maximal.";
                 }
                 if ($rule['min_amount'] !== null && $rule['max_amount'] !== null && $rule['min_amount'] > $rule['max_amount']) {
-                    $errors[] = "{$rw} : le montant minimal dépasse le montant maximal.";
+                    $errors[] = "{$rw} : le total TTC minimal dépasse le total TTC maximal.";
                 }
                 $rules[] = $rule;
             }

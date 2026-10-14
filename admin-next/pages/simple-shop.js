@@ -990,7 +990,7 @@
                     marginFieldset,
                     h('fieldset', {}, h('legend', {}, 'Règles'),
                         h('div', { class: 'ss-inline' },
-                            field('Offert dès (€ d’articles TTC)', inputs.free, 'Vide = jamais. Au-dessus, la livraison du mode est offerte, sous réserve des contraintes globales.'),
+                            field('Offert dès (total TTC, €)', inputs.free, 'Vide = jamais. Au-dessus, la livraison du mode est offerte, sous réserve des contraintes globales.'),
                             field('Poids maximal du colis (g)', inputs.maxw, 'Vide = illimité.'),
                             field('Épaisseur maximale (mm)', inputs.maxt, 'Vide = illimité.')),
                         h('p', { class: 'ss-muted' }, 'Les contraintes globales (plus bas) s’appliquent ensuite ; un mode peut en être exclu.')),
@@ -1104,8 +1104,8 @@
                         return h('tr', {},
                             h('td', {}, bindNum(r, 'min_weight', { aria: 'Poids à partir de (g)' + n, placeholder: '—' })),
                             h('td', {}, bindNum(r, 'max_weight', { aria: 'Poids jusqu’à (g)' + n, placeholder: '—' })),
-                            h('td', {}, bindNum(r, 'min_amount', { aria: 'Montant à partir de (€ TTC)' + n, placeholder: '—' })),
-                            h('td', {}, bindNum(r, 'max_amount', { aria: 'Montant jusqu’à (€ TTC)' + n, placeholder: '—' })),
+                            h('td', {}, bindNum(r, 'min_amount', { aria: 'Total TTC à partir de (€)' + n, placeholder: '—' })),
+                            h('td', {}, bindNum(r, 'max_amount', { aria: 'Total TTC jusqu’à (€)' + n, placeholder: '—' })),
                             h('td', {}, effect), h('td', {}, value), h('td', {}, comment),
                             h('td', {}, h('button', { class: 'ss-btn', type: 'button', 'aria-label': 'Supprimer la règle' + n, onclick: function () {
                                 c.rules.splice(j, 1); touch(); drawConstraints('#' + cid + '-addrule');
@@ -1123,16 +1123,16 @@
                     consBox.appendChild(h('fieldset', { class: 'ss-constraint', id: cid }, legend,
                         field('Nom de la contrainte', name),
                         types.length
-                            ? h('fieldset', {}, h('legend', {}, 'Articles concernés'),
+                            ? h('fieldset', {}, h('legend', {}, 'Types de produits (blueprint)'),
                                 h('div', { class: 'ss-inline' }, typeBoxes.map(function (b, k) { return h('div', { class: 'ss-field-row ss-check' }, b, h('label', { for: b.id }, types[k])); })),
-                                h('p', { class: 'ss-muted' }, 'Aucun coché : tous les articles. Le montant comparé est celui des articles concernés (TTC) ; une contrainte limitée à des types ne s’applique que si le panier en contient.'))
+                                h('p', { class: 'ss-muted' }, 'Aucun coché : tous les produits. Le total TTC comparé est celui des produits de ces types ; une contrainte limitée à des types ne s’applique que si le panier en contient.'))
                             : null,
                         h('fieldset', {}, h('legend', {}, 'Modes non concernés'),
                             h('div', { class: 'ss-inline' }, modeBoxes.map(function (b, k) { return h('div', { class: 'ss-field-row ss-check' }, b, h('label', { for: b.id }, data.modes[k].name)); }))),
                         h('div', { class: 'ss-table-scroll', role: 'region', tabindex: '0', 'aria-label': 'Règles de la contrainte ' + (i + 1) + ', défilement horizontal' },
                             h('table', {},
                                 h('caption', { class: 'ss-sr' }, 'Règles de la contrainte ' + (c.name || (i + 1))),
-                                h('thead', {}, h('tr', {}, ['Poids de (g)', 'Jusqu’à (g)', 'Montant de (€ TTC)', 'Jusqu’à (€ TTC)', 'Effet', 'Valeur (€ TTC)', 'Commentaire', ''].map(function (t) { return h('th', { scope: 'col' }, t); }))),
+                                h('thead', {}, h('tr', {}, ['Poids de (g)', 'Jusqu’à (g)', 'Total TTC de (€)', 'Jusqu’à (€)', 'Effet', 'Valeur (€ TTC)', 'Commentaire', ''].map(function (t) { return h('th', { scope: 'col' }, t); }))),
                                 tbody)),
                         h('p', { class: 'ss-muted' }, 'Effet : « Minimum », le prix ne descend pas sous la valeur ; « Maximum », il ne la dépasse pas ; « Prix imposé », il est remplacé par la valeur.'),
                         h('div', { class: 'ss-bar' },
@@ -1213,10 +1213,10 @@
                     h('div', { class: 'ss-bar' },
                         h('div', { class: 'ss-field-row' }, h('label', { for: 'ss-sim-w' }, 'Poids du colis, emballage compris (g)'), f.weight),
                         h('div', { class: 'ss-field-row' }, h('label', { for: 'ss-sim-t' }, 'Épaisseur (mm)'), f.thickness),
-                        h('div', { class: 'ss-field-row' }, h('label', { for: 'ss-sim-s' }, 'Montant des articles (€ TTC)'), f.subtotal),
+                        h('div', { class: 'ss-field-row' }, h('label', { for: 'ss-sim-s' }, 'Total TTC des produits (€)'), f.subtotal),
                         h('div', { class: 'ss-field-row' }, h('label', { for: 'ss-sim-z' }, 'Zone'), f.zone),
                         h('button', { class: 'ss-btn ss-primary', type: 'submit' }, 'Calculer')),
-                    simTypes.length ? h('fieldset', { class: 'ss-sim-types' }, h('legend', {}, 'Le panier contient des articles de type'),
+                    simTypes.length ? h('fieldset', { class: 'ss-sim-types' }, h('legend', {}, 'Le panier contient des produits de type (blueprint)'),
                         h('div', { class: 'ss-inline' }, simTypes.map(function (b) { return h('div', { class: 'ss-field-row ss-check' }, b, h('label', { for: b.id }, b.value)); }))) : null);
                 simBox.appendChild(form);
                 simBox.appendChild(out);

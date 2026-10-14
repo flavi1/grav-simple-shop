@@ -384,7 +384,7 @@ class ShopApiController extends AbstractApiController
         $subtotal = $num(isset($body['subtotal']) ? str_replace(',', '.', (string) $body['subtotal']) : null, 1000000);
         $zone = (string) ($body['zone'] ?? 'FR-METRO');
         if ($weight === null || $thickness === null || $subtotal === null || !in_array($zone, CarrierConfig::ZONES, true)) {
-            throw new ValidationException('Paramètres de simulation invalides.', ['simulation' => ['Poids (g), épaisseur (mm), montant des articles (€ TTC) et zone sont obligatoires.']]);
+            throw new ValidationException('Paramètres de simulation invalides.', ['simulation' => ['Poids (g), épaisseur (mm), total TTC des produits (€) et zone sont obligatoires.']]);
         }
         // Types d'articles du panier simulé : le montant est attribué à chacun (aucun = article sans type).
         $types = array_values(array_filter((array) ($body['types'] ?? []), static fn ($t) => is_string($t) && preg_match('/^[a-z0-9_.-]{1,60}$/i', $t)));
