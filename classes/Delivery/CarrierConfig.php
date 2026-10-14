@@ -44,6 +44,9 @@ class CarrierConfig
         }
 
         $errors = [];
+        if (isset($data['setup']) && !is_array($data['setup'])) {
+            $errors[] = 'setup doit être un bloc (réglages de première configuration).';
+        }
 
         foreach ($data['carriers'] as $key => $carrier) {
             $where = "Transporteur « {$key} »";
@@ -61,6 +64,18 @@ class CarrierConfig
             }
             if (isset($carrier['free_from']) && (!is_numeric($carrier['free_from']) || $carrier['free_from'] < 0)) {
                 $errors[] = "{$where} : free_from doit être un nombre positif ou nul.";
+            }
+            if (isset($carrier['pricing']) && !in_array($carrier['pricing'], CarrierCatalog::PRICING, true)) {
+                $errors[] = "{$where} : pricing doit valoir flat (forfait), provider (grille du plugin) ou grid (grille personnalisée).";
+            }
+            if (($carrier['pricing'] ?? null) === 'provider' && strpos((string) $key, '.') === false) {
+                $errors[] = "{$where} : pricing « provider » est réservé aux modes d'un plugin transporteur.";
+            }
+            if (isset($carrier['flat_price']) && (!is_numeric($carrier['flat_price']) || $carrier['flat_price'] < 0)) {
+                $errors[] = "{$where} : flat_price doit être un nombre positif ou nul.";
+            }
+            if (($carrier['pricing'] ?? null) === 'flat' && strpos((string) $key, '.') === false && !isset($carrier['flat_price'])) {
+                $errors[] = "{$where} : un forfait (pricing: flat) demande un prix (flat_price).";
             }
             if (isset($carrier['legal_floor']) && !is_bool($carrier['legal_floor'])) {
                 $errors[] = "{$where} : legal_floor doit valoir true ou false.";
@@ -129,14 +144,17 @@ class CarrierConfig
      * édité à la main ne sont pas conservés).
      *
      * @param array<string, array> $carriers
+     * @param array                $setup    Bloc `setup` (ex. préréglage « Livres France » proposé ou écarté).
      */
-    public static function dump(array $carriers): string
+    public static function dump(array $carriers, array $setup = []): string
     {
         $header = "# Modes de livraison — écrit par l'administration (Boutique > Transporteurs).\n"
             . "# Prix hors taxe par défaut (plugins.simple-shop.delivery.prices_entered). Les modes d'un plugin transporteur\n"
             . "# (clé « fournisseur.mode ») ne contiennent que les valeurs modifiées par rapport aux réglages du plugin.\n\n";
 
-        return $header . Yaml::dump(['carriers' => $carriers], 6, 2, Yaml::DUMP_OBJECT_AS_MAP);
+        $data = $setup !== [] ? ['setup' => $setup, 'carriers' => $carriers] : ['carriers' => $carriers];
+
+        return $header . Yaml::dump($data, 6, 2, Yaml::DUMP_OBJECT_AS_MAP);
     }
 
     /**

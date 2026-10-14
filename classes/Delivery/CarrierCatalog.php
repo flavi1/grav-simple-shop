@@ -13,7 +13,15 @@ namespace Grav\Plugin\SimpleShop\Delivery;
 final class CarrierCatalog
 {
     /** Champs d'un mode que l'administration peut modifier (le reste vient du fournisseur). */
-    public const EDITABLE = ['name', 'description', 'enabled', 'legal_floor', 'margin', 'free_from', 'constraints', 'rules'];
+    public const EDITABLE = ['name', 'description', 'enabled', 'legal_floor', 'pricing', 'flat_price', 'margin', 'free_from', 'constraints', 'rules'];
+
+    /**
+     * Types de calcul d'un mode :
+     *   - flat     : forfait, un seul prix (`flat_price`) quel que soit le colis ;
+     *   - provider : grille fournie par le plugin transporteur (mode d'un fournisseur seulement), non modifiée ;
+     *   - grid     : grille personnalisée (`rules`).
+     */
+    public const PRICING = ['flat', 'provider', 'grid'];
 
     /** Champs qui n'appartiennent qu'au fournisseur. */
     public const PROVIDER_ONLY = ['requires_pickup_point', 'available', 'unavailable_reason'];
@@ -48,6 +56,14 @@ final class CarrierCatalog
                         }
                     }
                 }
+                // Ancien format : une surcharge de grille sans `pricing` vaut « grille personnalisée ».
+                $pricing = in_array($mode['pricing'] ?? null, self::PRICING, true)
+                    ? $mode['pricing']
+                    : (isset($override['rules']) ? 'grid' : 'provider');
+                $mode['pricing'] = $pricing;
+                if ($pricing === 'provider') {
+                    $mode['rules'] = $def['rules'] ?? [];
+                }
                 $modes[$key] = self::normalize($mode, $key, $provider->getId(), $local, $override !== null ? 'provider+override' : 'provider');
                 $modes[$key]['provider_defaults'] = self::normalize($def, $key, $provider->getId(), $local, 'provider');
             }
@@ -58,6 +74,9 @@ final class CarrierCatalog
             if (!is_array($def) || isset($modes[$key]) || strpos($key, '.') !== false) {
                 // Les entrées « fournisseur.mode » sans fournisseur actif sont ignorées (plugin désactivé).
                 continue;
+            }
+            if (!in_array($def['pricing'] ?? null, ['flat', 'grid'], true)) {
+                $def['pricing'] = 'grid';
             }
             $modes[$key] = self::normalize($def, $key, null, $key, 'manual');
         }
@@ -79,6 +98,8 @@ final class CarrierCatalog
             'description'           => (string) ($mode['description'] ?? ''),
             'enabled'               => (bool) ($mode['enabled'] ?? false),
             'legal_floor'           => ($mode['legal_floor'] ?? true) !== false,
+            'pricing'               => in_array($mode['pricing'] ?? null, self::PRICING, true) ? $mode['pricing'] : ($provider !== null ? 'provider' : 'grid'),
+            'flat_price'            => isset($mode['flat_price']) && is_numeric($mode['flat_price']) && $mode['flat_price'] >= 0 ? (float) $mode['flat_price'] : null,
             'margin'                => [
                 'fixed'   => max(0.0, (float) ($margin['fixed'] ?? 0)),
                 'percent' => max(0.0, (float) ($margin['percent'] ?? 0)),

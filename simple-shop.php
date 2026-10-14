@@ -143,6 +143,7 @@ class SimpleShopPlugin extends Plugin
             $group->get('/carriers', [$c, 'carriers']);
             $group->put('/carriers', [$c, 'saveCarriers']);
             $group->post('/carriers/simulate', [$c, 'simulateCarriers']);
+            $group->post('/carriers/preset', [$c, 'carriersPreset']);
             $group->post('/carriers/providers/{id}/test', [$c, 'testCarrierProvider']);
             $group->put('/carriers/{key}', [$c, 'saveCarrierMode']);
             $group->delete('/carriers/{key}', [$c, 'deleteCarrierMode']);

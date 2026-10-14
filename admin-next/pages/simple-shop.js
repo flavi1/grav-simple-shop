@@ -185,6 +185,13 @@
         '.ss-new-mode{margin-top:1.2rem}.ss-new-mode h4{margin:0 0 .4rem}',
         '.ss-form-status{min-height:1.2rem;margin:.4rem 0 0}',
         '.ss-advanced>*:not(summary){padding:0 .9rem .9rem}',
+        '.ss-hide-adv .ss-adv-col{display:none}',
+        '.ss [hidden]{display:none !important}',
+        '.ss details.ss-grid-details{border:1px solid var(--border,#e5e7eb);border-radius:.375rem;margin:.4rem 0 .8rem}',
+        '.ss details.ss-grid-details>*:not(summary){margin-left:.9rem;margin-right:.9rem}',
+        '.ss-choice label{font-size:.875rem}',
+        '.ss-pricing-body{margin:.2rem 0 .6rem}',
+        '.ss-preset{margin:.6rem 0 1rem}.ss-preset h4{margin:0 0 .4rem}',
         '@media (prefers-reduced-motion:no-preference){.ss details{transition:none}}'
     ].join('\n');
 
@@ -505,7 +512,7 @@
             }
 
             var sProviders = section('ss-s-providers', 'Transporteurs connectés', 'Plugins transporteur installés. Leurs identifiants (clés d’API) se saisissent dans la page du plugin.');
-            var sModes = section('ss-s-modes', 'Modes de livraison', 'Chaque mode a sa grille de tarifs, sa marge et ses règles. Les prix sont saisis hors taxe : la TVA est ajoutée automatiquement, puis le plancher légal.');
+            var sModes = section('ss-s-modes', 'Modes de livraison', 'Pour chaque mode, choisissez un forfait, le tarif du transporteur ou votre propre grille. Les prix sont saisis hors taxe : la TVA est ajoutée automatiquement, puis le plancher légal.');
             var sSim = section('ss-s-sim', 'Simulateur', 'Vérifiez le prix que verrait un client pour un colis donné.');
             var sYaml = h('details', { class: 'ss-advanced' }, h('summary', {}, 'Mode avancé : fichier YAML'));
 
@@ -598,6 +605,8 @@
                 modesStatus.textContent = '';
                 editors = {};
                 draftHolder.innerHTML = '';
+                var preset = presetCard();
+                if (preset) { modesBox.appendChild(preset); }
                 data.modes.forEach(function (m) {
                     var ed = modeEditor(m, false);
                     editors[m.key] = ed;
@@ -637,18 +646,106 @@
                 });
             }
 
+            var PRICING_LABELS = { flat: 'Forfait', provider: 'Tarif du plugin', grid: 'Grille personnalisée' };
+            var CSV_COLUMNS = ['zone', 'poids_de_g', 'poids_jusqua_g', 'panier_de_eur', 'panier_jusqua_eur', 'epaisseur_max_mm', 'prix_eur'];
+            var WEIGHT_INFINITE = 9999999, BASKET_INFINITE = 99999;
+
+            function isHt() { return (data.settings || {}).prices_entered === 'ht'; }
+            function taxLabel() { return isHt() ? 'HT' : 'TTC'; }
+
+            /** « 33 lignes, de 6,72 € à 36,39 € HT, jusqu'à 30 000 g » */
+            function gridSummary(rules) {
+                if (!rules.length) { return 'Grille vide.'; }
+                var prices = rules.map(function (r) { return parseFloat(r.price); }).filter(function (p) { return !isNaN(p); });
+                var maxW = 0, unlimited = false;
+                rules.forEach(function (r) {
+                    var w = r.max_weight === null || r.max_weight === '' || r.max_weight === undefined ? Infinity : parseFloat(r.max_weight);
+                    if (w >= WEIGHT_INFINITE) { unlimited = true; } else if (w > maxW) { maxW = w; }
+                });
+                var text = rules.length + (rules.length > 1 ? ' lignes' : ' ligne');
+                if (prices.length) {
+                    var lo = Math.min.apply(null, prices), hi = Math.max.apply(null, prices);
+                    text += lo === hi ? ', ' + money(lo) + ' ' + taxLabel() : ', de ' + money(lo) + ' à ' + money(hi) + ' ' + taxLabel();
+                }
+                text += unlimited ? ', sans limite de poids' : (maxW ? ', jusqu’à ' + maxW.toLocaleString('fr-FR') + ' g' : '');
+
+                return text + '.';
+            }
+
+            function usesAdvancedColumns(rules) {
+                return rules.some(function (r) {
+                    return (parseFloat(r.min_basket) || 0) > 0
+                        || (r.max_basket !== null && r.max_basket !== undefined && r.max_basket !== '' && parseFloat(r.max_basket) < BASKET_INFINITE)
+                        || (r.max_thickness !== null && r.max_thickness !== undefined && r.max_thickness !== '' && parseFloat(r.max_thickness) > 0);
+                });
+            }
+
+            /** Texte CSV (séparateur « ; », virgule décimale, en-tête) d'une liste de lignes de grille. */
+            function rulesToCsv(rules) {
+                function num(v, infinite) {
+                    if (v === null || v === undefined || v === '' || (infinite && parseFloat(v) >= infinite)) { return ''; }
+                    return String(v).replace('.', ',');
+                }
+                var lines = [CSV_COLUMNS.slice(0, 6).concat(['prix_eur_' + taxLabel().toLowerCase()]).join(';')];
+                rules.forEach(function (r) {
+                    lines.push([r.zone, num(r.min_weight), num(r.max_weight, WEIGHT_INFINITE), num(r.min_basket), num(r.max_basket, BASKET_INFINITE),
+                        num(r.max_thickness), num(r.price)].join(';'));
+                });
+
+                return '﻿' + lines.join('\r\n') + '\r\n';
+            }
+
+            /**
+             * Lit un CSV de grille (colonnes dans l'ordre de l'export ; séparateur « ; », « , » ou tabulation ;
+             * virgule ou point décimal ; ligne d'en-tête facultative).
+             * @return {{rules: Array, errors: string[]}}
+             */
+            function csvToRules(text) {
+                var lines = text.replace(/^﻿/, '').split(/\r?\n/).filter(function (l) { return l.trim() !== ''; });
+                var errors = [], rules = [];
+                if (!lines.length) { return { rules: [], errors: ['Le fichier est vide.'] }; }
+                var first = lines[0];
+                var delim = first.indexOf(';') > -1 ? ';' : (first.indexOf('\t') > -1 ? '\t' : ',');
+                lines.forEach(function (line, i) {
+                    var cells = line.split(delim).map(function (c) { return c.trim().replace(/^"|"$/g, '').trim(); });
+                    if (i === 0 && data.all_zones.indexOf(cells[0]) === -1) { return; } // en-tête
+                    var n = i + 1;
+                    if (data.all_zones.indexOf(cells[0]) === -1) { errors.push('Ligne ' + n + ' : zone « ' + cells[0] + ' » inconnue (' + data.all_zones.join(', ') + ').'); return; }
+                    function num(k, label, required) {
+                        var raw = (cells[k] || '').replace(/\s/g, '').replace(',', '.');
+                        if (raw === '') {
+                            if (required) { errors.push('Ligne ' + n + ' : ' + label + ' manquant.'); }
+                            return null;
+                        }
+                        if (isNaN(Number(raw)) || Number(raw) < 0) { errors.push('Ligne ' + n + ' : ' + label + ' invalide (« ' + cells[k] + ' »).'); return null; }
+                        return Number(raw);
+                    }
+                    rules.push({
+                        zone: cells[0], min_weight: num(1, 'poids de') || 0, max_weight: num(2, 'poids jusqu’à'),
+                        min_basket: num(3, 'panier de') || 0, max_basket: num(4, 'panier jusqu’à'),
+                        max_thickness: num(5, 'épaisseur'), price: num(6, 'prix', true)
+                    });
+                });
+                if (!rules.length && !errors.length) { errors.push('Aucune ligne de tarif trouvée.'); }
+
+                return { rules: rules, errors: errors };
+            }
+
             function modeEditor(m, isNew) {
-                var weightInfinite = 9999999;
                 var inputs = {};
                 var uidp = nextId('ss-mode');
+                var isProvider = !!m.provider;
+                var pricing = m.pricing || (isProvider ? 'provider' : 'grid');
 
                 var status = h('p', { class: 'ss-form-status', role: 'status', tabindex: '-1' });
                 var errors = h('div', { role: 'alert' });
 
                 inputs.enabled = h('input', { type: 'checkbox', id: uidp + '-enabled', checked: !!m.enabled });
                 inputs.name = h('input', { type: 'text', id: uidp + '-name', value: m.name || '', required: true, maxlength: '80' });
-                inputs.description = h('textarea', { id: uidp + '-desc', rows: '2', maxlength: '300' }, m.description || '');
+                inputs.description = h('textarea', { id: uidp + '-desc', rows: '2', maxlength: '300' });
                 inputs.description.value = m.description || '';
+                inputs.flat = numInput(m.flat_price);
+                inputs.flat.id = uidp + '-flat';
                 inputs.mfixed = numInput(m.margin.fixed);
                 inputs.mfixed.id = uidp + '-mfixed';
                 inputs.mpercent = numInput(m.margin.percent);
@@ -661,9 +758,65 @@
                 inputs.maxt = numInput(m.constraints.max_thickness);
                 inputs.maxt.id = uidp + '-maxt';
 
+                // ----- Choix du calcul -----
+                var choices = isProvider ? ['flat', 'provider', 'grid'] : ['flat', 'grid'];
+                var hints = {
+                    flat: 'Un seul prix, quel que soit le colis. Le plus simple.',
+                    provider: 'La grille fournie par le plugin ' + m.provider + ', mise à jour avec le plugin. Rien à saisir.',
+                    grid: 'Votre propre grille : prix selon le poids (et, si besoin, le montant du panier ou l’épaisseur).'
+                };
+                var radios = {};
+                var pricingFieldset = h('fieldset', {}, h('legend', {}, 'Calcul du prix'),
+                    choices.map(function (c) {
+                        radios[c] = h('input', { type: 'radio', name: uidp + '-pricing', id: uidp + '-p-' + c, value: c, checked: c === pricing,
+                            'aria-describedby': uidp + '-p-' + c + '-hint', onchange: function () { setPricing(c); } });
+                        return h('div', { class: 'ss-field-row ss-check ss-choice' }, radios[c],
+                            h('label', { for: uidp + '-p-' + c }, h('strong', {}, PRICING_LABELS[c]), ' ', h('span', { id: uidp + '-p-' + c + '-hint', class: 'ss-muted' }, hints[c])));
+                    }));
+
+                // ----- Forfait -----
+                var law = (data.legal || {}).book_law || {};
+                var flatBlock = h('div', {},
+                    field('Prix du forfait (€ ' + taxLabel() + ')', inputs.flat,
+                        law.enabled
+                            ? '0 = le minimum légal : ' + money(law.below) + ' TTC sous ' + money(law.threshold) + ' de livres, ' + money(law.at_or_above) + ' au-delà.'
+                            : null));
+
+                // ----- Grille du plugin (lecture seule) -----
+                var providerRules = pricing === 'provider' ? (m.rules || []) : null;
+                var providerBlock = h('div', {});
+                if (isProvider) {
+                    var shownRules = providerRules || [];
+                    var roTable = h('table', {},
+                        h('caption', { class: 'ss-sr' }, 'Grille du plugin pour ' + (m.name || '')),
+                        h('thead', {}, h('tr', {}, ['Zone', 'Poids de (g)', 'Jusqu’à (g)', 'Prix (€ ' + taxLabel() + ')'].map(function (t) { return h('th', { scope: 'col' }, t); }))),
+                        h('tbody', {}, shownRules.map(function (r) {
+                            return h('tr', {}, h('td', {}, r.zone), h('td', { class: 'ss-num' }, (r.min_weight || 0).toLocaleString('fr-FR')),
+                                h('td', { class: 'ss-num' }, r.max_weight >= WEIGHT_INFINITE ? 'sans limite' : Number(r.max_weight).toLocaleString('fr-FR')),
+                                h('td', { class: 'ss-num' }, money(r.price)));
+                        })));
+                    providerBlock.appendChild(h('p', {}, 'Grille du plugin : ' + gridSummary(shownRules)));
+                    if (shownRules.length) {
+                        providerBlock.appendChild(h('details', { class: 'ss-grid-details' }, h('summary', {}, 'Voir la grille du plugin'),
+                            h('div', { class: 'ss-table-scroll' }, roTable),
+                            h('div', { class: 'ss-bar' },
+                                h('button', { class: 'ss-btn', type: 'button', onclick: function () { download(new Blob([rulesToCsv(shownRules)], { type: 'text/csv;charset=utf-8' }), m.key + '-grille.csv'); } }, 'Exporter en CSV'))));
+                    }
+                    providerBlock.appendChild(h('button', { class: 'ss-btn', type: 'button', onclick: function () {
+                        radios.grid.checked = true;
+                        setPricing('grid');
+                        gridDetails.open = true;
+                        (rows[0] ? rows[0].price : addBtn).focus();
+                    } }, 'Personnaliser cette grille'));
+                }
+
+                // ----- Grille personnalisée (modifiable) -----
                 var zones = (data.zones && data.zones.length) ? data.zones.slice() : data.all_zones.slice();
                 var tbody = h('tbody');
                 var rows = [];
+                var gridSummaryText = h('p', {});
+
+                function cell(input, advanced) { return h('td', { class: advanced ? 'ss-adv-col' : null }, input); }
 
                 function addRow(rule) {
                     rule = rule || { zone: zones[0], min_weight: 0, max_weight: null, min_basket: 0, max_basket: null, price: '' };
@@ -672,56 +825,123 @@
                     var r = {
                         zone: h('select', { 'aria-label': 'Zone, ligne ' + n }, zoneList.map(function (z) { return h('option', { value: z, selected: z === rule.zone }, z); })),
                         minw: numInput(rule.min_weight, { aria: 'Poids de (g), ligne ' + n }),
-                        maxw: numInput(rule.max_weight !== null && rule.max_weight >= weightInfinite ? null : rule.max_weight, { aria: 'Poids jusqu’à (g), ligne ' + n, placeholder: 'sans limite' }),
+                        maxw: numInput(rule.max_weight !== null && rule.max_weight >= WEIGHT_INFINITE ? null : rule.max_weight, { aria: 'Poids jusqu’à (g), ligne ' + n, placeholder: 'sans limite' }),
                         minb: numInput(rule.min_basket, { aria: 'Panier de (€), ligne ' + n }),
-                        maxb: numInput(rule.max_basket !== null && rule.max_basket >= 99999 ? null : rule.max_basket, { aria: 'Panier jusqu’à (€), ligne ' + n, placeholder: 'sans limite' }),
+                        maxb: numInput(rule.max_basket !== null && rule.max_basket >= BASKET_INFINITE ? null : rule.max_basket, { aria: 'Panier jusqu’à (€), ligne ' + n, placeholder: 'sans limite' }),
                         thick: numInput(rule.max_thickness, { aria: 'Épaisseur maximale (mm), ligne ' + n, placeholder: 'sans limite' }),
-                        price: numInput(rule.price, { aria: 'Prix (€), ligne ' + n })
+                        price: numInput(rule.price, { aria: 'Prix (€ ' + taxLabel() + '), ligne ' + n })
                     };
-                    r.price.required = true;
                     r.del = h('button', { class: 'ss-btn', type: 'button', 'aria-label': 'Supprimer la ligne ' + n, onclick: function () {
                         rows.splice(rows.indexOf(r), 1);
                         r.tr.remove();
+                        refreshGridSummary();
                         status.textContent = 'Ligne supprimée (pas encore enregistré).';
-                        (rows.length ? rows[Math.min(rows.length - 1, 0)].zone : addBtn).focus();
+                        (rows.length ? rows[0].zone : addBtn).focus();
                     } }, 'Supprimer');
-                    r.tr = h('tr', {},
-                        h('td', {}, r.zone), h('td', {}, r.minw), h('td', {}, r.maxw), h('td', {}, r.minb), h('td', {}, r.maxb),
-                        h('td', {}, r.thick), h('td', {}, r.price), h('td', {}, r.del));
+                    r.tr = h('tr', {}, cell(r.zone), cell(r.minw), cell(r.maxw), cell(r.minb, true), cell(r.maxb, true), cell(r.thick, true), cell(r.price), cell(r.del));
                     rows.push(r);
                     tbody.appendChild(r.tr);
 
                     return r;
                 }
 
+                function v(i) { return i.value === '' ? null : i.value; }
+                function currentRules() {
+                    return rows.map(function (r) {
+                        return { zone: r.zone.value, min_weight: v(r.minw), max_weight: v(r.maxw), min_basket: v(r.minb), max_basket: v(r.maxb), max_thickness: v(r.thick), price: v(r.price) };
+                    });
+                }
+                function refreshGridSummary() {
+                    gridSummaryText.textContent = 'Votre grille : ' + gridSummary(currentRules());
+                    gridDetailsLabel.textContent = 'Modifier la grille (' + rows.length + (rows.length > 1 ? ' lignes)' : ' ligne)');
+                }
+
                 var addBtn = h('button', { class: 'ss-btn', type: 'button', onclick: function () {
                     var r = addRow();
+                    refreshGridSummary();
                     r.minw.focus();
                 } }, 'Ajouter une ligne');
 
                 (m.rules || []).forEach(addRow);
 
-                var priceHead = ((data.settings || {}).prices_entered === 'ht') ? 'Prix (€ HT)' : 'Prix (€ TTC)';
-                var table = h('table', {},
+                var advToggle = h('input', { type: 'checkbox', id: uidp + '-adv', checked: usesAdvancedColumns(m.rules || []), onchange: function () {
+                    table.classList.toggle('ss-hide-adv', !advToggle.checked);
+                } });
+                var table = h('table', { class: advToggle.checked ? null : 'ss-hide-adv' },
                     h('caption', { class: 'ss-sr' }, 'Grille de tarifs du mode ' + (m.name || 'nouveau')),
-                    h('thead', {}, h('tr', {}, ['Zone', 'Poids de (g)', 'Jusqu’à (g)', 'Panier de (€)', 'Jusqu’à (€)', 'Épaisseur max (mm)', priceHead, ''].map(function (t) {
-                        return h('th', { scope: 'col' }, t);
+                    h('thead', {}, h('tr', {}, [['Zone'], ['Poids de (g)'], ['Jusqu’à (g)'], ['Panier de (€)', 1], ['Jusqu’à (€)', 1], ['Épaisseur max (mm)', 1], ['Prix (€ ' + taxLabel() + ')'], ['']].map(function (t) {
+                        return h('th', { scope: 'col', class: t[1] ? 'ss-adv-col' : null }, t[0]);
                     }))),
                     tbody);
 
+                var fileInput = h('input', { type: 'file', accept: '.csv,text/csv,text/plain', class: 'ss-sr', id: uidp + '-csv', tabindex: '-1', onchange: function () {
+                    var file = fileInput.files && fileInput.files[0];
+                    if (!file) { return; }
+                    file.text().then(function (text) {
+                        var parsed = csvToRules(text);
+                        fileInput.value = '';
+                        if (parsed.errors.length) {
+                            showErrors({ message: 'Import impossible : le fichier n’a pas été pris en compte.', details: parsed.errors.slice(0, 20) });
+                            return;
+                        }
+                        if (rows.length && !window.confirm('Remplacer les ' + rows.length + ' lignes actuelles par les ' + parsed.rules.length + ' lignes du fichier ?')) { return; }
+                        rows.slice().forEach(function (r) { r.tr.remove(); });
+                        rows.length = 0;
+                        parsed.rules.forEach(addRow);
+                        if (usesAdvancedColumns(parsed.rules) && !advToggle.checked) { advToggle.checked = true; table.classList.remove('ss-hide-adv'); }
+                        refreshGridSummary();
+                        errors.innerHTML = '';
+                        status.className = 'ss-form-status';
+                        status.textContent = parsed.rules.length + ' lignes importées. Vérifiez puis enregistrez le mode.';
+                        status.focus();
+                    });
+                } });
+
+                var gridDetailsLabel = h('span', {});
+                var gridDetails = h('details', { class: 'ss-grid-details', open: isNew }, h('summary', {}, gridDetailsLabel),
+                    h('p', { class: 'ss-muted' }, 'La première ligne qui correspond au colis s’applique. Poids en grammes ; laissez « jusqu’à » vide pour « sans limite ».'),
+                    h('div', { class: 'ss-field-row ss-check' }, advToggle, h('label', { for: uidp + '-adv' }, 'Afficher les colonnes avancées (montant du panier, épaisseur)')),
+                    h('div', { class: 'ss-table-scroll', role: 'region', tabindex: '0', 'aria-label': 'Grille de tarifs, défilement horizontal' }, table),
+                    h('div', { class: 'ss-bar' }, addBtn,
+                        h('button', { class: 'ss-btn', type: 'button', onclick: function () {
+                            download(new Blob([rulesToCsv(currentRules())], { type: 'text/csv;charset=utf-8' }), m.key + '-grille.csv');
+                        } }, 'Exporter en CSV'),
+                        h('button', { class: 'ss-btn', type: 'button', onclick: function () { fileInput.click(); } }, 'Importer un CSV…'),
+                        fileInput),
+                    h('p', { class: 'ss-muted' }, 'CSV : une ligne par tranche, colonnes ' + CSV_COLUMNS.join(' ; ') + ' (séparateur « ; », virgule décimale ; l’export donne un modèle).'));
+                var gridBlock = h('div', {}, gridSummaryText, gridDetails);
+                refreshGridSummary();
+
+                var marginFieldset = h('fieldset', {}, h('legend', {}, 'Marge sur le tarif de la grille'),
+                    h('div', { class: 'ss-inline' },
+                        field('Marge fixe (€ ' + taxLabel() + ')', inputs.mfixed),
+                        field('Marge (%)', inputs.mpercent)),
+                    h('p', { class: 'ss-muted' }, 'Ajoutées au prix de la grille (ex. 0,50 € pour le suivi de la lettre verte). Pas de marge sur une ligne à 0 €.'));
+
+                function setPricing(p) {
+                    pricing = p;
+                    flatBlock.hidden = p !== 'flat';
+                    providerBlock.hidden = p !== 'provider';
+                    gridBlock.hidden = p !== 'grid';
+                    marginFieldset.hidden = p === 'flat';
+                    if (p === 'grid' && !rows.length && isProvider) {
+                        (m.provider_rules || m.rules || []).forEach(addRow);
+                        refreshGridSummary();
+                    }
+                }
+
                 function read() {
-                    function v(i) { return i.value === '' ? null : i.value; }
                     return {
                         name: inputs.name.value,
                         description: inputs.description.value,
                         enabled: inputs.enabled.checked,
                         legal_floor: inputs.floor.checked,
+                        pricing: pricing,
+                        flat_price: pricing === 'flat' ? v(inputs.flat) : null,
                         margin: { fixed: v(inputs.mfixed), percent: v(inputs.mpercent) },
                         free_from: v(inputs.free),
                         constraints: { max_weight: v(inputs.maxw), max_thickness: v(inputs.maxt) },
-                        rules: rows.map(function (r) {
-                            return { zone: r.zone.value, min_weight: v(r.minw), max_weight: v(r.maxw), min_basket: v(r.minb), max_basket: v(r.maxb), max_thickness: v(r.thick), price: v(r.price) };
-                        })
+                        rules: pricing === 'grid' ? currentRules() : []
                     };
                 }
 
@@ -752,10 +972,11 @@
                     errors.scrollIntoView({ block: 'nearest' });
                 }
 
-                var form = h('form', { class: 'ss-mode-form', novalidate: false, onsubmit: function (ev) {
+                var form = h('form', { class: 'ss-mode-form', onsubmit: function (ev) {
                     ev.preventDefault();
                     errors.innerHTML = '';
                     saveBtn.disabled = true;
+                    status.className = 'ss-form-status';
                     status.textContent = 'Enregistrement…';
                     api('PUT', '/carriers/' + encodeURIComponent(m.key), read())
                         .then(function () { return reload({ key: m.key, message: 'Mode « ' + inputs.name.value + ' » ' + (isNew ? 'créé.' : 'enregistré.') }); })
@@ -766,30 +987,30 @@
                     m.available === false ? h('p', { class: 'ss-msg err' }, 'Indisponible pour le moment : ' + (m.unavailable_reason || 'réglages du plugin incomplets') + ' Le mode n’est pas proposé tant que ce n’est pas réglé.') : null,
                     field('Nom affiché au client', inputs.name),
                     field('Description affichée au client', inputs.description),
-                    h('fieldset', {}, h('legend', {}, 'Marge sur le tarif de la grille'),
-                        h('div', { class: 'ss-inline' },
-                            field('Marge fixe (€ ' + (priceHead.indexOf('HT') > -1 ? 'HT' : 'TTC') + ')', inputs.mfixed),
-                            field('Marge (%)', inputs.mpercent)),
-                        h('p', { class: 'ss-muted' }, 'Ajoutées au prix de la grille (ex. 0,50 € pour le suivi de la lettre verte). Pas de marge sur une ligne à 0 €.')),
+                    pricingFieldset,
+                    h('div', { class: 'ss-pricing-body' }, flatBlock, providerBlock, gridBlock),
+                    marginFieldset,
                     h('fieldset', {}, h('legend', {}, 'Règles'),
                         h('div', { class: 'ss-inline' },
                             field('Offert dès (€ de livres TTC)', inputs.free, 'Vide = jamais. Au-dessus, la livraison est offerte, au plancher légal près.'),
                             field('Poids maximal du colis (g)', inputs.maxw, 'Vide = illimité.'),
                             field('Épaisseur maximale (mm)', inputs.maxt, 'Vide = illimité.')),
                         h('div', { class: 'ss-field-row ss-check' }, inputs.floor,
-                            h('label', { for: uidp + '-floor' }, 'Appliquer le plancher légal des frais de livraison de livres'),
-                        ), h('p', { class: 'ss-muted' }, 'À décocher uniquement pour un retrait sur place, qui n’est pas une livraison.')),
-                    h('fieldset', {}, h('legend', {}, 'Grille de tarifs'),
-                        h('p', { class: 'ss-muted' }, 'La première ligne qui correspond au colis s’applique. Poids en grammes ; laissez « jusqu’à » vide pour « sans limite ».'),
-                        h('div', { class: 'ss-table-scroll', role: 'region', tabindex: '0', 'aria-label': 'Grille de tarifs, défilement horizontal' }, table),
-                        addBtn),
+                            h('label', { for: uidp + '-floor' }, 'Appliquer le plancher légal des frais de livraison de livres')),
+                        h('p', { class: 'ss-muted' }, 'À décocher uniquement pour un retrait sur place, qui n’est pas une livraison.')),
                     errors,
                     h('div', { class: 'ss-bar' }, saveBtn, extraBtn),
                     status);
 
+                setPricing(pricing);
+
+                var pricingBadge = pricing === 'flat' && m.flat_price !== null && m.flat_price !== undefined
+                    ? 'Forfait ' + money(m.flat_price) + ' ' + taxLabel()
+                    : PRICING_LABELS[pricing];
                 var summary = h('summary', {},
                     h('span', { class: 'ss-mode-name' }, m.name || 'Nouveau mode'), ' ',
                     h('span', { class: 'ss-badge' }, sourceLabel(m)), ' ',
+                    isNew ? null : h('span', { class: 'ss-badge ss-b-off' }, pricingBadge), ' ',
                     h('span', { class: 'ss-badge ' + (!m.available ? 'ss-b-ko' : (m.enabled ? 'ss-b-on' : 'ss-b-off')) }, statusLabel(m)));
                 var el = h('details', { class: 'ss-mode', open: isNew }, summary, form);
 
@@ -807,6 +1028,39 @@
                 };
             }
 
+            // ----- Préréglage « Livres France » (proposé tant qu'il n'est ni appliqué ni écarté) -----
+            function presetCard() {
+                if (((data.setup || {}).books_preset || '') !== 'pending') { return null; }
+                var law = (data.legal || {}).book_law || {};
+                var disable = h('input', { type: 'checkbox', id: 'ss-preset-disable' });
+                var cardStatus = h('div', { role: 'alert' });
+                function send(action) {
+                    cardStatus.innerHTML = '';
+                    api('POST', '/carriers/preset', { action: action, disable_others: disable.checked })
+                        .then(function (res) {
+                            return action === 'apply'
+                                ? reload({ key: res.data.key, message: 'Préréglage « Livres France » appliqué : mode « Livraison » créé.' + (disable.checked ? ' Les autres modes sont désactivés.' : '') })
+                                : reload({ message: 'Préréglage écarté : il ne sera plus proposé.' });
+                        })
+                        .catch(function (e) {
+                            cardStatus.appendChild(h('div', { class: 'ss-msg err' }, e.message,
+                                e.details && e.details.length ? h('ul', { class: 'ss-list' }, e.details.map(function (d) { return h('li', {}, d); })) : null));
+                        });
+                }
+
+                return h('section', { class: 'ss-card ss-preset', 'aria-labelledby': 'ss-preset-title' },
+                    h('h4', { id: 'ss-preset-title' }, 'Préréglage proposé : « Livres France »'),
+                    h('p', {}, law.enabled
+                        ? 'Un seul mode, au minimum fixé par la loi : ' + money(law.below) + ' pour moins de ' + money(law.threshold) + ' de livres, '
+                            + money(law.at_or_above) + ' au-delà, quel que soit le poids. C’est ce que pratiquent la plupart des librairies en ligne ; la différence avec le coût réel d’envoi est à votre charge.'
+                        : 'Le plancher légal est désactivé (Plugins > Simple Shop > Livraison) : ce préréglage n’est pas applicable.'),
+                    h('div', { class: 'ss-field-row ss-check' }, disable, h('label', { for: 'ss-preset-disable' }, 'Désactiver les autres modes (réactivables à tout moment)')),
+                    cardStatus,
+                    h('div', { class: 'ss-bar' },
+                        h('button', { class: 'ss-btn ss-primary', type: 'button', disabled: !law.enabled, onclick: function () { send('apply'); } }, 'Appliquer le préréglage'),
+                        h('button', { class: 'ss-btn', type: 'button', onclick: function () { send('dismiss'); } }, 'Non merci')));
+            }
+
             function newModeForm() {
                 var nameInput = h('input', { type: 'text', id: 'ss-new-mode-name', maxlength: '80' });
                 var btn = h('button', { class: 'ss-btn', type: 'button', onclick: function () {
@@ -816,8 +1070,8 @@
                     var existing = data.modes.map(function (x) { return x.key; });
                     while (existing.indexOf(key) !== -1) { key = base + '_' + (i++); }
                     var draft = { key: key, source: 'manual', provider: null, name: name, description: '', enabled: false, legal_floor: true,
-                        margin: { fixed: 0, percent: 0 }, free_from: null, constraints: { max_weight: null, max_thickness: null },
-                        rules: [], available: true };
+                        pricing: 'flat', flat_price: null, margin: { fixed: 0, percent: 0 }, free_from: null,
+                        constraints: { max_weight: null, max_thickness: null }, rules: [], available: true };
                     var ed = modeEditor(draft, true);
                     draftHolder.innerHTML = '';
                     draftHolder.appendChild(ed.el);

@@ -13,7 +13,8 @@ final class ModeEditor
     /**
      * Valide et normalise un mode reçu de l'interface.
      *
-     * @param array $in Champs bruts : name, description, enabled, legal_floor, margin, free_from, constraints, rules.
+     * @param array $in Champs bruts : name, description, enabled, legal_floor, pricing (flat|provider|grid), flat_price,
+     *                  margin, free_from, constraints, rules.
      *
      * @return array{0: array, 1: string[]} [mode normalisé, erreurs en français]
      */
@@ -48,6 +49,17 @@ final class ModeEditor
 
             return round((float) $v, 4);
         };
+
+        $pricing = (string) ($in['pricing'] ?? ($isProviderMode ? 'provider' : 'grid'));
+        $allowed = $isProviderMode ? CarrierCatalog::PRICING : ['flat', 'grid'];
+        if (!in_array($pricing, $allowed, true)) {
+            $errors[] = 'Type de calcul inconnu.';
+            $pricing = $isProviderMode ? 'provider' : 'grid';
+        }
+        $flatPrice = $number($in['flat_price'] ?? null, 'Prix du forfait', 1000);
+        if ($pricing === 'flat' && $flatPrice === null && !in_array('Prix du forfait : nombre positif attendu (au plus 1000).', $errors, true)) {
+            $errors[] = 'Le prix du forfait est obligatoire (0 = gratuit, au plancher légal près).';
+        }
 
         $margin = (array) ($in['margin'] ?? []);
         $constraints = (array) ($in['constraints'] ?? []);
@@ -96,11 +108,20 @@ final class ModeEditor
             $rules[] = $rule;
         }
 
+        if ($pricing === 'grid' && $rules === [] && !$isProviderMode) {
+            $errors[] = 'La grille est vide : ajoutez au moins une ligne, ou choisissez « Forfait ».';
+        }
+        if ($pricing === 'grid' && $rules === [] && $isProviderMode) {
+            $errors[] = 'La grille personnalisée est vide : ajoutez au moins une ligne, ou revenez au tarif du plugin.';
+        }
+
         $clean = [
             'name'        => $name,
             'description' => $description,
             'enabled'     => filter_var($in['enabled'] ?? false, FILTER_VALIDATE_BOOLEAN),
             'legal_floor' => filter_var($in['legal_floor'] ?? true, FILTER_VALIDATE_BOOLEAN),
+            'pricing'     => $pricing,
+            'flat_price'  => $pricing === 'flat' ? $flatPrice : null,
             'margin'      => [
                 'fixed'   => $number($margin['fixed'] ?? 0, 'Marge fixe', 1000) ?? 0.0,
                 'percent' => $number($margin['percent'] ?? 0, 'Marge en %', 1000) ?? 0.0,
@@ -133,6 +154,13 @@ final class ModeEditor
             if ($out['free_from'] === null) {
                 unset($out['free_from']);
             }
+            if ($out['flat_price'] === null) {
+                unset($out['flat_price']);
+            }
+            if ($out['pricing'] === 'flat') {
+                // La grille éventuelle est conservée (retour possible à « grille personnalisée »).
+                unset($out['margin']);
+            }
             if ($out['constraints']['max_weight'] === null && $out['constraints']['max_thickness'] === null) {
                 unset($out['constraints']);
             }
@@ -140,7 +168,11 @@ final class ModeEditor
             return $out;
         }
 
-        [$cleanDefaults] = self::sanitize($defaults, true);
+        [$cleanDefaults] = self::sanitize(['pricing' => 'provider'] + $defaults, true);
+        if ($clean['pricing'] !== 'grid') {
+            // Tarif du plugin ou forfait : la grille du plugin n'est pas surchargée.
+            $clean['rules'] = $cleanDefaults['rules'];
+        }
         $out = [];
         foreach (CarrierCatalog::EDITABLE as $field) {
             if ($clean[$field] != $cleanDefaults[$field]) {
@@ -149,6 +181,30 @@ final class ModeEditor
         }
 
         return $out;
+    }
+
+    /** Clé du mode créé par le préréglage « Livres France ». */
+    public const BOOKS_PRESET_KEY = 'livres_france';
+
+    /**
+     * Préréglage « Livres France » : un forfait à 0 € HT soumis au plancher légal, soit exactement le minimum de la loi
+     * (3 € TTC sous 35 € de livres, 0,01 € au-delà avec les réglages par défaut). Il suit donc les montants du plancher.
+     *
+     * @param array $law LegalShippingFloor::settings() : enabled, threshold, below, at_or_above.
+     */
+    public static function booksPreset(array $law): array
+    {
+        $fmt = static fn ($v): string => number_format((float) $v, 2, ',', ' ') . ' €';
+
+        return [
+            'name'        => 'Livraison',
+            'description' => $fmt($law['below'] ?? 3) . ' pour moins de ' . $fmt($law['threshold'] ?? 35) . ' de livres, '
+                . $fmt($law['at_or_above'] ?? 0.01) . ' au-delà.',
+            'enabled'     => true,
+            'legal_floor' => true,
+            'pricing'     => 'flat',
+            'flat_price'  => 0.0,
+        ];
     }
 
     /** Une clé de mode manuel est-elle valide ? (minuscules, chiffres, _ ; 2 à 40 caractères) */

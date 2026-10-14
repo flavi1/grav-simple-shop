@@ -234,12 +234,80 @@ class ShopApiController extends AbstractApiController
                 'prices_entered' => ShippingManager::pricesEnteredHt($config) ? 'ht' : 'ttc',
                 'packaging'      => ShippingManager::packaging($config),
             ],
+            'setup'     => ['books_preset' => $this->booksPresetState($path, $manager->getModes())],
             'legal'     => [
                 'book_law'  => \Grav\Plugin\SimpleShop\Delivery\LegalShippingFloor::settings($config),
                 'vat_rate'  => \Grav\Plugin\SimpleShop\Services\TaxManager::defaultRate(),
                 'tax_code'  => \Grav\Plugin\SimpleShop\Services\TaxManager::defaultCode(),
             ],
         ]);
+    }
+
+    /**
+     * Préréglage « Livres France » : « pending » (à proposer) tant qu'il n'a été ni appliqué ni écarté,
+     * sinon « applied » ou « dismissed » (bloc `setup` de carriers.yaml).
+     */
+    private function booksPresetState(string $path, array $modes): string
+    {
+        $setup = [];
+        if (is_file($path)) {
+            try {
+                $setup = (array) (\Symfony\Component\Yaml\Yaml::parseFile($path)['setup'] ?? []);
+            } catch (\Throwable $e) {
+                $setup = [];
+            }
+        }
+        $state = (string) ($setup['books_preset'] ?? '');
+        if (in_array($state, ['applied', 'dismissed'], true)) {
+            return $state;
+        }
+
+        return isset($modes[ModeEditor::BOOKS_PRESET_KEY]) ? 'applied' : 'pending';
+    }
+
+    /**
+     * POST /simple-shop/carriers/preset — corps : {"action": "apply"|"dismiss", "disable_others": bool}.
+     * « apply » crée le mode forfaitaire « Livres France » (et désactive les autres modes si demandé) ;
+     * « dismiss » ne le propose plus.
+     */
+    public function carriersPreset(ServerRequestInterface $request): ResponseInterface
+    {
+        $this->requirePermission($request, self::PERM_WRITE);
+
+        $body = $this->getRequestBody($request);
+        $action = (string) ($body['action'] ?? '');
+        if (!in_array($action, ['apply', 'dismiss'], true)) {
+            throw new ValidationException('Action inconnue.', ['action' => ['Attendu : apply ou dismiss.']]);
+        }
+        $config = (array) $this->grav['config']->get('plugins.simple-shop', []);
+        $law = \Grav\Plugin\SimpleShop\Delivery\LegalShippingFloor::settings($config);
+        if ($action === 'apply' && !$law['enabled']) {
+            throw new ValidationException('Préréglage impossible.', ['preset' => [
+                'Le plancher légal est désactivé (Plugins > Simple Shop > Livraison) : ce forfait rendrait la livraison gratuite.',
+            ]]);
+        }
+        $disableOthers = $action === 'apply' && filter_var($body['disable_others'] ?? false, FILTER_VALIDATE_BOOLEAN);
+        $modes = (new ShippingManager())->getModes();
+
+        $this->updateCarriersFile(function (array $carriers, array &$setup) use ($action, $law, $disableOthers, $modes): array {
+            $setup['books_preset'] = $action === 'apply' ? 'applied' : 'dismissed';
+            if ($action !== 'apply') {
+                return $carriers;
+            }
+            $carriers[ModeEditor::BOOKS_PRESET_KEY] = ModeEditor::booksPreset($law);
+            if ($disableOthers) {
+                foreach ($modes as $key => $mode) {
+                    if ($key !== ModeEditor::BOOKS_PRESET_KEY && $mode['enabled']) {
+                        $carriers[$key] = ['enabled' => false] + (is_array($carriers[$key] ?? null) ? $carriers[$key] : []);
+                        $carriers[$key]['enabled'] = false;
+                    }
+                }
+            }
+
+            return $carriers;
+        });
+
+        return ApiResponse::create(['books_preset' => $action === 'apply' ? 'applied' : 'dismissed', 'key' => ModeEditor::BOOKS_PRESET_KEY]);
     }
 
     /** @return array Vue d'un mode pour l'interface (sans les valeurs par défaut du fournisseur). */
@@ -396,7 +464,8 @@ class ShopApiController extends AbstractApiController
         try {
             $current = is_file($path) ? \Symfony\Component\Yaml\Yaml::parseFile($path) : [];
             $carriers = is_array($current['carriers'] ?? null) ? $current['carriers'] : [];
-            $errors = CarrierConfig::save($path, CarrierConfig::dump($change($carriers)));
+            $setup = is_array($current['setup'] ?? null) ? $current['setup'] : [];
+            $errors = CarrierConfig::save($path, CarrierConfig::dump($change($carriers, $setup), $setup));
             if ($errors !== []) {
                 throw new ValidationException('Configuration des transporteurs invalide.', ['carriers' => $errors]);
             }

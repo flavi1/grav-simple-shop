@@ -89,7 +89,16 @@ créée et l'incident est journalisé pour rapprochement manuel. Configuration p
 
 ### Prix de livraison (`carriers.yaml`)
 
-Chaîne de calcul d'un mode : **prix du palier (HT par défaut, `delivery.prices_entered`) + marge** (`margin: {fixed, percent}` sur le mode ; pas de marge sur un palier à 0)
+Chaque mode a un **type de calcul** (`pricing`) :
+- `flat` — **forfait** : un seul prix (`flat_price`), quel que soit le colis ; pas de marge. Un forfait à 0 soumis au plancher légal
+  donne exactement le minimum Darcos (c'est le préréglage « Livres France », clé `livres_france`, proposé une fois dans l'administration ;
+  son état est noté dans le bloc `setup.books_preset` de `carriers.yaml` : `applied` ou `dismissed`) ;
+- `provider` — **tarif du plugin** transporteur (modes `fournisseur.mode` seulement), grille livrée et mise à jour avec le plugin ;
+- `grid` — **grille personnalisée** (`rules`), importable / exportable en CSV depuis l'administration
+  (colonnes `zone;poids_de_g;poids_jusqua_g;panier_de_eur;panier_jusqua_eur;epaisseur_max_mm;prix_eur`, séparateur `;`, virgule décimale).
+Sans `pricing` : `grid` pour un mode manuel, `provider` pour un mode de plugin (ou `grid` si sa grille est surchargée).
+
+Chaîne de calcul d'un mode : **prix du palier ou du forfait (HT par défaut, `delivery.prices_entered`) + marge** (`margin: {fixed, percent}` sur le mode ; pas de marge sur un palier à 0)
 **→ TVA du site → plancher légal (Darcos) → arrondi au centime**. L'emballage (`delivery.packaging`, 40 g et 6 mm par défaut) est ajouté au poids et à l'épaisseur du panier
 (les épaisseurs des exemplaires s'additionnent) avant le choix des modes. Voir `ShippingManager::priceTtc()`.
 
@@ -149,7 +158,8 @@ API (préfixe `/api/v1/simple-shop`), permissions `api.simple-shop.read` /
 
 `GET /orders`, `GET /orders/export`, `GET /orders/{reference}`,
 `PATCH /orders/{reference}/status`, `PATCH /orders/{reference}/invoice-status`,
-`GET /orders/{reference}/invoice`, `GET|PUT /carriers`, `GET|POST /bans`,
+`GET /orders/{reference}/invoice`, `GET|PUT /carriers`, `PUT|DELETE /carriers/{key}`, `POST /carriers/simulate`,
+`POST /carriers/preset` (`{action: apply|dismiss, disable_others}`), `POST /carriers/providers/{id}/test`, `GET|POST /bans`,
 `DELETE /bans/{email}`.
 
 ## Configuration et données

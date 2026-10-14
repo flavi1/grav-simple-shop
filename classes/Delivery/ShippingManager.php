@@ -180,8 +180,15 @@ class ShippingManager
             return $no('Colis trop épais pour ce mode (' . $constraints['max_thickness'] . ' mm au plus).');
         }
 
+        $flat = ($mode['pricing'] ?? 'grid') === 'flat';
         $matched = null;
-        foreach ((array) ($mode['rules'] ?? []) as $rule) {
+        if ($flat) {
+            if (!isset($mode['flat_price']) || !is_numeric($mode['flat_price'])) {
+                return $no('Forfait sans prix.');
+            }
+            $matched = (float) $mode['flat_price'];
+        }
+        foreach ($flat ? [] : (array) ($mode['rules'] ?? []) as $rule) {
             if (($rule['zone'] ?? null) !== $zone) {
                 continue;
             }
@@ -203,7 +210,9 @@ class ShippingManager
 
         $freeApplied = !empty($mode['free_from']) && $metrics['subtotal'] >= $mode['free_from'];
         $grid = $freeApplied ? 0.0 : $matched;
-        $before = self::priceTtc($grid, (array) ($mode['margin'] ?? []), $config);
+        // Forfait : le prix saisi est le prix voulu, sans marge.
+        $margin = $flat ? [] : (array) ($mode['margin'] ?? []);
+        $before = self::priceTtc($grid, $margin, $config);
 
         // Plancher légal des frais de livraison de livres (loi Darcos). `legal_floor: false` : retrait sur place,
         // qui n'est pas une livraison au sens de la loi (à n'utiliser que pour cela ; voir LegalShippingFloor).
@@ -213,7 +222,7 @@ class ShippingManager
             'price'              => round(max($before, $floor), 2),
             'grid_price'         => $matched,
             'after_margin'       => $grid > 0
-                ? round($grid * (1 + max(0.0, (float) ($mode['margin']['percent'] ?? 0)) / 100) + max(0.0, (float) ($mode['margin']['fixed'] ?? 0)), 4)
+                ? round($grid * (1 + max(0.0, (float) ($margin['percent'] ?? 0)) / 100) + max(0.0, (float) ($margin['fixed'] ?? 0)), 4)
                 : 0.0,
             'vat_rate'           => self::pricesEnteredHt($config) ? \Grav\Plugin\SimpleShop\Services\TaxManager::defaultRate($config) : 0.0,
             'price_before_floor' => $before,
