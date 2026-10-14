@@ -44,7 +44,7 @@
 
         {# 4. Formulaire d'ajout au panier #}
         {% if price > 0 and virtual_stock != 0 %}
-            {% set buy_route = config.plugins['simple-shop'].routes.cart|default('/cart') %}
+            {% set buy_route = shop_routes.cart|default('/cart') %}
             <form action="{{ base_url_absolute ~ buy_route }}" method="POST" class="simple-shop-add-form" style="display: flex; gap: 1rem;">
                 {{ nonce_field('shop-cart-action')|raw }}
                 

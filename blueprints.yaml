@@ -27,24 +27,6 @@ form:
       validate:
         type: bool
 
-    buy_route:
-      type: text
-      label: Route de base du tunnel d'achat
-      help: "L'URL relative qui déclenche le tunnel (ex: /buy)"
-      default: '/buy'
-
-    success_url:
-      type: text
-      label: URL de succès
-      help: "Page de retour après un paiement réussi (ex: /checkout-success)"
-      default: '/checkout-success'
-
-    cancel_url:
-      type: text
-      label: URL d'annulation
-      help: "Page de retour si l'utilisateur annule"
-      default: '/checkout-cancel'
-
     newsletter_unsubscribe_secret:
       type: text
       label: Secret des liens de désabonnement newsletter

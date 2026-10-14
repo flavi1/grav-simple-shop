@@ -89,6 +89,9 @@ class OrderFinalizer
             $stmt = $db->prepare("SELECT * FROM \"order\" WHERE order_reference = :ref");
             $stmt->execute([':ref' => $orderReference]);
             $orderData = $stmt->fetch(\PDO::FETCH_ASSOC);
+            // Libère le verrou de lecture SQLite : sinon la réservation du numéro de facture (autre connexion, même
+            // requête) attend le délai maximal puis échoue (« database is locked »).
+            $stmt->closeCursor();
             if (!$orderData) {
                 return;
             }

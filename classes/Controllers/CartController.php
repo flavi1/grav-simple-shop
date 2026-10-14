@@ -7,6 +7,7 @@ use Grav\Common\Grav;
 use Grav\Common\Utils;
 use Grav\Plugin\Mvc\AbstractController;
 use Grav\Plugin\Mvc\Response;
+use Grav\Plugin\SimpleShop\Config\Routes;
 use Grav\Plugin\SimpleShop\Delivery\ZoneResolver;
 use Grav\Plugin\SimpleShop\Gateways\RedirectPaymentGatewayInterface;
 use Grav\Plugin\SimpleShop\Delivery\ShippingManager;
@@ -46,6 +47,16 @@ class CartController extends AbstractController
     private function customerManager(): CustomerManager
     {
         return $this->grav['simple_shop_customer'];
+    }
+
+    /**
+     * Paramètre POST attendu comme chaîne : null s'il est absent ou s'il n'est pas une chaîne (formulaire forgé avec un tableau).
+     */
+    private function postString(string $key): ?string
+    {
+        $value = $this->post($key);
+
+        return is_string($value) ? $value : null;
     }
 
     /**
@@ -163,7 +174,7 @@ class CartController extends AbstractController
                 'error'
             );
 
-            return $this->redirect($this->grav['base_url_absolute'] . ($config['routes']['cart'] ?? '/cart'), 303);
+            return $this->redirect($this->grav['base_url_absolute'] . Routes::get((array) $config, 'cart'), 303);
         }
 
         // E-mails de commande : uniquement à la création (jamais si la
@@ -181,7 +192,7 @@ class CartController extends AbstractController
         }
         $this->session->shop_last_order = $orderNumber;
 
-        $confirmationRoute = $config['routes']['confirmation'] ?? '/checkout/confirmation';
+        $confirmationRoute = Routes::get((array) $config, 'confirmation');
 
         return $this->redirect($this->grav['base_url_absolute'] . $confirmationRoute, 303);
     }
@@ -194,8 +205,8 @@ class CartController extends AbstractController
     public function step3PaymentReturn(): Response
     {
         $config = $this->grav['config']->get('plugins.simple-shop');
-        $cartUrl = $this->grav['base_url_absolute'] . ($config['routes']['cart'] ?? '/cart');
-        $paymentUrl = $this->grav['base_url_absolute'] . ($config['routes']['payment'] ?? '/checkout/payment');
+        $cartUrl = $this->grav['base_url_absolute'] . Routes::get((array) $config, 'cart');
+        $paymentUrl = $this->grav['base_url_absolute'] . Routes::get((array) $config, 'payment');
 
         $order = $this->session->shop_order ?? null;
         $query = $this->request()->getQueryParams();
@@ -275,9 +286,9 @@ class CartController extends AbstractController
 		$db = InventoryManager::getDatabase();
 
 		$config = $this->grav['config']->get('plugins.simple-shop');
-		$cartRoute = $config['routes']['cart'] ?? '/cart';
-		$emailRoute = $config['routes']['validation'] ?? '/checkout/email';
-		$deliveryRoute = $config['routes']['delivery'] ?? '/checkout/delivery';
+		$cartRoute = Routes::get((array) $config, 'cart');
+		$emailRoute = Routes::get((array) $config, 'validation');
+		$deliveryRoute = Routes::get((array) $config, 'delivery');
 
 		$absoluteCartUrl = $this->grav['base_url_absolute'] . $cartRoute;
 
@@ -288,23 +299,21 @@ class CartController extends AbstractController
 			$this->session->shop_order->customer = [];
 		}
 
-		if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+		if ($this->isPost()) {
 			
-			$action = filter_input(INPUT_POST, 'action', FILTER_DEFAULT);
+			$action = $this->postString('action');
 			
 			if ($action === 'process_checkout') {
-				$nonce = filter_input(INPUT_POST, 'nonce', FILTER_DEFAULT);
+				$nonce = $this->postString('nonce');
 				if (!$nonce || !Utils::verifyNonce($nonce, 'shop-checkout-action')) {
 					$this->addMessage("Votre session de validation a expiré, veuillez réessayer.", 'error');
-					$this->grav->redirect($absoluteCartUrl);
-					exit;
+					return $this->redirect($absoluteCartUrl);
 				}
 			} else {
-				$nonce = filter_input(INPUT_POST, 'nonce', FILTER_DEFAULT);
+				$nonce = $this->postString('nonce');
 				if ($action && (!$nonce || !Utils::verifyNonce($nonce, 'shop-cart-action'))) {
 					$this->addMessage("Votre session de panier a expiré, veuillez réessayer.", 'error');
-					$this->grav->redirect($absoluteCartUrl);
-					exit;
+					return $this->redirect($absoluteCartUrl);
 				}
 			}
 
@@ -312,11 +321,10 @@ class CartController extends AbstractController
 
 			switch ($action) {
 				case 'add_item':
-					$productRoute = filter_input(INPUT_POST, 'product_route', FILTER_SANITIZE_URL);
+					$productRoute = $this->post('product_route', FILTER_SANITIZE_URL);
 					if (!$productRoute) {
 						$this->addMessage("Impossible d'identifier le produit.", 'error');
-						$this->grav->redirect($absoluteCartUrl);
-						exit;
+						return $this->redirect($absoluteCartUrl);
 					}
 
 					$this->grav['pages']->init(); 
@@ -324,8 +332,7 @@ class CartController extends AbstractController
 
 					if (!$page || !$page->published()) {
 						$this->addMessage("Ce produit n'est plus disponible.", 'error');
-						$this->grav->redirect($absoluteCartUrl);
-						exit;
+						return $this->redirect($absoluteCartUrl);
 					}
 
 					$virtualStock = InventoryManager::getVirtualStock($productRoute);
@@ -336,15 +343,13 @@ class CartController extends AbstractController
 
 					if ($virtualStock === 0 && $currentQty === 0) {
 						$this->addMessage("Désolé, l'article est en rupture de stock.", 'error');
-						$this->grav->redirect($this->grav['base_url_absolute'] . $productRoute);
-						exit;
+						return $this->redirect($this->grav['base_url_absolute'] . $productRoute);
 					}
 
 					$maxAllowable = $virtualStock + $currentQty;
 					if ($virtualStock !== -1 && ($currentQty + 1) > $maxAllowable) {
 						$this->addMessage("Vous avez réservé la totalité des stocks disponibles.", 'notice');
-						$this->grav->redirect($absoluteCartUrl);
-						exit;
+						return $this->redirect($absoluteCartUrl);
 					}
 
 					$db->beginTransaction();
@@ -362,12 +367,11 @@ class CartController extends AbstractController
 						$this->addMessage("Une erreur technique est survenue.", 'error');
 					}
 
-					$this->grav->redirect($absoluteCartUrl);
-					exit;
+					return $this->redirect($absoluteCartUrl);
 
 				case 'update_quantity':
-					$productRoute = filter_input(INPUT_POST, 'product_route', FILTER_SANITIZE_URL);
-					$quantity = filter_input(INPUT_POST, 'quantity', FILTER_VALIDATE_INT);
+					$productRoute = $this->post('product_route', FILTER_SANITIZE_URL);
+					$quantity = $this->post('quantity', FILTER_VALIDATE_INT, false);
 					
 					if ($productRoute && $quantity !== false) {
 						if ($quantity <= 0) {
@@ -388,18 +392,16 @@ class CartController extends AbstractController
 							$stmt->execute([':qty' => $quantity, ':cid' => $cartId, ':route' => $productRoute]);
 						}
 					}
-					$this->grav->redirect($absoluteCartUrl);
-					exit;
+					return $this->redirect($absoluteCartUrl);
 
 				case 'remove_item':
-					$productRoute = filter_input(INPUT_POST, 'product_route', FILTER_SANITIZE_URL);
+					$productRoute = $this->post('product_route', FILTER_SANITIZE_URL);
 					if ($productRoute) {
 						$stmt = $db->prepare("DELETE FROM cart_item WHERE cart_id = :cid AND product_route = :route");
 						$stmt->execute([':cid' => $cartId, ':route' => $productRoute]);
 						$this->addMessage("L'article a été retiré de votre panier.", 'notice');
 					}
-					$this->grav->redirect($absoluteCartUrl);
-					exit;
+					return $this->redirect($absoluteCartUrl);
 
 				case 'process_checkout':
 					// Si le panier vient d'être corrigé (rupture de stock,
@@ -408,15 +410,13 @@ class CartController extends AbstractController
 					// flash déjà émis par revalidateCartStock() ci-dessus)
 					// avant de pouvoir soumettre à nouveau.
 					if (!empty($stockAdjustments)) {
-						$this->grav->redirect($absoluteCartUrl);
-						exit;
+						return $this->redirect($absoluteCartUrl);
 					}
 
-					$acceptCgv = filter_input(INPUT_POST, 'accept-cgv', FILTER_DEFAULT);
+					$acceptCgv = $this->post('accept-cgv', FILTER_DEFAULT);
 					if (!$acceptCgv) {
 						$this->addMessage("Vous devez accepter les conditions générales de vente pour continuer.", 'error');
-						$this->grav->redirect($absoluteCartUrl);
-						exit;
+						return $this->redirect($absoluteCartUrl);
 					}
 
 					// Construction des données client à partir des champs d'identité
@@ -424,11 +424,12 @@ class CartController extends AbstractController
 					// par les champs spécifiques au tunnel de commande.
 					$customerData = [];
 					foreach (CustomerManager::TEXT_FIELDS as $field) {
-						$customerData[$field] = trim((string) filter_input(INPUT_POST, $field, FILTER_DEFAULT));
+						$value = $this->post($field, FILTER_DEFAULT);
+						$customerData[$field] = is_string($value) ? trim($value) : '';
 					}
-					$customerData['country']    = filter_input(INPUT_POST, 'country', FILTER_DEFAULT) ?: 'FR';
-					$customerData['newsletter'] = filter_input(INPUT_POST, 'newsletter', FILTER_DEFAULT) ? true : false;
-					$customerData['keep-data']  = filter_input(INPUT_POST, 'keep-data', FILTER_DEFAULT) ? true : false;
+					$customerData['country']    = $this->post('country', FILTER_DEFAULT) ?: 'FR';
+					$customerData['newsletter'] = $this->post('newsletter', FILTER_DEFAULT) ? true : false;
+					$customerData['keep-data']  = $this->post('keep-data', FILTER_DEFAULT) ? true : false;
 					$customerData['accept-cgv'] = true;
 
 					// Validation + persistance déléguées à CustomerManager (dette #11) :
@@ -445,8 +446,7 @@ class CartController extends AbstractController
 						} else {
 							$this->addMessage("Veuillez remplir correctement tous les champs obligatoires (*).", 'error');
 						}
-						$this->grav->redirect($absoluteCartUrl);
-						exit;
+						return $this->redirect($absoluteCartUrl);
 					}
 
 					// Décision de redirection factorisée (voir
@@ -470,8 +470,7 @@ class CartController extends AbstractController
 						false
 					);
 
-					$this->grav->redirect($destination['url']);
-					exit;
+					return $this->redirect($destination['url']);
 			}
 		}
 
@@ -486,10 +485,10 @@ class CartController extends AbstractController
     public function step2Delivery(): Response 
     {
 		$config = $this->grav['config']->get('plugins.simple-shop');
-		$cartRoute = $config['routes']['cart'] ?? '/cart';
-		$emailRoute = $config['routes']['validation'] ?? '/checkout/email';
-		$nextStepRoute = $config['routes']['payment'] ?? '/checkout/payment';
-		$deliveryRoute = $config['routes']['delivery'] ?? '/checkout/delivery';
+		$cartRoute = Routes::get((array) $config, 'cart');
+		$emailRoute = Routes::get((array) $config, 'validation');
+		$nextStepRoute = Routes::get((array) $config, 'payment');
+		$deliveryRoute = Routes::get((array) $config, 'delivery');
 
 		$absoluteCartUrl = $this->grav['base_url_absolute'] . $cartRoute;
 		$absoluteDeliveryUrl = $this->grav['base_url_absolute'] . $deliveryRoute;
@@ -500,8 +499,7 @@ class CartController extends AbstractController
 		$cartId = CartStorage::getOrCreateCartId();
 		$stockAdjustments = $this->revalidateCartStock($cartId);
 		if (!empty($stockAdjustments)) {
-			$this->grav->redirect($absoluteCartUrl);
-			exit;
+			return $this->redirect($absoluteCartUrl);
 		}
 
 		$customerData = AddressFields::normalize((array) ($this->session->shop_order->customer ?? []));
@@ -509,22 +507,19 @@ class CartController extends AbstractController
 
 		if (empty($customerData['email']) || empty($customerData['street'])) {
 			$this->addMessage("Veuillez d'abord renseigner vos informations de livraison.", 'notice');
-			$this->grav->redirect($absoluteCartUrl);
-			exit;
+			return $this->redirect($absoluteCartUrl);
 		}
 
 		// Filet de sécurité (profil ancien, session antérieure à la règle) :
 		// livraison uniquement dans les zones desservies.
 		if (!ZoneResolver::isDeliverable((array) $customerData, (array) $this->grav['config']->get('plugins.simple-shop', []))) {
 			$this->addMessage(ZoneResolver::unsupportedMessage((array) $this->grav['config']->get('plugins.simple-shop', [])), 'error');
-			$this->grav->redirect($absoluteCartUrl);
-			exit;
+			return $this->redirect($absoluteCartUrl);
 		}
 
 		if (!$emailVerified) {
 			$this->addMessage("Veuillez valider votre adresse e-mail avant de choisir un mode de livraison.", 'notice');
-			$this->grav->redirect($this->grav['base_url_absolute'] . $emailRoute . '?back_url=' . rawurlencode($absoluteDeliveryUrl));
-			exit;
+			return $this->redirect($this->grav['base_url_absolute'] . $emailRoute . '?back_url=' . rawurlencode($absoluteDeliveryUrl));
 		}
 
 		$cartItems = CartStorage::getCart();
@@ -539,10 +534,10 @@ class CartController extends AbstractController
 
 		$order = $this->session->shop_order;
 
-		if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+		if ($this->isPost()) {
 			
-			$action = filter_input(INPUT_POST, 'action', FILTER_DEFAULT);
-			$nonce = filter_input(INPUT_POST, 'nonce', FILTER_DEFAULT);
+			$action = $this->postString('action');
+			$nonce = $this->postString('nonce');
 
 			if (in_array($action, ['select_shipping', 'select_pickup', 'change_shipping'], true)
 				&& (!$nonce || !Utils::verifyNonce($nonce, 'shop-delivery-action'))) {
@@ -551,7 +546,7 @@ class CartController extends AbstractController
 			}
 
 			if ($action === 'select_shipping') {
-				$selectedCarrierKey = filter_input(INPUT_POST, 'shipping_method', FILTER_DEFAULT);
+				$selectedCarrierKey = $this->postString('shipping_method');
 
 				if (!$selectedCarrierKey || !isset($availableCarriers[$selectedCarrierKey])) {
 					$this->addMessage("Veuillez sélectionner un mode de livraison valide parmi les options proposées.", 'error');
@@ -585,7 +580,7 @@ class CartController extends AbstractController
 			if ($action === 'select_pickup') {
 				$pending = (array) ($order->pending_shipping ?? []);
 				$cache = (array) ($order->pickup_cache ?? []);
-				$pointId = trim((string) filter_input(INPUT_POST, 'pickup_point', FILTER_DEFAULT));
+				$pointId = is_string($this->post('pickup_point')) ? trim($this->post('pickup_point')) : '';
 
 				// Le point doit figurer dans la dernière liste proposée par le transporteur (jamais une valeur libre).
 				$point = ($pending && ($cache['mode'] ?? null) === ($pending['key'] ?? null)) ? ($cache['points'][$pointId] ?? null) : null;
@@ -611,13 +606,16 @@ class CartController extends AbstractController
 		// Sous-étape « choix du point de retrait ».
 		$pending = (array) ($order->pending_shipping ?? []);
 		if ($pending && isset($availableCarriers[$pending['key'] ?? ''])) {
+			$pickupZipRaw = $this->get('pickup_zip');
+			$pickupZip = is_string($pickupZipRaw) ? $pickupZipRaw : '';
+			$pickupCity = is_string($this->get('pickup_city')) ? trim($this->get('pickup_city')) : '';
 			$search = [
-				'postal-code' => preg_match('/^\d{5}$/', (string) ($_GET['pickup_zip'] ?? '')) ? (string) $_GET['pickup_zip'] : (string) ($customerData['postal-code'] ?? ''),
-				'city'        => trim((string) ($_GET['pickup_city'] ?? '')) !== '' ? mb_substr(trim((string) $_GET['pickup_city']), 0, 50) : (string) ($customerData['city'] ?? ''),
+				'postal-code' => preg_match('/^\d{5}$/', $pickupZip) ? $pickupZip : (string) ($customerData['postal-code'] ?? ''),
+				'city'        => $pickupCity !== '' ? mb_substr($pickupCity, 0, 50) : (string) ($customerData['city'] ?? ''),
 				'street'      => (string) ($customerData['street'] ?? ''),
 				'country'     => 'FR',
 			];
-			if (isset($_GET['pickup_zip'])) {
+			if ($pickupZipRaw !== null) {
 				$search['street'] = ''; // recherche sur une autre commune : l'adresse du client ne s'applique plus
 			}
 
@@ -651,9 +649,9 @@ class CartController extends AbstractController
     public function step3Payment(): Response 
     {
 		$config = $this->grav['config']->get('plugins.simple-shop');
-		$cartRoute = $config['routes']['cart'] ?? '/cart';
-		$deliveryRoute = $config['routes']['delivery'] ?? '/checkout/delivery';
-		$emailRoute = $config['routes']['validation'] ?? '/checkout/email';
+		$cartRoute = Routes::get((array) $config, 'cart');
+		$deliveryRoute = Routes::get((array) $config, 'delivery');
+		$emailRoute = Routes::get((array) $config, 'validation');
 
 		$absoluteCartUrl = $this->grav['base_url_absolute'] . $cartRoute;
 
@@ -663,8 +661,7 @@ class CartController extends AbstractController
 		$cartId = CartStorage::getOrCreateCartId();
 		$stockAdjustments = $this->revalidateCartStock($cartId);
 		if (!empty($stockAdjustments)) {
-			$this->grav->redirect($absoluteCartUrl);
-			exit;
+			return $this->redirect($absoluteCartUrl);
 		}
 
 		// ==========================================
@@ -703,9 +700,9 @@ class CartController extends AbstractController
 		// ==========================================
 		// TRAITEMENT DES FORMULAIRES (POST)
 		// ==========================================
-		if ($_SERVER['REQUEST_METHOD'] === 'POST') {
-			$action = filter_input(INPUT_POST, 'action', FILTER_DEFAULT);
-			$nonce = filter_input(INPUT_POST, 'nonce', FILTER_DEFAULT);
+		if ($this->isPost()) {
+			$action = $this->postString('action');
+			$nonce = $this->postString('nonce');
 
 			if (!$nonce || !Utils::verifyNonce($nonce, 'shop-payment-step')) {
 				$this->addMessage("Session expirée, veuillez réessayer.", 'error');
@@ -714,7 +711,7 @@ class CartController extends AbstractController
 
 			// --- TEMPS 1 -> TEMPS 2 : Soumission Facturation & Choix Gateway ---
 			if ($action === 'submit_billing') {
-				$selectedGateway = filter_input(INPUT_POST, 'payment_method', FILTER_DEFAULT);
+				$selectedGateway = $this->postString('payment_method');
 				
 				if (empty($selectedGateway) || !isset($gateways[$selectedGateway])) {
 					$this->addMessage("Veuillez sélectionner un mode de paiement valide.", 'error');
@@ -723,11 +720,11 @@ class CartController extends AbstractController
 
 				// Sauvegarde de l'adresse de facturation
 				$order->billing = [
-					'name'          => filter_input(INPUT_POST, 'billing_name', FILTER_DEFAULT),
-					'street'        => filter_input(INPUT_POST, 'billing_street', FILTER_DEFAULT),
-					'postal-code'      => filter_input(INPUT_POST, 'billing_postal_code', FILTER_DEFAULT),
-					'city'          => filter_input(INPUT_POST, 'billing_city', FILTER_DEFAULT),
-					'address-complement' => filter_input(INPUT_POST, 'billing_address_complement', FILTER_DEFAULT),
+					'name'          => $this->post('billing_name', FILTER_DEFAULT),
+					'street'        => $this->post('billing_street', FILTER_DEFAULT),
+					'postal-code'      => $this->post('billing_postal_code', FILTER_DEFAULT),
+					'city'          => $this->post('billing_city', FILTER_DEFAULT),
+					'address-complement' => $this->post('billing_address_complement', FILTER_DEFAULT),
 				];
 				$order->selected_gateway = $selectedGateway;
 				$order->payment_sub_step = 'gateway_form'; // On bascule au Temps 2
@@ -749,7 +746,7 @@ class CartController extends AbstractController
 				$gateway = $gateways[$currentGatewayKey];
 				
 				// Exécution du Temps 3
-				$result = $gateway->processPayment($_POST);
+				$result = $gateway->processPayment($this->request()->getParsedBody());
 
 				if ($result['success']) {
 					return $this->finalizeOrder($result);
@@ -776,7 +773,7 @@ class CartController extends AbstractController
 				$order->billing_total = $this->computeBillingTotal($shippingData);
 
 				$returnUrl = $this->grav['base_url_absolute']
-					. ($config['routes']['payment_return'] ?? '/checkout/payment-return');
+					. Routes::get((array) $config, 'payment_return');
 
 				$started = $gateway->startHostedPayment((array) $order, $returnUrl);
 				if (!empty($started['url'])) {
@@ -830,8 +827,8 @@ class CartController extends AbstractController
 		$twig->twig_vars['gateway_html'] = $gatewayHtml;
 
 		// Routes pour les liens "Modifier" avec fallbacks sécurisés
-		$checkoutInfoRoute = $config['routes']['cart'] ?? '/cart';
-		$deliveryRoutePath = $config['routes']['delivery'] ?? '/checkout/delivery';
+		$checkoutInfoRoute = Routes::get((array) $config, 'cart');
+		$deliveryRoutePath = Routes::get((array) $config, 'delivery');
 
 		$twig->twig_vars['routes'] = [
 			'step1' => $this->grav['base_url_absolute'] . $checkoutInfoRoute,
@@ -853,7 +850,7 @@ class CartController extends AbstractController
 
 		if ($orderReference === '' || ($requested !== '' && $requested !== $orderReference)) {
 			$this->addMessage("Aucune commande à afficher pour cette session.", 'error');
-			return $this->redirect($this->grav['base_url_absolute'] . '/cart');
+			return $this->redirect($this->grav['base_url_absolute'] . Routes::get((array) $this->grav['config']->get('plugins.simple-shop', []), 'cart'));
 		}
 
 		$db = InventoryManager::getDatabase();
@@ -863,8 +860,7 @@ class CartController extends AbstractController
 
 		if (!$orderData) {
 			$this->addMessage("Commande introuvable.", 'error');
-			$this->grav->redirect($this->grav['base_url_absolute'] . '/cart');
-			exit;
+			return $this->redirect($this->grav['base_url_absolute'] . Routes::get((array) $this->grav['config']->get('plugins.simple-shop', []), 'cart'));
 		}
 
 		$stmtItems = $db->prepare("SELECT * FROM order_item WHERE order_reference = :ref");

@@ -43,10 +43,10 @@ class CartStorage
         $items = $stmt->fetchAll(\PDO::FETCH_ASSOC);
 
         $pages = Grav::instance()['pages'];
+        $pages->init();
         $structuredCart = [];
 
         foreach ($items as $item) {
-            $pages->init();
             $page = $pages->dispatch($item['product_route']);
             if (!$page) continue;
 
@@ -233,7 +233,9 @@ class CartStorage
 
         $stmtCount = $db->prepare("SELECT COUNT(*) FROM cart_item WHERE cart_id = :cid");
         $stmtCount->execute([':cid' => $targetCartId]);
-        if ((int) $stmtCount->fetchColumn() > 0) {
+        $count = (int) $stmtCount->fetchColumn();
+        $stmtCount->closeCursor();
+        if ($count > 0) {
             // Le panier courant n'est pas vide : conformément à la règle
             // métier demandée, on ne restaure rien.
             return false;
@@ -449,6 +451,7 @@ class CartStorage
         $stmt = $db->prepare("SELECT order_reference FROM order_payment WHERE payment_reference = :pay");
         $stmt->execute([':pay' => $paymentReference]);
         $ref = $stmt->fetchColumn();
+        $stmt->closeCursor();
 
         return $ref !== false ? (string) $ref : null;
     }

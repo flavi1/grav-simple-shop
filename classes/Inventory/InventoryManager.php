@@ -83,6 +83,7 @@ class InventoryManager
         ");
         $stmt->execute([':route' => $productRoute]);
         $reserved = (int)$stmt->fetchColumn();
+        $stmt->closeCursor();
 
         return [
             'product_price'         => $price,

@@ -226,6 +226,7 @@ class InvoiceManager
         $stmt = $db->prepare('SELECT * FROM invoice WHERE order_reference = :ref');
         $stmt->execute([':ref' => $orderReference]);
         $existing = $stmt->fetch(\PDO::FETCH_ASSOC);
+        $stmt->closeCursor();
 
         if ($existing) {
             return $existing;
@@ -300,6 +301,7 @@ class InvoiceManager
         ');
         $stmt->execute([':like' => $prefixLike]);
         $last = $stmt->fetchColumn();
+        $stmt->closeCursor();
 
         $nextCounter = 1;
         if ($last) {
@@ -334,6 +336,7 @@ class InvoiceManager
         $stmt = $db->prepare('SELECT * FROM invoice WHERE order_reference = :ref');
         $stmt->execute([':ref' => $orderReference]);
         $invoice = $stmt->fetch(\PDO::FETCH_ASSOC);
+        $stmt->closeCursor();
 
         if (!$invoice) {
             return false;

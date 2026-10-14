@@ -4,10 +4,6 @@ otp:
   resend_delay: 60        # secondes entre deux envois pour une même session
   max_per_email_hour: 5   # envois par heure vers une même adresse e-mail
   max_per_ip_hour: 20     # envois par heure depuis une même adresse IP
-buy_route: '/buy'
-cart_route: '/cart'
-success_url: '/checkout-success'
-cancel_url: '/checkout-cancel'
 routes:
   cart: '/cart'
   validation: '/checkout/email'
@@ -18,6 +14,7 @@ routes:
   identify: '/identify'
   account: '/mon-compte'
   logout: '/mon-compte/deconnexion'
+  newsletter_unsubscribe: '/newsletter/unsubscribe'
 
 # Livraison : zones desservies par CE site (le plugin sait résoudre FR-METRO,
 # FR-CORSE, FR-OM, EU-ZONE-1 et INTERNATIONAL ; chaque zone ouverte doit avoir

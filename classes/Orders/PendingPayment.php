@@ -78,6 +78,7 @@ class PendingPayment
         $stmt = $db->prepare("SELECT order_data, amount_cents FROM pending_payment WHERE snapshot_id = :id");
         $stmt->execute([':id' => $snapshotId]);
         $row = $stmt->fetch(\PDO::FETCH_ASSOC);
+        $stmt->closeCursor();
         if (!$row) {
             return null;
         }

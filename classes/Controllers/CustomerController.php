@@ -175,9 +175,7 @@ class CustomerController extends AbstractController
      */
     private function routeUrl(string $key, string $fallback): string
     {
-        $routes = (array) ($this->shopConfig()['routes'] ?? []);
-
-        $route = $routes[$key] ?? $fallback;
+        $route = \Grav\Plugin\SimpleShop\Config\Routes::get((array) $this->shopConfig(), $key, $fallback);
         if (!is_string($route) || $route === '') {
             $route = $fallback;
         }

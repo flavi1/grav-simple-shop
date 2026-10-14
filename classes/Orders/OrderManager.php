@@ -90,6 +90,7 @@ class OrderManager
         $stmt = $db->prepare('SELECT * FROM "order" WHERE order_reference = :ref');
         $stmt->execute([':ref' => $orderReference]);
         $order = $stmt->fetch(\PDO::FETCH_ASSOC);
+        $stmt->closeCursor();
 
         return $order ?: null;
     }
@@ -158,6 +159,7 @@ class OrderManager
         $stmt = InventoryManager::getDatabase()->prepare('SELECT tracking_number FROM order_tracking WHERE order_reference = :ref');
         $stmt->execute([':ref' => $orderReference]);
         $n = $stmt->fetchColumn();
+        $stmt->closeCursor();
 
         return $n === false ? null : (string) $n;
     }
@@ -266,6 +268,7 @@ class OrderManager
         $stmtCount = $db->prepare('SELECT COUNT(*) FROM "order"' . $where);
         $stmtCount->execute($params);
         $total = (int) $stmtCount->fetchColumn();
+        $stmtCount->closeCursor();
 
         $sql = 'SELECT * FROM "order"' . $where . ' ORDER BY created_at DESC, order_reference DESC';
         if ($limit > 0) {
