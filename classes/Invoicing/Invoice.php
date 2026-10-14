@@ -2,6 +2,7 @@
 
 namespace Grav\Plugin\SimpleShop\Invoicing;
 
+use Grav\Plugin\SimpleShop\Orders\OrderAmounts;
 use Grav\Plugin\SimpleShop\Services\AddressFields;
 
 use Atgp\FacturX\Writer;
@@ -33,9 +34,9 @@ use Atgp\FacturX\XsdValidator;
  * NOTES-TODO.md : Testeur Factur-X de la FNFE-MPE).
  *
  * Limitations métier assumées (voir échanges de conception) :
- *  - un seul taux de TVA pour toute la boutique ({@see InvoiceManager::getVatRate()}) ;
  *  - uniquement des clients B2C ;
- *  - devise EUR uniquement.
+ *  - une devise par commande (celle du site au moment de la commande).
+ * Les taux de TVA sont ceux figés sur chaque ligne de la commande (plusieurs taux possibles).
  *
  * @package Grav\Plugin\SimpleShop\Invoicing
  */
@@ -90,10 +91,10 @@ class Invoice
      */
     public function build(): string
     {
-        $lines = $this->computeLines();
+        $computed = $this->computeLines();
 
-        $basePdf = $this->buildBasePdf($lines);
-        $xml = (new FacturXXmlBuilder($this->order, $this->invoiceRow, $this->seller, $lines))->build();
+        $basePdf = $this->buildBasePdf($computed['amounts'], $computed['totals']);
+        $xml = (new FacturXXmlBuilder($this->order, $this->invoiceRow, $this->seller, $computed['amounts'], $computed['totals']))->build();
 
         $validator = new XsdValidator();
         if (!$validator->validate($xml)) {
@@ -111,65 +112,18 @@ class Invoice
     }
 
     /**
-     * Calcule, pour chaque ligne de facture (articles + éventuels frais de
-     * livraison), les montants TTC / HT / TVA à partir du taux unique de la
-     * facture (`invoice.vat_rate`, figé au moment de la création de la
-     * facture).
+     * Montants de la facture, en centimes : lignes figées à la commande (prix HT/TTC, code et taux de taxe), totaux par
+     * taux et montant d'arrondi (voir {@see OrderAmounts}). Une ancienne commande (sans centimes) est relue avec le taux
+     * figé sur sa facture (`invoice.vat_rate`).
      *
-     * Les prix produits ({@see \Grav\Plugin\SimpleShop\Inventory\InventoryManager})
-     * sont TTC : le HT est donc dérivé (`TTC / (1 + taux)`), jamais l'inverse.
-     *
-     * Une ligne "Frais de livraison" est ajoutée si `order.shipping_data`
-     * contient un prix non nul, afin que le total de la facture corresponde
-     * exactement à `order.total_amount`.
-     *
-     * @return array<int, array{
-     *     title: string, quantity: int, unit_price_ttc: float,
-     *     line_total_ttc: float, line_total_ht: float, line_vat: float
-     * }>
+     * @return array{amounts: array, totals: array}
      */
     private function computeLines(): array
     {
-        $vatRate = (float) ($this->invoiceRow['vat_rate'] ?? 0.0);
-        $lines = [];
+        $rate = isset($this->invoiceRow['vat_rate']) ? (float) $this->invoiceRow['vat_rate'] : null;
+        $amounts = OrderAmounts::forStoredOrder($this->order, $this->orderItems, $rate);
 
-        foreach ($this->orderItems as $item) {
-            $qty = (int) ($item['quantity'] ?? 0);
-            $unitTtc = (float) ($item['price'] ?? 0.0);
-            $lineTtc = round($unitTtc * $qty, 2);
-            $lineHt = $vatRate > 0 ? round($lineTtc / (1 + $vatRate), 2) : $lineTtc;
-            $lineVat = round($lineTtc - $lineHt, 2);
-
-            $lines[] = [
-                'title'          => (string) ($item['title'] ?? ''),
-                'quantity'       => $qty,
-                'unit_price_ttc' => $unitTtc,
-                'line_total_ttc' => $lineTtc,
-                'line_total_ht'  => $lineHt,
-                'line_vat'       => $lineVat,
-            ];
-        }
-
-        $shipping = json_decode((string) ($this->order['shipping_data'] ?? '{}'), true) ?: [];
-        $shippingPrice = (float) ($shipping['price'] ?? 0.0);
-
-        if ($shippingPrice > 0) {
-            $shippingTitle = (string) ($shipping['name'] ?? $shipping['label'] ?? $shipping['title'] ?? 'Frais de livraison');
-            $lineTtc = round($shippingPrice, 2);
-            $lineHt = $vatRate > 0 ? round($lineTtc / (1 + $vatRate), 2) : $lineTtc;
-            $lineVat = round($lineTtc - $lineHt, 2);
-
-            $lines[] = [
-                'title'          => $shippingTitle,
-                'quantity'       => 1,
-                'unit_price_ttc' => $lineTtc,
-                'line_total_ttc' => $lineTtc,
-                'line_total_ht'  => $lineHt,
-                'line_vat'       => $lineVat,
-            ];
-        }
-
-        return $lines;
+        return ['amounts' => $amounts, 'totals' => OrderAmounts::invoiceTotals($amounts)];
     }
 
     /**
@@ -184,12 +138,15 @@ class Invoice
      * fonctionnalités FPDI, est `\setasign\Fpdi\Fpdi` (fichier `src/Fpdi.php`,
      * à la racine du namespace `setasign\Fpdi`).
      *
-     * @param array $lines Lignes de facture (voir {@see self::computeLines()}).
+     * @param array $amounts Montants de la commande (voir {@see OrderAmounts}).
+     * @param array $totals  Totaux de facture (voir {@see OrderAmounts::invoiceTotals()}).
      *
      * @return string Le contenu binaire du PDF de base.
      */
-    private function buildBasePdf(array $lines): string
+    private function buildBasePdf(array $amounts, array $totals): string
     {
+        $cur = ' ' . $amounts['currency'];
+        $fmt = static fn (int $cents): string => number_format($cents / 100, 2, ',', ' ');
         $customer = AddressFields::normalize(json_decode((string) ($this->order['customer_data'] ?? '{}'), true) ?: []);
         $billing  = AddressFields::normalize(json_decode((string) ($this->order['billing_data'] ?? '{}'), true) ?: []);
 
@@ -261,33 +218,31 @@ class Invoice
         $pdf->Cell(35, 7, $this->t('Total TTC'), 1, 1, 'R', true);
 
         $pdf->SetFont('Helvetica', '', 10);
-        $subtotalHt = 0.0;
-        $vatTotal = 0.0;
-        $totalTtc = 0.0;
-
-        foreach ($lines as $line) {
+        foreach ($amounts['lines'] as $line) {
             $pdf->Cell(90, 7, $this->t($line['title']), 1);
             $pdf->Cell(20, 7, (string) $line['quantity'], 1, 0, 'C');
-            $pdf->Cell(35, 7, number_format($line['unit_price_ttc'], 2, ',', ' ') . ' EUR', 1, 0, 'R');
-            $pdf->Cell(35, 7, number_format($line['line_total_ttc'], 2, ',', ' ') . ' EUR', 1, 1, 'R');
-
-            $subtotalHt += $line['line_total_ht'];
-            $vatTotal += $line['line_vat'];
-            $totalTtc += $line['line_total_ttc'];
+            $pdf->Cell(35, 7, $fmt($line['unit_ttc_cents']) . $cur, 1, 0, 'R');
+            $pdf->Cell(35, 7, $fmt($line['line_ttc_cents']) . $cur, 1, 1, 'R');
         }
 
         $pdf->Ln(4);
 
-        $vatRatePercent = number_format(((float) ($this->invoiceRow['vat_rate'] ?? 0)) * 100, 2, ',', ' ');
-
         $pdf->SetFont('Helvetica', '', 10);
         $pdf->Cell(145, 6, $this->t('Total HT'), 0, 0, 'R');
-        $pdf->Cell(35, 6, number_format($subtotalHt, 2, ',', ' ') . ' EUR', 0, 1, 'R');
-        $pdf->Cell(145, 6, $this->t('TVA (' . $vatRatePercent . ' %)'), 0, 0, 'R');
-        $pdf->Cell(35, 6, number_format($vatTotal, 2, ',', ' ') . ' EUR', 0, 1, 'R');
+        $pdf->Cell(35, 6, $fmt($totals['line_total_ht_cents']) . $cur, 0, 1, 'R');
+        foreach ($totals['taxes'] as $tax) {
+            $percent = rtrim(rtrim(number_format($tax['bp'] / 100, 2, ',', ''), '0'), ',');
+            $pdf->Cell(145, 6, $this->t('TVA ' . $percent . ' % sur ' . $fmt($tax['base_cents']) . $cur), 0, 0, 'R');
+            $pdf->Cell(35, 6, $fmt($tax['tax_cents']) . $cur, 0, 1, 'R');
+        }
+        if ($totals['rounding_cents'] !== 0) {
+            // Écart d'arrondi entre la TVA calculée par taux et les prix TTC payés (BT-114).
+            $pdf->Cell(145, 6, $this->t('Arrondi'), 0, 0, 'R');
+            $pdf->Cell(35, 6, ($totals['rounding_cents'] < 0 ? '-' : '') . $fmt(abs($totals['rounding_cents'])) . $cur, 0, 1, 'R');
+        }
         $pdf->SetFont('Helvetica', 'B', 11);
         $pdf->Cell(145, 8, $this->t('Total TTC'), 0, 0, 'R');
-        $pdf->Cell(35, 8, number_format($totalTtc, 2, ',', ' ') . ' EUR', 0, 1, 'R');
+        $pdf->Cell(35, 8, $fmt($totals['due_cents']) . $cur, 0, 1, 'R');
 
         $pdf->Ln(10);
         $pdf->SetFont('Helvetica', 'I', 8);

@@ -239,6 +239,41 @@ class InventoryManager
      * production) ; dans ce cas, le marqueur n'est PAS mis à jour, afin que
      * la migration soit retentée au prochain appel.
      */
+    /**
+     * Colonnes ajoutées aux tables existantes (migration additive : jamais de suppression ni de modification).
+     * Montants en centimes et taxe figée par ligne (14/10/2026) : les anciennes commandes gardent ces colonnes vides
+     * et sont relues depuis leurs montants décimaux (voir Orders\OrderAmounts::fromStored()).
+     */
+    private const ADDED_COLUMNS = [
+        'order' => [
+            'currency'           => 'TEXT',
+            'total_cents'        => 'INTEGER',
+            'shipping_ht_cents'  => 'INTEGER',
+            'shipping_ttc_cents' => 'INTEGER',
+            'shipping_tax_code'  => 'TEXT',
+            'shipping_tax_bp'    => 'INTEGER',
+        ],
+        'order_item' => [
+            'unit_ht_cents'  => 'INTEGER',
+            'unit_ttc_cents' => 'INTEGER',
+            'tax_code'       => 'TEXT',
+            'tax_bp'         => 'INTEGER',
+            'product_type'   => 'TEXT',
+        ],
+    ];
+
+    private static function addMissingColumns(\PDO $db): void
+    {
+        foreach (self::ADDED_COLUMNS as $table => $columns) {
+            $existing = array_column($db->query('PRAGMA table_info("' . $table . '")')->fetchAll(\PDO::FETCH_ASSOC), 'name');
+            foreach ($columns as $name => $type) {
+                if (!in_array($name, $existing, true)) {
+                    $db->exec('ALTER TABLE "' . $table . '" ADD COLUMN ' . $name . ' ' . $type);
+                }
+            }
+        }
+    }
+
     public static function getDatabase(): \PDO
     {
         $grav = Grav::instance();
@@ -316,6 +351,15 @@ class InventoryManager
             // volontairement PAS mis à jour ci-dessous (voir plus bas, hors
             // de ce catch), afin que la migration soit retentée au prochain appel.
             $grav['log']->error("SimpleShop: Erreur lors de la migration additive du schéma SQL : " . $e->getMessage());
+
+            return $db;
+        }
+
+        // Colonnes ajoutées après coup (SQLite n'a pas de « ADD COLUMN IF NOT EXISTS ») : voir ADDED_COLUMNS.
+        try {
+            self::addMissingColumns($db);
+        } catch (\PDOException $e) {
+            $grav['log']->error("SimpleShop: Erreur lors de l'ajout de colonnes : " . $e->getMessage());
 
             return $db;
         }

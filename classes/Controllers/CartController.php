@@ -137,13 +137,12 @@ class CartController extends AbstractController
      */
     private function computeBillingTotal($shippingData): float
     {
-        $shippingData = (array) $shippingData;
-        $subtotal = 0.0;
-        foreach (CartStorage::getCart() as $item) {
-            $subtotal += ($item['price'] ?? 0.0) * ($item['quantity'] ?? 0);
-        }
+        $amounts = \Grav\Plugin\SimpleShop\Orders\OrderAmounts::forSite(CartStorage::getCart(), (array) $shippingData);
+        // Montant exact à encaisser (centimes) et devise, lus par les passerelles de paiement.
+        $this->session->shop_order->billing_total_cents = $amounts['total_ttc_cents'];
+        $this->session->shop_order->billing_currency = $amounts['currency'];
 
-        return $subtotal + (float) ($shippingData['price'] ?? 0);
+        return \Grav\Plugin\SimpleShop\Orders\OrderAmounts::toDecimal($amounts['total_ttc_cents']);
     }
 
     /**

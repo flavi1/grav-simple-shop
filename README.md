@@ -147,9 +147,19 @@ Numéro saisi dans Admin2 (`PATCH /orders/{reference}/tracking`, table `order_tr
 - `Orders\OrderManager` : statuts (`paid`, `processing`, `shipped`,
   `delivered`, `cancelled`, `refunded`), historique (`order_status_history`),
   recherche filtrée, export CSV comptable (`;`, UTF-8 BOM, virgule décimale).
-- `Invoicing\*` : factures Factur-X (profil BASIC), numérotation, suivi de
-  l'e-reporting. La facture PDF est jointe à l'e-mail de confirmation. Les
-  anomalies sont journalisées dans `logs/simple-shop/invoices.log`.
+- `Orders\OrderAmounts` : **montants en centimes**, seule source pour le panier, le paiement (montant envoyé à Stripe),
+  la commande et la facture. Une ligne = prix unitaires HT et TTC, code et taux de taxe (points de base), quantité ;
+  livraison = une ligne au taux du site. Total payé = somme des TTC.
+- **Instantané à la commande** (migration additive, `InventoryManager::ADDED_COLUMNS`) : `order.currency`, `total_cents`,
+  `shipping_ht_cents`, `shipping_ttc_cents`, `shipping_tax_code`, `shipping_tax_bp` ; `order_item.unit_ht_cents`,
+  `unit_ttc_cents`, `tax_code`, `tax_bp`, `product_type`. Les colonnes décimales (`total_amount`, `price`) restent remplies
+  pour l'affichage et les exports. Les commandes antérieures (centimes vides) sont relues depuis leurs montants décimaux
+  et le taux figé sur leur facture.
+- `Invoicing\*` : factures Factur-X, **profil EN 16931** (seul à porter le montant d'arrondi BT-114), numérotation, suivi de
+  l'e-reporting. Prix net des lignes = HT ; un bloc TVA par taux (base = somme des HT, TVA = arrondi(base × taux)) ;
+  l'écart avec le montant encaissé va en arrondi (BT-114) ; commande payée : déjà payé (BT-113) = encaissé, reste dû 0.
+  Catégorie de TVA `S` (taux réduit compris). XML validé contre le XSD officiel (`tests/invoice.php`).
+  La facture PDF est jointe à l'e-mail de confirmation. Les anomalies sont journalisées dans `logs/simple-shop/invoices.log`.
 - `Services\OrderMailer` : e-mails de confirmation, de notification vendeur et
   de changement de statut (`status_emails`, par défaut expédiée / annulée /
   remboursée).

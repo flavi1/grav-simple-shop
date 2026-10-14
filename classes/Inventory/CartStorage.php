@@ -53,9 +53,18 @@ class CartStorage
             // Libellé et image : présentation du type de produit (blueprint `shop.presentation`).
             $type = \Grav\Plugin\SimpleShop\Product\ProductTypes::forPage($page);
             $presentation = $type ? $type->presentation($page, []) : ['label' => $page->title(), 'image' => null];
+            // Prix calculé par le type (centimes, taxe, devise) ; `price` (décimal TTC) reste pour les gabarits.
+            $data = InventoryManager::getProductData($item['product_route']);
+            $price = $data !== false ? $data['price'] : null;
             $structuredCart[$item['product_route']] = [
                 'title' => $presentation['label'],
-                'price' => InventoryManager::getProductPrice($item['product_route']) ?? 0.0,
+                'price' => $price ? $price->unitTtc->toFloat() : 0.0,
+                'unit_ttc_cents' => $price ? $price->unitTtc->amount : 0,
+                'unit_ht_cents' => $price ? $price->unitHt->amount : 0,
+                'tax_code' => $price ? $price->tax->code : null,
+                'tax_bp' => $price ? $price->tax->basisPoints : null,
+                'currency' => $price ? $price->currency() : null,
+                'product_type' => $type ? $type->name : null,
                 'quantity' => (int)$item['quantity'],
                 'cover_path' => $presentation['image'],
             ];
@@ -333,12 +342,10 @@ class CartStorage
         $db = InventoryManager::getDatabase();
         $orderReference = 'CMD-' . date('Ymd') . '-' . strtoupper(bin2hex(random_bytes(3)));
 
-        $subtotal = 0.0;
-        foreach ($cartItems as $item) {
-            $subtotal += ($item['price'] ?? 0.0) * ($item['quantity'] ?? 0);
-        }
-        $shippingPrice = isset($order->shipping['price']) ? (float)$order->shipping['price'] : 0.0;
-        $totalAmount = $subtotal + $shippingPrice;
+        // Montants en centimes (une seule source avec le paiement et la facture), taxe figée par ligne.
+        $amounts = \Grav\Plugin\SimpleShop\Orders\OrderAmounts::forSite($cartItems, isset($order->shipping) ? (array) $order->shipping : []);
+        $totalAmount = \Grav\Plugin\SimpleShop\Orders\OrderAmounts::toDecimal($amounts['total_ttc_cents']);
+        $ship = $amounts['shipping'];
 
         $customerData = isset($order->customer) ? (array)$order->customer : [];
         $shippingData = isset($order->shipping) ? (array)$order->shipping : [];
@@ -352,15 +359,24 @@ class CartStorage
         try {
             // Insertion de la commande
             $stmtOrder = $db->prepare("
-                INSERT INTO \"order\" (order_reference, customer_data, shipping_data, billing_data, total_amount, status)
-                VALUES (:ref, :customer, :shipping, :billing, :total, 'paid')
+                INSERT INTO \"order\" (order_reference, customer_data, shipping_data, billing_data, total_amount, status,
+                    currency, total_cents, shipping_ht_cents, shipping_ttc_cents, shipping_tax_code, shipping_tax_bp)
+                VALUES (:ref, :customer, :shipping, :billing, :total, 'paid',
+                    :currency, :total_cents, :ship_ht, :ship_ttc, :ship_code, :ship_bp)
             ");
+            $siteTax = \Grav\Plugin\SimpleShop\Product\Catalog::taxRate();
             $stmtOrder->execute([
-                ':ref'      => $orderReference,
-                ':customer' => $customerJson,
-                ':shipping' => $shippingJson,
-                ':billing'  => $billingJson,
-                ':total'    => $totalAmount
+                ':ref'         => $orderReference,
+                ':customer'    => $customerJson,
+                ':shipping'    => $shippingJson,
+                ':billing'     => $billingJson,
+                ':total'       => $totalAmount,
+                ':currency'    => $amounts['currency'],
+                ':total_cents' => $amounts['total_ttc_cents'],
+                ':ship_ht'     => $ship['unit_ht_cents'] ?? 0,
+                ':ship_ttc'    => $ship['unit_ttc_cents'] ?? 0,
+                ':ship_code'   => $ship['tax_code'] ?? $siteTax->code,
+                ':ship_bp'     => $ship['tax_bp'] ?? $siteTax->basisPoints,
             ]);
 
             // Rattachement du paiement à la commande : la clé primaire garantit
@@ -383,16 +399,25 @@ class CartStorage
 
             // Insertion des articles de la commande
             $stmtItem = $db->prepare("
-                INSERT INTO order_item (order_reference, product_route, title, price, quantity)
-                VALUES (:ref, :route, :title, :price, :qty)
+                INSERT INTO order_item (order_reference, product_route, title, price, quantity,
+                    unit_ht_cents, unit_ttc_cents, tax_code, tax_bp, product_type)
+                VALUES (:ref, :route, :title, :price, :qty, :ht, :ttc, :code, :bp, :type)
             ");
-            foreach ($cartItems as $route => $item) {
+            foreach ($amounts['lines'] as $line) {
+                if ($line['kind'] !== 'item') {
+                    continue;
+                }
                 $stmtItem->execute([
                     ':ref'   => $orderReference,
-                    ':route' => (string)$route,
-                    ':title' => (string)($item['title'] ?? ''),
-                    ':price' => (float)($item['price'] ?? 0.0),
-                    ':qty'   => (int)($item['quantity'] ?? 0)
+                    ':route' => $line['route'],
+                    ':title' => $line['title'],
+                    ':price' => \Grav\Plugin\SimpleShop\Orders\OrderAmounts::toDecimal($line['unit_ttc_cents']),
+                    ':qty'   => $line['quantity'],
+                    ':ht'    => $line['unit_ht_cents'],
+                    ':ttc'   => $line['unit_ttc_cents'],
+                    ':code'  => $line['tax_code'],
+                    ':bp'    => $line['tax_bp'],
+                    ':type'  => $cartItems[$line['route']]['product_type'] ?? null,
                 ]);
             }
 

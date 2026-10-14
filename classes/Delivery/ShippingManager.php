@@ -86,7 +86,10 @@ class ShippingManager
 
         $shippable = 0;
         foreach ($cartItems as $route => $item) {
-            $line = $item['price'] * $item['quantity'];
+            // Montant de la ligne en centimes (prix calculé par le type), ramené en euros pour les règles de livraison.
+            $line = isset($item['unit_ttc_cents'])
+                ? ((int) $item['unit_ttc_cents'] * (int) $item['quantity']) / 100
+                : $item['price'] * $item['quantity'];
             $basketSubtotal += $line;
             $typeName = '';
 
@@ -326,6 +329,8 @@ class ShippingManager
                 'name'                  => $mode['name'],
                 'description'           => $mode['description'],
                 'price'                 => $quote['price'],
+                // Prix TTC en centimes : seule valeur reprise par la commande, le paiement et la facture.
+                'price_cents'           => \Grav\Plugin\SimpleShop\Pricing\Money::fromLegacyDecimal(max(0.0, (float) $quote['price']), 'EUR')->amount,
                 'provider'              => $mode['provider'],
                 'requires_pickup_point' => $mode['requires_pickup_point'],
                 'kind'                  => $mode['kind'],
@@ -334,7 +339,7 @@ class ShippingManager
         }
 
         // Du moins cher au plus cher (à prix égal, l'ordre de la configuration est conservé : tri stable).
-        uasort($available, static fn (array $a, array $b): int => $a['price'] <=> $b['price']);
+        uasort($available, static fn (array $a, array $b): int => $a['price_cents'] <=> $b['price_cents']);
 
         return $available;
     }

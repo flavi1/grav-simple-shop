@@ -89,6 +89,8 @@ assert($redirect($r) === 'https://shop.test/checkout/payment');
 // --- 4. Facturation et paiement de test (échec, puis succès)
 $r = $call('step3Payment', '/checkout/payment');
 assert(!$r->isRedirect() && abs($session->shop_order->billing_total - (25.90 + 7.99)) < 0.001, 'total = 2 × 12,95 + 7,99');
+assert($session->shop_order->billing_total_cents === 3389 && $session->shop_order->billing_currency === 'EUR', 'montant à encaisser en centimes');
+assert($session->shop_order->shipping['price_cents'] === 799, 'livraison en centimes');
 $billing = ['billing_name' => 'Marie Curie', 'billing_street' => '1 rue de la Paix', 'billing_postal_code' => '75002', 'billing_city' => 'Paris'];
 $r = $call('step3Payment', '/checkout/payment', ['action' => 'submit_billing', 'payment_method' => 'test_gateway', 'nonce' => 'nonce-shop-payment-step'] + $billing);
 assert($redirect($r) === '/checkout/payment' && $session->shop_order->payment_sub_step === 'gateway_form');
@@ -104,6 +106,11 @@ $order = $db->query('SELECT * FROM "order"')->fetch(PDO::FETCH_ASSOC);
 assert($order && abs((float) $order['total_amount'] - 33.89) < 0.001, 'montant de la commande');
 $items = $db->query('SELECT * FROM order_item')->fetchAll(PDO::FETCH_ASSOC);
 assert(count($items) === 1 && (int) $items[0]['quantity'] === 2 && abs((float) $items[0]['price'] - 12.95) < 0.001);
+// Instantané par ligne : prix HT/TTC en centimes, taxe et type figés (la facture ne relit plus la configuration).
+assert((int) $order['total_cents'] === 3389 && $order['currency'] === 'EUR', 'total en centimes');
+assert((int) $order['shipping_ttc_cents'] === 799 && (int) $order['shipping_ht_cents'] === 757 && (int) $order['shipping_tax_bp'] === 550, 'livraison : 7,99 TTC = 7,57 HT à 5,5 %');
+assert((int) $items[0]['unit_ttc_cents'] === 1295 && (int) $items[0]['unit_ht_cents'] === 1227 && $items[0]['tax_code'] === 'TVA_5_5'
+    && (int) $items[0]['tax_bp'] === 550 && $items[0]['product_type'] === 'book', 'ligne : 12,95 TTC, 12,27 HT, TVA_5_5, book');
 assert(json_decode($order['shipping_data'], true)['key'] === 'colis');
 assert(strpos(file_get_contents($book->file), "product_quantity: '8'") !== false || strpos(file_get_contents($book->file), 'product_quantity: 8') !== false, 'stock 10 → 8 : ' . file_get_contents($book->file));
 $invoice = $db->query('SELECT * FROM invoice')->fetch(PDO::FETCH_ASSOC);

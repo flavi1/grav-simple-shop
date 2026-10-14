@@ -2,30 +2,24 @@
 
 namespace Grav\Plugin\SimpleShop\Invoicing;
 
+use Grav\Plugin\SimpleShop\Orders\OrderAmounts;
 use Grav\Plugin\SimpleShop\Services\AddressFields;
 
 /**
- * Génère le XML CII (Cross Industry Invoice) profil BASIC de Factur-X pour
- * une commande, destiné à être fusionné avec le PDF de base via
- * `Atgp\FacturX\Writer` (voir {@see Invoice}).
+ * Génère le XML CII (Cross Industry Invoice) de Factur-X, profil **EN 16931** (`urn:cen.eu:en16931:2017`), fusionné
+ * ensuite avec le PDF de base via `Atgp\FacturX\Writer` (voir {@see Invoice}). Validé contre le XSD officiel
+ * (`atgp/factur-x`, dossier `xsd/`) par {@see Invoice::build()} et par `tests/invoice.php`.
  *
- * ⚠️ Ce générateur est écrit à la main (aucun outillage XSD/CII disponible
- * dans cet environnement pour le tester exhaustivement) : il vise une
- * structure standard raisonnable du profil BASIC
- * (`urn:factur-x.eu:1p0:basic`), mais DOIT être re-validé contre le XSD
- * officiel (fourni dans `atgp/factur-x`, dossier `xsd/`) avant toute mise en
- * production. La validation est effectuée par {@see Invoice::build()} via
- * `Atgp\FacturX\XsdValidator`, mais ses éventuelles erreurs ne bloquent
- * volontairement pas la génération : elles sont journalisées dans le fichier
- * dédié `logs/simple-shop/invoices.log` (voir {@see InvoiceLogger}).
+ * Profil EN 16931 et non BASIC : seul lui porte le montant d'arrondi (BT-114), nécessaire quand les prix sont des TTC
+ * ronds (la TVA calculée par taux peut différer d'un centime de la somme des TTC payés).
  *
- * Simplifications assumées :
- *  - un seul taux de TVA pour toute la facture ;
- *  - catégorie de TVA UNTDID 5305 déterminée heuristiquement : `AA` (taux
- *    réduit) si le taux est inférieur à 20 %, `S` (taux standard) sinon ;
- *  - devise EUR uniquement ;
- *  - client B2C (pas de SIRET/TVA acheteur) ;
- *  - aucune remise/charge au niveau de l'en-tête de facture.
+ * Règles appliquées (montants en centimes, voir {@see OrderAmounts}) :
+ *  - prix net d'une ligne (BT-146) = prix unitaire **HT** ; montant de ligne (BT-131) = HT × quantité ;
+ *  - un bloc TVA par taux (BG-23) : base = somme des lignes HT, TVA = arrondi(base × taux) ;
+ *  - total TTC (BT-112) = HT + TVA ; arrondi (BT-114) = montant encaissé − BT-112 ;
+ *  - commande payée en ligne : déjà payé (BT-113) = montant encaissé, reste dû (BT-115) = 0 ;
+ *  - catégorie de TVA `S` (taux normal ou réduit, le taux est précisé), `Z` pour un taux nul ;
+ *  - client B2C (pas de SIRET/TVA acheteur), aucune remise ou charge d'en-tête.
  *
  * @package Grav\Plugin\SimpleShop\Invoicing
  */
@@ -52,25 +46,21 @@ class FacturXXmlBuilder
      */
     private array $seller;
 
-    /**
-     * Lignes de facture calculées (voir Invoice::computeLines()).
-     *
-     * @var array
-     */
-    private array $lines;
+    public const PROFILE_URN = 'urn:cen.eu:en16931:2017';
 
-    /**
-     * @param array $order      Ligne brute de la table `order`.
-     * @param array $invoiceRow Ligne de la table `invoice`.
-     * @param array $seller     Informations légales du vendeur.
-     * @param array $lines      Lignes de facture calculées.
-     */
-    public function __construct(array $order, array $invoiceRow, array $seller, array $lines)
+    /** Montants de la commande (voir OrderAmounts). */
+    private array $amounts;
+
+    /** Totaux de facture (voir OrderAmounts::invoiceTotals()). */
+    private array $totals;
+
+    public function __construct(array $order, array $invoiceRow, array $seller, array $amounts, array $totals)
     {
         $this->order = $order;
         $this->invoiceRow = $invoiceRow;
         $this->seller = $seller;
-        $this->lines = $lines;
+        $this->amounts = $amounts;
+        $this->totals = $totals;
     }
 
     /**
@@ -82,31 +72,15 @@ class FacturXXmlBuilder
     {
         $customer = AddressFields::normalize(json_decode((string) ($this->order['customer_data'] ?? '{}'), true) ?: []);
         $billing  = AddressFields::normalize(json_decode((string) ($this->order['billing_data'] ?? '{}'), true) ?: []);
-
-        $vatRate = (float) ($this->invoiceRow['vat_rate'] ?? 0.0);
-        $vatCategoryCode = $vatRate < 0.20 ? 'AA' : 'S';
-        $vatRatePercent = round($vatRate * 100, 2);
+        $currency = $this->esc((string) $this->amounts['currency']);
+        $t = $this->totals;
 
         $issueDate = date('Ymd', strtotime((string) ($this->order['created_at'] ?? 'now')) ?: time());
 
-        $subtotalHt = 0.0;
-        $vatTotal = 0.0;
-        $totalTtc = 0.0;
-
         $linesXml = '';
-        $lineNumber = 0;
-        foreach ($this->lines as $line) {
-            $lineNumber++;
-            $subtotalHt += $line['line_total_ht'];
-            $vatTotal += $line['line_vat'];
-            $totalTtc += $line['line_total_ttc'];
-
-            $linesXml .= $this->buildLineXml($lineNumber, $line, $vatCategoryCode, $vatRatePercent);
+        foreach ($this->amounts['lines'] as $i => $line) {
+            $linesXml .= $this->buildLineXml($i + 1, $line);
         }
-
-        $subtotalHt = round($subtotalHt, 2);
-        $vatTotal = round($vatTotal, 2);
-        $totalTtc = round($totalTtc, 2);
 
         $billingName = (string) ($billing['name'] ?? trim(((string) ($customer['firstname'] ?? '')) . ' ' . ((string) ($customer['lastname'] ?? ''))));
 
@@ -143,7 +117,7 @@ class FacturXXmlBuilder
 
         $xml .= '<rsm:ExchangedDocumentContext>'
             . '<ram:GuidelineSpecifiedDocumentContextParameter>'
-            . '<ram:ID>urn:factur-x.eu:1p0:basic</ram:ID>'
+            . '<ram:ID>' . self::PROFILE_URN . '</ram:ID>'
             . '</ram:GuidelineSpecifiedDocumentContextParameter>'
             . '</rsm:ExchangedDocumentContext>';
 
@@ -160,20 +134,24 @@ class FacturXXmlBuilder
         $xml .= '<ram:ApplicableHeaderTradeDelivery/>';
 
         $xml .= '<ram:ApplicableHeaderTradeSettlement>';
-        $xml .= '<ram:InvoiceCurrencyCode>EUR</ram:InvoiceCurrencyCode>';
-        $xml .= '<ram:ApplicableTradeTax>'
-            . '<ram:CalculatedAmount>' . number_format($vatTotal, 2, '.', '') . '</ram:CalculatedAmount>'
-            . '<ram:TypeCode>VAT</ram:TypeCode>'
-            . '<ram:BasisAmount>' . number_format($subtotalHt, 2, '.', '') . '</ram:BasisAmount>'
-            . '<ram:CategoryCode>' . $vatCategoryCode . '</ram:CategoryCode>'
-            . '<ram:RateApplicablePercent>' . $vatRatePercent . '</ram:RateApplicablePercent>'
-            . '</ram:ApplicableTradeTax>';
+        $xml .= '<ram:InvoiceCurrencyCode>' . $currency . '</ram:InvoiceCurrencyCode>';
+        foreach ($t['taxes'] as $tax) {
+            $xml .= '<ram:ApplicableTradeTax>'
+                . '<ram:CalculatedAmount>' . self::amount($tax['tax_cents']) . '</ram:CalculatedAmount>'
+                . '<ram:TypeCode>VAT</ram:TypeCode>'
+                . '<ram:BasisAmount>' . self::amount($tax['base_cents']) . '</ram:BasisAmount>'
+                . '<ram:CategoryCode>' . self::category($tax['bp']) . '</ram:CategoryCode>'
+                . '<ram:RateApplicablePercent>' . self::percent($tax['bp']) . '</ram:RateApplicablePercent>'
+                . '</ram:ApplicableTradeTax>';
+        }
         $xml .= '<ram:SpecifiedTradeSettlementHeaderMonetarySummation>'
-            . '<ram:LineTotalAmount>' . number_format($subtotalHt, 2, '.', '') . '</ram:LineTotalAmount>'
-            . '<ram:TaxBasisTotalAmount>' . number_format($subtotalHt, 2, '.', '') . '</ram:TaxBasisTotalAmount>'
-            . '<ram:TaxTotalAmount currencyID="EUR">' . number_format($vatTotal, 2, '.', '') . '</ram:TaxTotalAmount>'
-            . '<ram:GrandTotalAmount>' . number_format($totalTtc, 2, '.', '') . '</ram:GrandTotalAmount>'
-            . '<ram:DuePayableAmount>' . number_format($totalTtc, 2, '.', '') . '</ram:DuePayableAmount>'
+            . '<ram:LineTotalAmount>' . self::amount($t['line_total_ht_cents']) . '</ram:LineTotalAmount>'
+            . '<ram:TaxBasisTotalAmount>' . self::amount($t['line_total_ht_cents']) . '</ram:TaxBasisTotalAmount>'
+            . '<ram:TaxTotalAmount currencyID="' . $currency . '">' . self::amount($t['tax_total_cents']) . '</ram:TaxTotalAmount>'
+            . ($t['rounding_cents'] !== 0 ? '<ram:RoundingAmount>' . self::amount($t['rounding_cents']) . '</ram:RoundingAmount>' : '')
+            . '<ram:GrandTotalAmount>' . self::amount($t['grand_total_cents']) . '</ram:GrandTotalAmount>'
+            . '<ram:TotalPrepaidAmount>' . self::amount($t['due_cents']) . '</ram:TotalPrepaidAmount>'
+            . '<ram:DuePayableAmount>0.00</ram:DuePayableAmount>'
             . '</ram:SpecifiedTradeSettlementHeaderMonetarySummation>';
         $xml .= '</ram:ApplicableHeaderTradeSettlement>';
 
@@ -183,23 +161,14 @@ class FacturXXmlBuilder
         return $xml;
     }
 
-    /**
-     * Construit le XML d'une ligne de facture (`IncludedSupplyChainTradeLineItem`).
-     *
-     * @param int    $lineNumber      Numéro séquentiel de la ligne (1-indexé).
-     * @param array  $line            Ligne calculée (voir Invoice::computeLines()).
-     * @param string $vatCategoryCode Code de catégorie de TVA (UNTDID 5305).
-     * @param float  $vatRatePercent  Taux de TVA en pourcentage.
-     *
-     * @return string
-     */
-    private function buildLineXml(int $lineNumber, array $line, string $vatCategoryCode, float $vatRatePercent): string
+    /** Ligne de facture (`IncludedSupplyChainTradeLineItem`) : prix net HT, quantité, taux, montant HT. */
+    private function buildLineXml(int $lineNumber, array $line): string
     {
         return '<ram:IncludedSupplyChainTradeLineItem>'
             . '<ram:AssociatedDocumentLineDocument><ram:LineID>' . $lineNumber . '</ram:LineID></ram:AssociatedDocumentLineDocument>'
             . '<ram:SpecifiedTradeProduct><ram:Name>' . $this->esc($line['title']) . '</ram:Name></ram:SpecifiedTradeProduct>'
             . '<ram:SpecifiedLineTradeAgreement>'
-            . '<ram:NetPriceProductTradePrice><ram:ChargeAmount>' . number_format($line['unit_price_ttc'], 2, '.', '') . '</ram:ChargeAmount></ram:NetPriceProductTradePrice>'
+            . '<ram:NetPriceProductTradePrice><ram:ChargeAmount>' . self::amount($line['unit_ht_cents']) . '</ram:ChargeAmount></ram:NetPriceProductTradePrice>'
             . '</ram:SpecifiedLineTradeAgreement>'
             . '<ram:SpecifiedLineTradeDelivery>'
             . '<ram:BilledQuantity unitCode="C62">' . (int) $line['quantity'] . '</ram:BilledQuantity>'
@@ -207,14 +176,32 @@ class FacturXXmlBuilder
             . '<ram:SpecifiedLineTradeSettlement>'
             . '<ram:ApplicableTradeTax>'
             . '<ram:TypeCode>VAT</ram:TypeCode>'
-            . '<ram:CategoryCode>' . $vatCategoryCode . '</ram:CategoryCode>'
-            . '<ram:RateApplicablePercent>' . $vatRatePercent . '</ram:RateApplicablePercent>'
+            . '<ram:CategoryCode>' . self::category($line['tax_bp']) . '</ram:CategoryCode>'
+            . '<ram:RateApplicablePercent>' . self::percent($line['tax_bp']) . '</ram:RateApplicablePercent>'
             . '</ram:ApplicableTradeTax>'
             . '<ram:SpecifiedTradeSettlementLineMonetarySummation>'
-            . '<ram:LineTotalAmount>' . number_format($line['line_total_ht'], 2, '.', '') . '</ram:LineTotalAmount>'
+            . '<ram:LineTotalAmount>' . self::amount($line['line_ht_cents']) . '</ram:LineTotalAmount>'
             . '</ram:SpecifiedTradeSettlementLineMonetarySummation>'
             . '</ram:SpecifiedLineTradeSettlement>'
             . '</ram:IncludedSupplyChainTradeLineItem>';
+    }
+
+    /** Centimes → « 12.95 » (montants négatifs : « -0.01 »). */
+    private static function amount(int $cents): string
+    {
+        return ($cents < 0 ? '-' : '') . intdiv(abs($cents), 100) . '.' . str_pad((string) (abs($cents) % 100), 2, '0', STR_PAD_LEFT);
+    }
+
+    /** Points de base → pourcentage (550 → « 5.50 »). */
+    private static function percent(int $bp): string
+    {
+        return self::amount($bp);
+    }
+
+    /** Catégorie de TVA EN 16931 (UNTDID 5305 restreinte) : S = taux normal ou réduit, Z = taux nul. */
+    private static function category(int $bp): string
+    {
+        return $bp > 0 ? 'S' : 'Z';
     }
 
     /**

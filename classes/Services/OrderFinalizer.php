@@ -52,12 +52,8 @@ class OrderFinalizer
         $order = $snapshot['order'];
         $cartId = (string) ($order['cart_id'] ?? '');
         $items = $cartId !== '' ? CartStorage::getCartItems($cartId) : [];
-        $total = 0.0;
-        foreach ($items as $item) {
-            $total += ((float) ($item['price'] ?? 0)) * ((int) ($item['quantity'] ?? 0));
-        }
-        $total += (float) (($order['shipping']['price'] ?? 0));
-        if ($items === [] || max((int) round($total * 100), 50) !== $amountPaidCents) {
+        $total = \Grav\Plugin\SimpleShop\Orders\OrderAmounts::forSite($items, (array) ($order['shipping'] ?? []))['total_ttc_cents'];
+        if ($items === [] || max($total, 50) !== $amountPaidCents) {
             return self::failure('panier absent ou modifié depuis le démarrage du paiement', $paymentReference);
         }
 
