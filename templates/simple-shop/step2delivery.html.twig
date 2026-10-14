@@ -86,12 +86,14 @@
                     {{ nonce_field('shop-delivery-action')|raw }}
                     <input type="hidden" name="action" value="select_shipping">
 
+                    {# Modes triés du moins cher au plus cher ; présélection : le choix déjà fait s'il est encore proposé, sinon le moins cher. #}
+                    {% set selected_key = (current_shipping.key is defined and carriers[current_shipping.key] is defined) ? current_shipping.key : carriers|keys|first %}
                     <div class="carriers-list">
                         {% for key, carrier in carriers %}
-                            <label class="carrier-option {% if current_shipping.key == key %}is-selected{% endif %}">
+                            <label class="carrier-option {% if selected_key == key %}is-selected{% endif %}">
                                 <span class="carrier-input-wrapper">
                                     <input type="radio" name="shipping_method" value="{{ key }}" 
-                                           {% if current_shipping.key == key or (current_shipping is empty and loop.first) %}checked{% endif %} required>
+                                           {% if selected_key == key %}checked{% endif %} required>
                                 </span>
                                 <span class="carrier-details">
                                     <strong class="carrier-name">{{ carrier.name }}</strong>

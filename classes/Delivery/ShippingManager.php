@@ -351,6 +351,9 @@ class ShippingManager
             ];
         }
 
+        // Du moins cher au plus cher (à prix égal, l'ordre de la configuration est conservé : tri stable).
+        uasort($available, static fn (array $a, array $b): int => $a['price'] <=> $b['price']);
+
         return $available;
     }
 

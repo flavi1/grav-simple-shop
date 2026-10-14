@@ -19,16 +19,16 @@ constraints:
       - { max_amount: 34.99, type: minimum, value: 3.00, comment: "Livres : au moins 3 €" }
       - { min_amount: 35, type: minimum, value: 0.01 }
 carriers:
-  forfait:
-    name: "Livraison forfaitaire"
-    enabled: true
-    pricing: flat
-    flat_price: 0
   colis:
     name: "Colis"
     enabled: true
     rules:
       - { zone: FR-METRO, min_weight: 0, max_weight: 1000, price: 7.57 }
+  forfait:
+    name: "Livraison forfaitaire"
+    enabled: true
+    pricing: flat
+    flat_price: 0
 YAML;
 
 $book = new FakePage('/livres/un-livre', [
@@ -80,6 +80,7 @@ $carriersShown = $grav['twig']->twig_vars['carriers'];
 assert(!$r->isRedirect() && isset($carriersShown['forfait'], $carriersShown['colis']));
 assert($carriersShown['forfait']['price'] === 3.0, 'forfait 0 € → 3,00 € (Darcos)');
 assert($carriersShown['colis']['price'] === 7.99, 'colis 7,57 € HT → 7,99 € TTC');
+assert(array_keys($carriersShown) === ['forfait', 'colis'], 'du moins cher au plus cher');
 $r = $call('step2Delivery', '/checkout/delivery', ['action' => 'select_shipping', 'shipping_method' => 'inconnu', 'nonce' => 'nonce-shop-delivery-action']);
 assert($redirect($r) === 'https://shop.test/checkout/delivery', 'mode inconnu refusé');
 $r = $call('step2Delivery', '/checkout/delivery', ['action' => 'select_shipping', 'shipping_method' => 'colis', 'nonce' => 'nonce-shop-delivery-action']);

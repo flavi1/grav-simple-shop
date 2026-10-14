@@ -6,7 +6,6 @@
 {% if shop_data %}
     {% set price = shop_data.product_price %}
     {% set virtual_stock = shop_data.product_virtual_stock %}
-    {% set is_b2b = shop_data.is_b2b_price %}
     
     {% set is_future = product.header.publication_date and product.header.publication_date|date('Y-m-d') > "now"|date('Y-m-d') %}
 
@@ -22,9 +21,7 @@
         {# 2. Affichage du prix avec préfixes contextuels #}
         {% if price > 0 %}
             <div class="product-price" style="font-size: 1.4rem; font-weight: bold; margin-bottom: 0.5rem;">
-                {% if is_b2b %}
-                    <span style="font-size: 0.9rem; color: #2e7d32; display: block; font-weight: normal;">Tarif réservé : Prix libraire</span>
-                {% elseif is_future %}
+                {% if is_future %}
                     <span style="font-size: 0.9rem; color: #0275d8; display: block; font-weight: normal;">Tarif préférentiel : Prévente</span>
                 {% endif %}
                 {{ price|number_format(2, ',', ' ') }} €
