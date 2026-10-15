@@ -44,32 +44,45 @@ delivery:
 # Devise du site (code ISO 4217). Tous les montants (produits, livraison, commandes) sont dans cette devise.
 currency: EUR
 
-# Taxes (voir README et classes/Tax/) : une TABLE DES TAUX. Chaque ligne a un nom (« Taux réduit ») choisi par les types
-# de produits et les fiches ; plusieurs lignes du même nom = variantes par pays / région / codes postaux (vente à l'étranger).
+# Taxes (voir README et classes/Tax/) : des TYPES DE TAXE (« Taux réduit »…), choisis par les types de produits et les fiches,
+# contenant chacun un ou plusieurs TAUX (variantes par pays / région / codes postaux pour la vente à l'étranger, ou taxes cumulées).
 # Valeurs par défaut : TVA française ; les livres sont au « Taux réduit » (5,5 %, blueprint du thème).
+# Édition : Admin2 > Boutique > Taxes (types et taux, CSV) ; autres réglages : Plugins > Simple Shop > Taxes.
 taxes:
   enabled: true
   prices_entered: ht      # ht | ttc : base de saisie des prix des fiches (surchargeable par fiche : price_entered_as)
   based_on: shipping      # adresse qui décide du taux : shipping (livraison) | billing (facturation) | shop (boutique)
   # Taxe des frais de livraison : items = selon les articles du panier (panier mixte : taux le plus élevé, comme WooCommerce),
-  # items_prorata = réparti au prorata du HT des articles (pratique française recommandée), ou le nom d'un taux fixe.
+  # items_prorata = réparti au prorata du HT des articles (pratique française recommandée), ou le nom d'un type de taxe fixe.
   shipping_tax: items
   shop:                   # adresse de la boutique (taux avant la saisie de l'adresse du client)
     country: FR
     region: ''
     postcode: ''
-  default_rate: 'Taux normal'
+  default_type: 'Taux normal'
   small_business:         # franchise en base : aucune TVA facturée, mention obligatoire
     enabled: false
     mention: 'TVA non applicable, art. 293 B du CGI'
-  rates:
-    - { name: 'Taux normal', rate: 20, country: FR, label: 'TVA 20 %', region: '', postcodes: '', priority: 1, compound: false, shipping: true, category: S, mention: '' }
-    - { name: 'Taux intermédiaire', rate: 10, country: FR, label: 'TVA 10 %', region: '', postcodes: '', priority: 1, compound: false, shipping: true, category: S, mention: '' }
-    - { name: 'Taux réduit', rate: 5.5, country: FR, label: 'TVA 5,5 %', region: '', postcodes: '', priority: 1, compound: false, shipping: true, category: S, mention: '' }
-    - { name: 'Taux particulier', rate: 2.1, country: FR, label: 'TVA 2,1 %', region: '', postcodes: '', priority: 1, compound: false, shipping: true, category: S, mention: '' }
-    - { name: 'Taux zéro', rate: 0, country: FR, label: 'TVA 0 %', region: '', postcodes: '', priority: 1, compound: false, shipping: true, category: Z, mention: '' }
-    - { name: 'Exonéré', rate: 0, country: FR, label: 'Exonéré', region: '', postcodes: '', priority: 1, compound: false, shipping: true, category: E, mention: 'TVA non applicable' }
-  types: []               # type de produit → taux, surcharge du blueprint : [{ type: book, rate: 'Taux réduit' }]
+  tax_types:
+    - name: 'Taux normal'
+      rates:
+        - { rate: 20, country: FR, region: '', postcodes: '', label: 'TVA 20 %', priority: 1, compound: false, shipping: true, category: S, mention: '' }
+    - name: 'Taux intermédiaire'
+      rates:
+        - { rate: 10, country: FR, region: '', postcodes: '', label: 'TVA 10 %', priority: 1, compound: false, shipping: true, category: S, mention: '' }
+    - name: 'Taux réduit'
+      rates:
+        - { rate: 5.5, country: FR, region: '', postcodes: '', label: 'TVA 5,5 %', priority: 1, compound: false, shipping: true, category: S, mention: '' }
+    - name: 'Taux particulier'
+      rates:
+        - { rate: 2.1, country: FR, region: '', postcodes: '', label: 'TVA 2,1 %', priority: 1, compound: false, shipping: true, category: S, mention: '' }
+    - name: 'Taux zéro'
+      rates:
+        - { rate: 0, country: FR, region: '', postcodes: '', label: 'TVA 0 %', priority: 1, compound: false, shipping: true, category: Z, mention: '' }
+    - name: 'Exonéré'
+      rates:
+        - { rate: 0, country: FR, region: '', postcodes: '', label: 'Exonéré', priority: 1, compound: false, shipping: true, category: E, mention: 'TVA non applicable' }
+  product_types: []       # type de produit → type de taxe, surcharge du blueprint : [{ type: book, tax_type: 'Taux réduit' }]
 
 # E-mail au client quand sa commande passe à l'un de ces statuts (voir OrderManager::STATUSES)
 status_emails:

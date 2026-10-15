@@ -131,23 +131,27 @@ shop:
   défaut `product_price`) est réécrit dans la nouvelle base — de HT vers TTC, le prix public est inchangé. Base déjà appliquée :
   `user://data/simple-shop/.prices-basis` (absente = `ht`). Les prix de livraison ont leur propre réglage (`delivery.prices_entered`).
 - **Taxes** (`classes/Tax/` ; réglages : Plugins > Simple Shop > Taxes ; vue d'ensemble et CSV : Boutique > Taxes) :
-  - une seule **table des taux** (`taxes.rates`) : nom (« Taux réduit »), taux %, pays (vide = tous), région, codes postaux
-    (`20*`, `97100...97199`), libellé de facture (« TVA 5,5 % »), priorité, composée, s'applique à la livraison, catégorie de facture
-    (S, Z, E, O), mention (exonération). Valeurs par défaut : TVA française (Taux normal / intermédiaire / réduit / particulier / zéro, Exonéré) ;
-  - les produits désignent un taux **par son nom** : `shop.tax` du blueprint (ex. book → 'Taux réduit'), surchargé par `taxes.types`
-    (administration, `{type, rate}`) puis par `tax_rate` d'une fiche ; taux par défaut : `taxes.default_rate`. Plusieurs lignes du même nom
-    = variantes par pays / région / codes postaux (vente à l'étranger, OSS) : à l'adresse du client, à chaque priorité, la ligne la plus
-    précise ; plusieurs priorités = taxes cumulées. En interne, clé = nom sans accents (`taux-reduit`), enregistrée comme `tax_code` ;
+  - des **types de taxe** (`taxes.tax_types`) : un nom (« Taux réduit ») et **un ou plusieurs taux** : taux %, pays (vide = tous),
+    région, codes postaux (`20*`, `97100...97199`), libellé de facture (« TVA 5,5 % »), priorité, composée, s'applique à la livraison,
+    catégorie de facture (S, Z, E, O), mention (exonération). Valeurs par défaut : TVA française (Taux normal / intermédiaire / réduit /
+    particulier / zéro, Exonéré, un taux FR chacun). Édition : Admin2 > Boutique > Taxes (chaque type dans un bloc ouvert, chacun de
+    ses taux dans un bloc replié ; import/export CSV, une ligne par taux) ;
+  - les produits désignent un type de taxe **par son nom** : `shop.tax` du blueprint (ex. book → 'Taux réduit'), surchargé par
+    `taxes.product_types` (administration, `{type, tax_type}`) puis par `tax_type` d'une fiche ; type par défaut : `taxes.default_type`.
+    Plusieurs taux dans un type = variantes par pays / région / codes postaux (vente à l'étranger, OSS) : à l'adresse du client, à chaque
+    priorité, le taux le plus précis ; plusieurs priorités = taxes cumulées. En interne, clé = nom sans accents (`taux-reduit`),
+    enregistrée comme `tax_code` ;
   - **adresse** qui décide du taux (`taxes.based_on`) : livraison (défaut), facturation ou boutique (`taxes.shop`) ; avant la saisie
     de l'adresse, celle de la boutique ;
   - **livraison** (`taxes.shipping_tax`) : `items` = selon les articles expédiés, panier mixte au taux le plus élevé (comme WooCommerce),
-    `items_prorata` = une part par taxe au prorata du HT, ou le nom d'un taux fixe. Une livraison à plusieurs taux = une ligne par taux
+    `items_prorata` = une part par taxe au prorata du HT, ou le nom d'un type de taxe fixe. Une livraison à plusieurs taux = une ligne par taux
     (commande : `order.shipping_taxes`) ;
   - exonération (catégorie E + mention, motif BT-120 de la facture électronique), franchise en base (`taxes.small_business`),
     taxes désactivées (`taxes.enabled`). Une ligne à plusieurs taxes donne une facture PDF sans XML Factur-X (non exprimable en EN 16931) ;
   - point d'extension : événement `onSimpleShopTaxRates` (`rates` modifiable) pour un service de taxes externe ;
-  - les anciennes configurations (`taxes.default` + `taxes.rates` `CODE: {label, rate}` ; `taxes.classes` + lignes `{class, name}`),
-    les anciens codes (`reduit`, `TVA_5_5`) et le champ de fiche `tax_class` restent compris.
+  - les anciennes configurations (table plate `taxes.rates` avec `name` ; `taxes.default` + `taxes.rates` `CODE: {label, rate}` ;
+    `taxes.classes` + lignes `{class, name}` ; `taxes.types`, `default_rate`), les anciens codes (`reduit`, `TVA_5_5`) et les champs de
+    fiche `tax_rate` / `tax_class` restent compris.
 - **Contraintes globales** (`Delivery/ShippingConstraints`, bloc `constraints` de `carriers.yaml`, écran Boutique > Transporteurs) :
   lois et offres sur le prix de livraison, sans rien de propre à un type de produit. Une contrainte = nom, types d'articles concernés
   (`product_types` ; type d'un article = son type de produit, ex. `book`, ou `default` pour un produit générique), modes exclus (`except_modes`) et

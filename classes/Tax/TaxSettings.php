@@ -3,21 +3,23 @@
 namespace Grav\Plugin\SimpleShop\Tax;
 
 /**
- * Réglages des taxes (`plugins.simple-shop.taxes`), normalisés. Une seule notion : la **table des taux**.
+ * Réglages des taxes (`plugins.simple-shop.taxes`), normalisés.
  *
- *  - chaque ligne a un **nom** (ex. « Taux réduit ») : c'est ce nom que choisissent les types de produits et les fiches ;
- *  - plusieurs lignes peuvent porter le même nom pour d'autres pays / régions / codes postaux (vente à l'étranger, DOM,
- *    taxes cumulées) : à l'adresse du client, on retient à chaque priorité la ligne la plus précise ;
- *  - chaque ligne : taux, pays (vide = partout), région, codes postaux, libellé de facture, priorité, composée,
- *    s'applique à la livraison, catégorie de facture électronique, mention (exonération) ;
+ *  - des **types de taxe** (`taxes.tax_types`, ex. « Taux réduit ») : c'est le type que choisissent les types de produits
+ *    (`taxes.product_types`, blueprint `shop.tax`) et les fiches (`tax_type`) ;
+ *  - chaque type contient **un ou plusieurs taux** : taux, pays (vide = partout), région, codes postaux, libellé de facture,
+ *    priorité, composée, s'applique à la livraison, catégorie de facture électronique, mention (exonération). Plusieurs taux
+ *    = variantes par pays / région / codes postaux (vente à l'étranger, DOM) ou taxes cumulées (priorités) : à l'adresse du
+ *    client, on retient à chaque priorité le taux le plus précis ;
  *  - réglages : prix saisis HT ou TTC, adresse qui décide du taux, taxe de la livraison, franchise en base.
  *
  * Valeurs par défaut : TVA française (20 / 10 / 5,5 / 2,1 / 0 %, exonéré). Formats antérieurs repris :
- *  - `classes` + lignes `class` (octobre 2026) : le libellé de la classe devient le nom du taux, l'ancien nom de ligne son libellé ;
+ *  - table plate `taxes.rates` dont chaque ligne porte le nom de son type (`name`) ;
+ *  - `classes` + lignes `class` : le libellé de la classe devient le nom du type, l'ancien nom de ligne son libellé ;
  *  - `taxes.default` + `taxes.rates` sous forme `CODE: {label, rate}`.
  *
- * En interne, un taux est désigné par sa **clé** : le nom en minuscules sans accents (« taux-reduit »). Les anciens codes
- * (`reduit`, `standard`, `TVA_5_5`…) restent compris (alias).
+ * En interne, les taux sont une liste plate ; chacun porte la **clé** de son type : le nom en minuscules sans accents
+ * (« taux-reduit »). Les anciens codes (`reduit`, `standard`, `TVA_5_5`…) restent compris (alias).
  */
 final class TaxSettings
 {
@@ -47,6 +49,35 @@ final class TaxSettings
 
     public const DEFAULT_RATE = 'Taux normal';
 
+    /** Champs d'un taux (dans un type de taxe), dans l'ordre de l'administration et du CSV. */
+    public const RATE_FIELDS = ['rate', 'country', 'region', 'postcodes', 'label', 'priority', 'compound', 'shipping', 'category', 'mention'];
+
+    /** Types de taxe par défaut, imbriqués (format de `taxes.tax_types`). */
+    public static function defaultTaxTypes(): array
+    {
+        return self::nest(array_map(static fn ($r) => self::normalizeRate($r), self::DEFAULT_RATES));
+    }
+
+    /**
+     * Taux normalisés (liste plate) → types de taxe imbriqués `[{name, rates: [{rate, country, …}]}]`, dans l'ordre d'apparition.
+     *
+     * @param list<array> $rates
+     */
+    public static function nest(array $rates): array
+    {
+        $types = [];
+        foreach ($rates as $r) {
+            $types[$r['key']] ??= ['name' => $r['name'], 'rates' => []];
+            $types[$r['key']]['rates'][] = [
+                'rate' => $r['bp'] / 100, 'country' => $r['country'], 'region' => $r['region'], 'postcodes' => implode(';', $r['postcodes']),
+                'label' => $r['label'], 'priority' => $r['priority'], 'compound' => $r['compound'], 'shipping' => $r['shipping'],
+                'category' => $r['category'], 'mention' => $r['mention'],
+            ];
+        }
+
+        return array_values($types);
+    }
+
     /**
      * @return array{enabled: bool, prices_entered: string, based_on: string, shipping_tax: string, shop: array{country: string, region: string, postcode: string},
      *               default_rate: string, small_business: array{enabled: bool, mention: string}, names: array<string, string>,
@@ -71,7 +102,19 @@ final class TaxSettings
 
         $rawRates = $t['rates'] ?? null;
         $rows = [];
-        if (is_array($rawRates) && $rawRates !== [] && !array_is_list($rawRates)) {
+        if (is_array($t['tax_types'] ?? null) && $t['tax_types'] !== []) {
+            // Format actuel : types de taxe, chacun avec ses taux.
+            foreach ($t['tax_types'] as $type) {
+                if (!is_array($type) || trim((string) ($type['name'] ?? '')) === '') {
+                    continue;
+                }
+                foreach ((array) ($type['rates'] ?? []) as $rate) {
+                    if (is_array($rate)) {
+                        $rows[] = ['name' => trim((string) $type['name'])] + array_diff_key($rate, ['name' => 1, 'key' => 1, 'class' => 1]);
+                    }
+                }
+            }
+        } elseif (is_array($rawRates) && $rawRates !== [] && !array_is_list($rawRates)) {
             // Très ancien format : CODE: {label, rate}
             foreach ($rawRates as $code => $def) {
                 if (!is_array($def) || !isset($def['rate']) || !is_numeric($def['rate'])) {
@@ -131,11 +174,12 @@ final class TaxSettings
             return isset($names[$k]) ? $k : '';
         };
 
-        // Type de produit → taux (surcharge du blueprint) : liste Admin2 [{type, rate}] (ancien : {type, class}) ou map.
+        // Type de produit → type de taxe (surcharge du blueprint) : liste Admin2 `product_types` [{type, tax_type}]
+        // (anciens : `types` [{type, rate}] ou [{type, class}]) ou map.
         $types = [];
-        foreach ((array) ($t['types'] ?? []) as $type => $ref) {
+        foreach ((array) ($t['product_types'] ?? $t['types'] ?? []) as $type => $ref) {
             if (is_array($ref)) {
-                [$type, $ref] = [(string) ($ref['type'] ?? ''), (string) ($ref['rate'] ?? $ref['class'] ?? '')];
+                [$type, $ref] = [(string) ($ref['type'] ?? ''), (string) ($ref['tax_type'] ?? $ref['rate'] ?? $ref['class'] ?? '')];
             }
             $k = $resolve((string) $ref);
             if ((string) $type !== '' && $k !== '') {
@@ -143,7 +187,7 @@ final class TaxSettings
             }
         }
 
-        $default = $resolve((string) ($t['default_rate'] ?? $t['default_class'] ?? $t['default'] ?? ''));
+        $default = $resolve((string) ($t['default_type'] ?? $t['default_rate'] ?? $t['default_class'] ?? $t['default'] ?? ''));
         if ($default === '') {
             $default = $resolve(self::DEFAULT_RATE) ?: (string) array_key_first($names);
         }
@@ -257,7 +301,7 @@ final class TaxSettings
         }
     }
 
-    /** Options des listes de l'administration (blueprint `data-options@`) : noms des taux (valeur = nom). */
+    /** Options des listes de l'administration (blueprint `data-options@`) : noms des types de taxe (valeur = nom). */
     public static function rateOptions(): array
     {
         $names = array_values(self::fromConfig(self::siteConfig())['names']);
@@ -273,7 +317,7 @@ final class TaxSettings
             'items_prorata' => 'Selon les articles du panier, réparti au prorata du HT (pratique française recommandée)',
         ];
         foreach (self::rateOptions() as $name) {
-            $opts[$name] = 'Toujours « ' . $name . ' »';
+            $opts[$name] = 'Toujours le type « ' . $name . ' »';
         }
 
         return $opts;

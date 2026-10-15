@@ -534,15 +534,7 @@ class ShopApiController extends AbstractApiController
     // Taxes (réglages complets : Plugins > Simple Shop ; ici : vue d'ensemble et import/export CSV des taux)
     // ------------------------------------------------------------------
 
-    /** Ligne de taux pour l'API et le CSV (taux en %). */
-    private static function taxRow(array $r): array
-    {
-        return ['name' => $r['name'], 'rate' => $r['bp'] / 100, 'country' => $r['country'], 'region' => $r['region'], 'postcodes' => implode(';', $r['postcodes']),
-            'label' => $r['label'], 'priority' => $r['priority'], 'compound' => $r['compound'], 'shipping' => $r['shipping'],
-            'category' => $r['category'], 'mention' => $r['mention']];
-    }
-
-    /** GET /simple-shop/taxes — réglages normalisés (taux en %, taux de chaque type de produit). */
+    /** GET /simple-shop/taxes — réglages normalisés : types de taxe et leurs taux (en %), type de taxe de chaque type de produit. */
     public function taxes(ServerRequestInterface $request): ResponseInterface
     {
         $this->requirePermission($request, self::PERM_READ);
@@ -555,44 +547,75 @@ class ShopApiController extends AbstractApiController
 
         return ApiResponse::create([
             'enabled' => $s['enabled'], 'prices_entered' => $s['prices_entered'], 'based_on' => $s['based_on'], 'shipping_tax' => $shipping,
-            'default_rate' => $s['names'][$s['default_rate']] ?? '', 'small_business' => $s['small_business'],
-            'rates' => array_map([self::class, 'taxRow'], $s['rates']), 'types' => $types,
+            'default_type' => $s['names'][$s['default_rate']] ?? '', 'small_business' => $s['small_business'],
+            'tax_types' => \Grav\Plugin\SimpleShop\Tax\TaxSettings::nest($s['rates']), 'product_types' => $types,
         ]);
     }
 
     /**
-     * PUT /simple-shop/taxes/rates — corps : {"rates": [{name, rate, country, region, postcodes, label, priority, compound, shipping, category, mention}]}
-     * Remplace la table des taux (import CSV) dans user/config/plugins/simple-shop.yaml. Les taux encore utilisés
-     * (taux par défaut, types de produits, livraison) doivent rester présents.
+     * PUT /simple-shop/taxes/types — corps : {"tax_types": [{name, rates: [{rate, country, region, postcodes, label, priority,
+     * compound, shipping, category, mention}]}]} (éditeur de Boutique > Taxes, import CSV). Ancien corps accepté :
+     * {"rates": [{name, rate, …}]} (une ligne par taux, `name` = type de taxe).
+     * Remplace les types de taxe dans user/config/plugins/simple-shop.yaml. Les types encore utilisés (type par défaut,
+     * types de produits, livraison) doivent rester présents.
      */
-    public function saveTaxRates(ServerRequestInterface $request): ResponseInterface
+    public function saveTaxTypes(ServerRequestInterface $request): ResponseInterface
     {
         $this->requirePermission($request, self::PERM_WRITE);
-        $rows = $this->getRequestBody($request)['rates'] ?? null;
-        if (!is_array($rows) || $rows === [] || count($rows) > 5000) {
-            throw new ValidationException('Le champ « rates » doit être une liste de taux (5 000 au plus).');
+        $body = $this->getRequestBody($request);
+        $rows = [];
+        $errors = [];
+        if (is_array($body['tax_types'] ?? null)) {
+            foreach (array_values($body['tax_types']) as $i => $type) {
+                $name = is_array($type) ? trim((string) ($type['name'] ?? '')) : '';
+                if ($name === '') {
+                    $errors['type ' . ($i + 1)] = 'nom obligatoire';
+                    continue;
+                }
+                if (!is_array($type['rates'] ?? null) || $type['rates'] === []) {
+                    $errors['« ' . $name . ' »'] = 'au moins un taux';
+                    continue;
+                }
+                foreach (array_values($type['rates']) as $j => $rate) {
+                    $rows[] = [is_array($rate) ? ['name' => $name] + array_diff_key($rate, ['name' => 1, 'key' => 1, 'class' => 1]) : null, '« ' . $name . ' », taux ' . ($j + 1)];
+                }
+            }
+        } elseif (is_array($body['rates'] ?? null)) {
+            foreach (array_values($body['rates']) as $i => $row) {
+                $rows[] = [is_array($row) && !isset($row['class']) && !isset($row['key']) ? $row : null, 'ligne ' . ($i + 1)];
+            }
+        }
+        if (($rows === [] && $errors === []) || count($rows) > 5000) {
+            throw new ValidationException('Il faut au moins un type de taxe avec un taux (5 000 taux au plus).');
         }
         $clean = [];
-        $errors = [];
         $keys = [];
-        foreach (array_values($rows) as $i => $row) {
-            $n = is_array($row) && !isset($row['class']) && !isset($row['key']) ? \Grav\Plugin\SimpleShop\Tax\TaxSettings::normalizeRate($row) : null;
+        $seen = [];
+        foreach ($rows as [$row, $where]) {
+            $n = $row !== null ? \Grav\Plugin\SimpleShop\Tax\TaxSettings::normalizeRate($row) : null;
             if ($n === null) {
-                $errors['ligne ' . ($i + 1)] = 'nom ou taux invalide';
+                $errors[$where] = 'taux invalide (nombre de 0 à 99,99)';
                 continue;
             }
             $keys[$n['key']] = true;
-            $clean[] = self::taxRow($n);
+            $clean[] = $n;
+        }
+        foreach ($clean as $n) {   // deux noms différents qui donnent la même clé (« Taux réduit » / « taux reduit »)
+            if (isset($seen[$n['key']]) && $seen[$n['key']] !== $n['name']) {
+                $errors['« ' . $n['name'] . ' »'] = 'trop proche de « ' . $seen[$n['key']] . ' »';
+            }
+            $seen[$n['key']] ??= $n['name'];
         }
         $s = \Grav\Plugin\SimpleShop\Tax\TaxResolver::settings();
         foreach (array_unique(array_merge([$s['default_rate']], array_values($s['types']), in_array($s['shipping_tax'], \Grav\Plugin\SimpleShop\Tax\TaxSettings::SHIPPING_MODES, true) ? [] : [$s['shipping_tax']])) as $used) {
             if (!isset($keys[$used])) {
-                $errors['taux « ' . ($s['names'][$used] ?? $used) . ' »'] = 'encore utilisé dans les réglages : à garder dans le fichier';
+                $errors['« ' . ($s['names'][$used] ?? $used) . ' »'] = 'type encore utilisé dans les réglages (type par défaut, types de produits ou livraison) : à garder';
             }
         }
         if ($errors !== []) {
-            throw new ValidationException('Taux invalides.', $errors);
+            throw new ValidationException('Types de taxe invalides.', $errors);
         }
+        $clean = \Grav\Plugin\SimpleShop\Tax\TaxSettings::nest($clean);
 
         $path = $this->grav['locator']->findResource('user://config/plugins/simple-shop.yaml', true, true);
         $lock = fopen($path . '.lock', 'c');
@@ -602,8 +625,8 @@ class ShopApiController extends AbstractApiController
         try {
             $data = is_file($path) ? (array) \Grav\Common\Yaml::parse((string) file_get_contents($path)) : ['enabled' => true];
             $data['taxes'] = is_array($data['taxes'] ?? null) ? $data['taxes'] : [];
-            $data['taxes']['rates'] = $clean;
-            unset($data['taxes']['classes']);
+            $data['taxes']['tax_types'] = $clean;
+            unset($data['taxes']['rates'], $data['taxes']['classes']);
             $tmp = $path . '.tmp-' . bin2hex(random_bytes(4));
             file_put_contents($tmp, \Grav\Common\Yaml::dump($data, 10));
             rename($tmp, $path);
@@ -612,9 +635,10 @@ class ShopApiController extends AbstractApiController
             fclose($lock);
         }
         \Grav\Plugin\SimpleShop\Tax\TaxResolver::reset();
-        $this->grav['log']->info('[SimpleShop][API] Table des taux importée par ' . $this->getUser($request)->username . ' : ' . count($clean) . ' taux');
+        $count = array_sum(array_map(static fn ($t) => count($t['rates']), $clean));
+        $this->grav['log']->info('[SimpleShop][API] Types de taxe enregistrés par ' . $this->getUser($request)->username . ' : ' . count($clean) . ' types, ' . $count . ' taux');
 
-        return ApiResponse::create(['saved' => true, 'count' => count($clean)]);
+        return ApiResponse::create(['saved' => true, 'types' => count($clean), 'count' => $count]);
     }
 
     // ------------------------------------------------------------------

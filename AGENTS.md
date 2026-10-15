@@ -165,9 +165,10 @@ simple-shop).
   la base convertit une fois les fiches existantes (prix TTC inchangé). Premier site : **TTC** (décision du 14/10/2026, 18 h 30) ;
   un petit « TTC » suit les prix publics.
 - **Pas de vente aux professionnels** sur le premier site (prix libraire supprimé).
-- **Taxes** (conception validée le 15/10/2026, `docs/CONCEPTION-TAXES.md`) : modèle de WooCommerce simplifié — **une seule table de taux
-  nommés** (pas de « classes » séparées, décision du 15/10/2026 après-midi : le nom du taux joue le rôle de la classe ; plusieurs lignes
-  du même nom = variantes par pays / région / codes postaux, pour la vente à l'étranger). TVA française par défaut ; adresse de livraison
+- **Taxes** (conception validée le 15/10/2026, `docs/CONCEPTION-TAXES.md`) : modèle de WooCommerce — des **types de taxe** (« classes » de
+  WooCommerce, nom choisi par le propriétaire le 15/10/2026) contenant **un ou plusieurs taux** (variantes par pays / région / codes
+  postaux pour la vente à l'étranger, taxes cumulées). Interface voulue : chaque type dans un `<details>` **ouvert**, chacun de ses taux
+  dans un `<details>` **fermé** (Admin2 > Boutique > Taxes). TVA française par défaut ; adresse de livraison
   du client (comme WooCommerce) ; livraison taxée selon les articles (panier mixte : taux le plus élevé, comme WooCommerce ; prorata ou
   taux fixe en option) ; exonérations, franchise en base, CSV des taux (OSS), événement `onSimpleShopTaxRates` — « mais on s'arrête là ».
 - **Livraison** : chaque mode se calcule au choix en **forfait**, **tarif du plugin** ou **grille personnalisée** (grille repliée,

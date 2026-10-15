@@ -8,9 +8,9 @@ use Grav\Plugin\SimpleShop\Pricing\TaxComponent;
 use Grav\Plugin\SimpleShop\Pricing\TaxRate;
 
 /**
- * Taxe d'un taux nommé (ex. « Taux réduit ») à une adresse, et taxe des frais de livraison (voir TaxSettings).
+ * Taxe d'un type de taxe (ex. « Taux réduit ») à une adresse, et taxe des frais de livraison (voir TaxSettings).
  *
- * Résolution (comme WooCommerce) : parmi les lignes de ce nom, pour chaque priorité, la ligne la plus précise qui
+ * Résolution (comme WooCommerce) : parmi les taux de ce type, pour chaque priorité, la ligne la plus précise qui
  * correspond à l'adresse (code postal > région > pays > toutes) ; les taux retenus s'additionnent, les « composés »
  * s'appliquent ensuite. Aucune ligne : pas de taxe.
  *
@@ -85,7 +85,7 @@ final class TaxResolver
         return new TaxLocation((string) ($address['country'] ?? $s['shop']['country']), (string) ($address['region'] ?? ''), $postcode);
     }
 
-    /** Clé du taux désigné par un nom, une clé ou un ancien code (« reduit », « TVA_5_5 ») ; '' si inconnu. */
+    /** Clé du type de taxe désigné par un nom, une clé ou un ancien code (« reduit », « TVA_5_5 ») ; '' si inconnu. */
     public static function resolve(string $ref, ?array $config = null): string
     {
         $s = self::settings($config);
@@ -95,7 +95,7 @@ final class TaxResolver
         return isset($s['names'][$k]) ? $k : '';
     }
 
-    /** Taxe d'un taux (nom ou clé ; inconnu : taux par défaut) à une adresse (par défaut : location()). */
+    /** Taxe d'un type de taxe (nom ou clé ; inconnu : type par défaut) à une adresse (par défaut : location()). */
     public static function forRate(string $name, ?TaxLocation $location = null, ?array $config = null): TaxRate
     {
         $s = self::settings($config);
@@ -136,11 +136,11 @@ final class TaxResolver
             : TaxRate::fromComponents($key, $components);
     }
 
-    /** Taux d'un produit (clé) : fiche (`tax_rate`) > administration (type → taux) > blueprint (`shop.tax`) > taux par défaut. */
+    /** Type de taxe d'un produit (clé) : fiche (`tax_type`) > administration (`product_types`) > blueprint (`shop.tax`) > type par défaut. */
     public static function rateFor(?string $typeName, ?string $blueprintTax = null, array $header = [], ?array $config = null): string
     {
         $s = self::settings($config);
-        foreach ([(string) (($header['tax_rate'] ?? '') ?: ($header['tax_class'] ?? '')), $s['types'][(string) $typeName] ?? '', (string) $blueprintTax] as $candidate) {
+        foreach ([(string) (($header['tax_type'] ?? '') ?: ($header['tax_rate'] ?? '') ?: ($header['tax_class'] ?? '')), $s['types'][(string) $typeName] ?? '', (string) $blueprintTax] as $candidate) {
             $k = $candidate !== '' ? self::resolve($candidate, $config) : '';
             if ($k !== '') {
                 return $k;

@@ -23,8 +23,8 @@ final class Catalog
     }
 
     /**
-     * Taxe d'un taux nommé (ou d'un ancien code « TVA_5_5 ») à l'adresse qui décide du taux (voir Tax\TaxResolver) ;
-     * sans nom : le taux par défaut du site.
+     * Taxe d'un type de taxe (ou d'un ancien code « TVA_5_5 ») à l'adresse qui décide du taux (voir Tax\TaxResolver) ;
+     * sans nom : le type de taxe par défaut du site.
      */
     public static function taxRate(?string $code = null, ?array $config = null): TaxRate
     {
@@ -34,8 +34,8 @@ final class Catalog
     }
 
     /**
-     * Contexte de calcul du prix d'un produit. Taxe : taux de la fiche (`tax_rate`), sinon celui choisi pour le type
-     * dans l'administration, sinon celui du blueprint (`shop.tax`), sinon le taux par défaut.
+     * Contexte de calcul du prix d'un produit. Taxe : type de taxe de la fiche (`tax_type`), sinon celui choisi pour le type
+     * de produit dans l'administration, sinon celui du blueprint (`shop.tax`), sinon le type par défaut.
      */
     public static function context(ProductType $type, ?array $config = null, int $quantity = 1, $page = null): PriceContext
     {

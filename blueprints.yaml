@@ -50,7 +50,7 @@ form:
     taxes_fieldset:
       type: fieldset
       title: Taxes
-      help: "Chaque type de produit choisit un TAUX par son nom (ex. livres → Taux réduit) ; un même nom peut avoir des lignes pour d'autres pays (vente à l'étranger). Valeurs par défaut : TVA française."
+      help: "Chaque type de produit choisit un TYPE DE TAXE (ex. livres → Taux réduit), qui contient un ou plusieurs TAUX (un par pays pour la vente à l'étranger). Types et taux s'éditent plus commodément dans Admin2 > Boutique > Taxes. Valeurs par défaut : TVA française."
       fields:
         taxes.enabled:
           type: toggle
@@ -93,10 +93,10 @@ form:
         taxes.shop.postcode:
           type: text
           label: Code postal de la boutique
-        taxes.default_rate:
+        taxes.default_type:
           type: select
-          label: Taux par défaut
-          help: "Pour un produit dont le type n'a pas de taux."
+          label: Type de taxe par défaut
+          help: "Pour un produit dont le type n'a pas de type de taxe."
           default: 'Taux normal'
           data-options@: '\Grav\Plugin\SimpleShop\Tax\TaxSettings::rateOptions'
           options: { 'Taux normal': 'Taux normal', 'Taux intermédiaire': 'Taux intermédiaire', 'Taux réduit': 'Taux réduit', 'Taux particulier': 'Taux particulier', 'Taux zéro': 'Taux zéro', 'Exonéré': 'Exonéré' }
@@ -112,82 +112,91 @@ form:
           type: text
           label: Mention de franchise
           default: 'TVA non applicable, art. 293 B du CGI'
-        taxes.rates:
+        taxes.tax_types:
           type: list
-          label: Taux
-          help: "Les types de produits et les fiches choisissent un taux par son nom. Pour vendre ailleurs, ajouter une ligne du même nom avec un autre pays (ex. « Taux réduit », BE, 6 %) : à l'adresse du client, on retient la ligne la plus précise (code postal, puis région, puis pays, puis « tous »). Deux priorités différentes = deux taxes cumulées."
+          label: Types de taxe et leurs taux
+          help: "Plus commode : Admin2 > Boutique > Taxes. Un type (ex. « Taux réduit ») est choisi par les types de produits et les fiches ; il contient un ou plusieurs taux : pour vendre ailleurs, ajouter un taux avec un autre pays (ex. BE, 6 %). À l'adresse du client, on retient le taux le plus précis (code postal, puis région, puis pays, puis « tous ») ; deux priorités différentes = deux taxes cumulées."
           style: vertical
+          collapsible: true
+          collapsed: false
           fields:
             .name:
               type: text
-              label: Nom
+              label: Nom du type de taxe
               placeholder: Taux réduit
               validate: { required: true }
-            .rate:
-              type: text
-              label: Taux (%)
-              placeholder: '5.5'
-              validate: { required: true, pattern: '[0-9]+([.,][0-9]{1,4})?' }
-            .country:
-              type: text
-              label: Pays (code à deux lettres ; vide = tous)
-              placeholder: FR
-            .label:
-              type: text
-              label: Libellé sur la facture (facultatif)
-              placeholder: TVA 5,5 %
-            .region:
-              type: text
-              label: Région (code, facultatif)
-            .postcodes:
-              type: text
-              label: Codes postaux (facultatif)
-              help: "Séparés par « ; ». « 20* » = commence par 20 ; « 97100...97199 » = intervalle."
-            .priority:
-              type: number
-              label: Priorité
-              default: 1
-              validate: { min: 1 }
-            .compound:
-              type: toggle
-              label: Composée (calculée sur le prix déjà taxé)
-              default: 0
-              highlight: 0
-              options: { 1: Oui, 0: Non }
-              validate: { type: bool }
-            .shipping:
-              type: toggle
-              label: S'applique aux frais de livraison
-              default: 1
-              highlight: 1
-              options: { 1: Oui, 0: Non }
-              validate: { type: bool }
-            .category:
-              type: select
-              label: Catégorie (facture électronique)
-              default: S
-              options:
-                S: Taux normal ou réduit
-                Z: Taux zéro
-                E: 'Exonéré (mention obligatoire)'
-                O: Hors champ de la TVA
-            .mention:
-              type: text
-              label: Mention sur la facture (exonération)
-              placeholder: 'TVA non applicable, art. 261-4-4°-a du CGI'
-        taxes.types:
+            .rates:
+              type: list
+              label: Taux
+              style: vertical
+              collapsible: true
+              collapsed: true
+              fields:
+                .rate:
+                  type: text
+                  label: Taux (%)
+                  placeholder: '5.5'
+                  validate: { required: true, pattern: '[0-9]+([.,][0-9]{1,4})?' }
+                .country:
+                  type: text
+                  label: Pays (code à deux lettres ; vide = tous)
+                  placeholder: FR
+                .label:
+                  type: text
+                  label: Libellé sur la facture (facultatif)
+                  placeholder: TVA 5,5 %
+                .region:
+                  type: text
+                  label: Région (code, facultatif)
+                .postcodes:
+                  type: text
+                  label: Codes postaux (facultatif)
+                  help: "Séparés par « ; ». « 20* » = commence par 20 ; « 97100...97199 » = intervalle."
+                .priority:
+                  type: number
+                  label: Priorité
+                  default: 1
+                  validate: { min: 1 }
+                .compound:
+                  type: toggle
+                  label: Composée (calculée sur le prix déjà taxé)
+                  default: 0
+                  highlight: 0
+                  options: { 1: Oui, 0: Non }
+                  validate: { type: bool }
+                .shipping:
+                  type: toggle
+                  label: S'applique aux frais de livraison
+                  default: 1
+                  highlight: 1
+                  options: { 1: Oui, 0: Non }
+                  validate: { type: bool }
+                .category:
+                  type: select
+                  label: Catégorie (facture électronique)
+                  default: S
+                  options:
+                    S: Taux normal ou réduit
+                    Z: Taux zéro
+                    E: 'Exonéré (mention obligatoire)'
+                    O: Hors champ de la TVA
+                .mention:
+                  type: text
+                  label: Mention sur la facture (exonération)
+                  placeholder: 'TVA non applicable, art. 261-4-4°-a du CGI'
+        taxes.product_types:
           type: list
-          label: Taux de chaque type de produit
-          help: "Remplace le taux déclaré dans le blueprint du type (ex. book → Taux réduit). Une fiche peut aussi avoir son propre taux."
+          label: Type de taxe de chaque type de produit
+          help: "Remplace le type de taxe déclaré dans le blueprint du type de produit (ex. book → Taux réduit). Une fiche peut aussi avoir son propre type de taxe."
           style: vertical
           fields:
             .type:
               type: select
               label: Type de produit
               data-options@: '\Grav\Plugin\SimpleShop\Tax\TaxSettings::typeOptions'
-            .rate:
+            .tax_type:
               type: select
-              label: Taux
+              label: Type de taxe
               data-options@: '\Grav\Plugin\SimpleShop\Tax\TaxSettings::rateOptions'
               options: { 'Taux normal': 'Taux normal', 'Taux intermédiaire': 'Taux intermédiaire', 'Taux réduit': 'Taux réduit', 'Taux particulier': 'Taux particulier', 'Taux zéro': 'Taux zéro', 'Exonéré': 'Exonéré' }
 

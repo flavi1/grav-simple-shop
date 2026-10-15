@@ -169,3 +169,17 @@ OSS, DOM), mais il ne demande pas une notion séparée : **le nom du taux joue l
 - Clé interne (nom sans accents, `taux-reduit`) enregistrée comme `tax_code` des commandes ; anciens codes (`reduit`, `TVA_5_5`),
   `taxes.classes` + lignes `{class, name}` et champ `tax_class` toujours compris.
 - CSV : `nom;taux;pays;region;codes_postaux;libelle;priorite;composee;livraison;categorie;mention`.
+
+## 11. Types de taxe contenant leurs taux (15/10/2026, 16 h)
+
+Retour du propriétaire sur le §10 : puisqu'un même produit doit pouvoir être taxé différemment selon le pays, la notion de classe est
+légitime — mais présentée comme un **type de taxe** (« je préfère type de taxe ») qui **contient** un ou plusieurs taux, plutôt que deux
+listes séparées. Validé.
+
+- Configuration : `taxes.tax_types: [{name, rates: [{rate, country, region, postcodes, label, priority, compound, shipping, category, mention}]}]`,
+  `taxes.default_type`, `taxes.product_types: [{type, tax_type}]`, champ de fiche `tax_type`. Les formats précédents (§8 à §10) restent lus.
+- Interface (Admin2 > Boutique > Taxes) : un `<details>` **ouvert** par type (nom, boutons « Ajouter un taux », « Supprimer ce type »),
+  et dans chacun un `<details>` **fermé** par taux (résumé : pays · taux · libellé). Enregistrement : `PUT /simple-shop/taxes/types`.
+  Le formulaire du plugin garde la même liste imbriquée (repli `collapsed` sur les taux), utile surtout pour ne pas perdre les données.
+- CSV inchangé dans l'esprit : une ligne par taux, première colonne = type (`type;taux;pays;region;codes_postaux;libelle;priorite;composee;livraison;categorie;mention`).
+

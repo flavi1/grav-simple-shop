@@ -1407,87 +1407,190 @@
         // ---------------- Taxes ----------------
 
         /**
-         * Vue d'ensemble des taxes et import/export CSV de la table des taux (ex. taux de TVA de chaque pays de l'UE pour
-         * le guichet unique OSS). Les réglages se modifient dans Plugins > Simple Shop > Taxes.
+         * Taxes : résumé des réglages, puis éditeur des TYPES DE TAXE (ex. « Taux réduit », choisis par les types de produits et
+         * les fiches) et de leurs TAUX (un ou plusieurs par type : variantes par pays, taxes cumulées). Chaque type est un
+         * <details> ouvert, chacun de ses taux un <details> fermé. Import/export CSV (ex. taux de chaque pays de l'UE pour le
+         * guichet unique OSS). Les autres réglages se modifient dans Plugins > Simple Shop > Taxes.
          */
         showTaxes() {
             var self = this;
-            var COLS = ['nom', 'taux', 'pays', 'region', 'codes_postaux', 'libelle', 'priorite', 'composee', 'livraison', 'categorie', 'mention'];
-            var KEYS = ['name', 'rate', 'country', 'region', 'postcodes', 'label', 'priority', 'compound', 'shipping', 'category', 'mention'];
+            var RATE_KEYS = ['rate', 'country', 'region', 'postcodes', 'label', 'priority', 'compound', 'shipping', 'category', 'mention'];
+            var COLS = ['type', 'taux', 'pays', 'region', 'codes_postaux', 'libelle', 'priorite', 'composee', 'livraison', 'categorie', 'mention'];
+            var CATEGORIES = [['S', 'Taux normal ou réduit'], ['Z', 'Taux zéro'], ['E', 'Exonéré (mention obligatoire)'], ['O', 'Hors champ de la TVA']];
             var box = h('div');
             var SHIPPING = { items: 'selon les articles du panier (panier mixte : taux le plus élevé)', items_prorata: 'selon les articles, au prorata du HT' };
             var BASED = { shipping: 'adresse de livraison du client', billing: 'adresse de facturation du client', shop: 'adresse de la boutique' };
+            var uid = 0;
 
-            function toCsv(rates) {
-                var lines = [COLS.join(';')];
-                rates.forEach(function (r) {
-                    lines.push(KEYS.map(function (k) {
-                        var v = r[k];
-                        if (typeof v === 'boolean') { return v ? 'oui' : 'non'; }
-                        if (k === 'rate') { return String(v).replace('.', ','); }
-                        return String(v === null || v === undefined ? '' : v).replace(/;/g, ',');
-                    }).join(';'));
-                });
-                return '\ufeff' + lines.join('\r\n') + '\r\n';
+            function pct(v) { return String(v === '' || v === undefined || v === null ? '?' : v).replace('.', ',') + ' %'; }
+            function newRate(country) {
+                return { rate: '', country: country || '', region: '', postcodes: '', label: '', priority: 1, compound: false, shipping: true, category: 'S', mention: '' };
+            }
+            function rateSummary(r) {
+                var where = (r.country || 'tous pays') + (r.region ? ' / ' + r.region : '') + (r.postcodes ? ' / ' + r.postcodes : '');
+                return where + ' · ' + pct(r.rate) + (r.label ? ' · ' + r.label : '') + (Number(r.priority) > 1 ? ' · priorité ' + r.priority : '')
+                    + (r.compound ? ' · composée' : '') + (r.shipping ? '' : ' · hors livraison');
             }
 
+            function toCsv(types) {
+                var lines = [COLS.join(';')];
+                types.forEach(function (t) {
+                    t.rates.forEach(function (r) {
+                        lines.push([t.name].concat(RATE_KEYS.map(function (k) {
+                            var v = r[k];
+                            if (typeof v === 'boolean') { return v ? 'oui' : 'non'; }
+                            if (k === 'rate') { return String(v).replace('.', ','); }
+                            return String(v === null || v === undefined ? '' : v);
+                        })).map(function (v) { return String(v).replace(/;/g, ','); }).join(';'));
+                    });
+                });
+                return '﻿' + lines.join('\r\n') + '\r\n';
+            }
+
+            // CSV → types imbriqués (lignes du même type regroupées dans l'ordre du fichier).
             function fromCsv(text) {
-                var lines = text.replace(/^\ufeff/, '').split(/\r?\n/).filter(function (l) { return l.trim() !== ''; });
+                var lines = text.replace(/^﻿/, '').split(/\r?\n/).filter(function (l) { return l.trim() !== ''; });
                 if (!lines.length) { return []; }
                 var delim = lines[0].indexOf(';') > -1 ? ';' : (lines[0].indexOf('\t') > -1 ? '\t' : ',');
-                var rows = [];
+                var byName = {};
+                var out = [];
                 lines.forEach(function (line, i) {
                     var c = line.split(delim).map(function (x) { return x.trim().replace(/^"|"$/g, ''); });
-                    if (i === 0 && c[0].toLowerCase() === 'nom') { return; }
+                    if (i === 0 && /^(type|nom|classe)$/i.test(c[0])) { return; }
                     var yes = function (v, d) { return v === '' || v === undefined ? d : /^(oui|yes|1|true|vrai)$/i.test(v); };
-                    rows.push({ name: c[0], rate: (c[1] || '').replace(',', '.'), country: c[2] || '', region: c[3] || '', postcodes: c[4] || '',
+                    if (!byName[c[0]]) { byName[c[0]] = { name: c[0], rates: [] }; out.push(byName[c[0]]); }
+                    byName[c[0]].rates.push({ rate: (c[1] || '').replace(',', '.'), country: c[2] || '', region: c[3] || '', postcodes: c[4] || '',
                         label: c[5] || '', priority: parseInt(c[6] || '1', 10) || 1, compound: yes(c[7], false), shipping: yes(c[8], true),
                         category: c[9] || '', mention: c[10] || '' });
                 });
-                return rows;
+                return out;
+            }
+
+            function save(types, after) {
+                return api('PUT', '/taxes/types', { tax_types: types })
+                    .then(function (res) { self.notify(res.data.types + ' types de taxe, ' + res.data.count + ' taux enregistrés.', false); if (after) { after(); } load(); })
+                    .catch(function (e) { self.fail(e); });
+            }
+
+            // Champ d'un taux, lié au modèle ; `onChange` met à jour le résumé du <details>.
+            function rateField(r, key, label, onChange) {
+                var id = 'ss-tx-' + (++uid);
+                var input;
+                if (key === 'compound' || key === 'shipping') {
+                    input = h('input', { type: 'checkbox', id: id, checked: !!r[key], onchange: function () { r[key] = input.checked; onChange(); } });
+                    return h('div', { class: 'ss-field-row ss-check' }, input, h('label', { for: id }, label));
+                }
+                if (key === 'category') {
+                    input = h('select', { id: id, onchange: function () { r[key] = input.value; onChange(); } },
+                        CATEGORIES.map(function (c) { return h('option', { value: c[0], selected: (r.category || 'S') === c[0] }, c[1]); }));
+                } else {
+                    input = h('input', { type: key === 'priority' ? 'number' : 'text', id: id, value: r[key] === undefined || r[key] === null ? '' : String(r[key]),
+                        min: key === 'priority' ? '1' : null, inputmode: key === 'rate' ? 'decimal' : null, maxlength: key === 'country' ? '2' : null,
+                        placeholder: { rate: '5.5', country: 'FR (vide = tous)', label: 'TVA 5,5 %', postcodes: '20* ; 97100...97199' }[key] || null,
+                        oninput: function () { r[key] = key === 'priority' ? (parseInt(input.value, 10) || 1) : (key === 'country' ? input.value.toUpperCase() : input.value); onChange(); } });
+                }
+                return h('div', { class: 'ss-field-row' }, h('label', { for: id }, label), input);
+            }
+
+            function drawEditor(container, types) {
+                container.innerHTML = '';
+                types.forEach(function (t, ti) {
+                    var title = h('span', { class: 'ss-mode-name' }, t.name || '(sans nom)');
+                    var count = h('span', { class: 'ss-muted' });
+                    function refreshType() {
+                        title.textContent = t.name || '(sans nom)';
+                        count.textContent = t.rates.length === 1 ? '— ' + rateSummary(t.rates[0]) : '— ' + t.rates.length + ' taux';
+                    }
+                    refreshType();
+                    var nameId = 'ss-tx-' + (++uid);
+                    var nameInput = h('input', { type: 'text', id: nameId, value: t.name, oninput: function () { t.name = nameInput.value; refreshType(); } });
+                    var ratesBox = h('div');
+                    t.rates.forEach(function (r, ri) {
+                        var sum = h('span', {}, rateSummary(r));
+                        var update = function () { sum.textContent = rateSummary(r); refreshType(); };
+                        ratesBox.appendChild(h('details', { class: 'ss-grid-details', 'data-rate': ri },
+                            h('summary', {}, h('span', { class: 'ss-muted' }, 'Taux ' + (ri + 1) + ' :'), sum),
+                            h('div', { class: 'ss-inline' },
+                                rateField(r, 'rate', 'Taux (%)', update), rateField(r, 'country', 'Pays (code à deux lettres)', update),
+                                rateField(r, 'label', 'Libellé sur la facture', update), rateField(r, 'priority', 'Priorité', update)),
+                            h('div', { class: 'ss-inline' },
+                                rateField(r, 'region', 'Région (code)', update), rateField(r, 'postcodes', 'Codes postaux', update),
+                                rateField(r, 'category', 'Catégorie (facture électronique)', update), rateField(r, 'mention', 'Mention (exonération)', update)),
+                            h('div', { class: 'ss-inline' }, rateField(r, 'compound', 'Composée (calculée sur le prix déjà taxé)', update),
+                                rateField(r, 'shipping', "S'applique aux frais de livraison", update)),
+                            h('p', {}, h('button', { class: 'ss-btn', type: 'button', disabled: t.rates.length < 2, onclick: function () {
+                                t.rates.splice(ri, 1); drawEditor(container, types);
+                            } }, 'Supprimer ce taux'))));
+                    });
+                    container.appendChild(h('details', { class: 'ss-mode', open: true },
+                        h('summary', {}, title, count),
+                        h('div', { class: 'ss-mode-form' },
+                            h('div', { class: 'ss-field-row' }, h('label', { for: nameId }, 'Nom du type de taxe (choisi par les types de produits et les fiches)'), nameInput),
+                            ratesBox,
+                            h('div', { class: 'ss-bar' },
+                                h('button', { class: 'ss-btn', type: 'button', onclick: function () {
+                                    t.rates.push(newRate(''));
+                                    drawEditor(container, types);
+                                    var last = container.querySelectorAll('details.ss-mode')[ti].querySelectorAll('details.ss-grid-details');
+                                    if (last.length) { last[last.length - 1].open = true; last[last.length - 1].querySelector('input').focus(); }
+                                } }, 'Ajouter un taux (autre pays…)'),
+                                h('button', { class: 'ss-btn', type: 'button', onclick: function () {
+                                    if (!window.confirm('Supprimer le type de taxe « ' + (t.name || '') + ' » et ses ' + t.rates.length + ' taux ?')) { return; }
+                                    types.splice(ti, 1); drawEditor(container, types);
+                                } }, 'Supprimer ce type')))));
+                });
             }
 
             function draw(t) {
                 box.innerHTML = '';
+                var types = JSON.parse(JSON.stringify(t.tax_types));
                 box.appendChild(h('p', {}, (t.enabled ? 'Taxes activées' : 'Taxes désactivées') + ' ; prix des fiches saisis ' + t.prices_entered.toUpperCase()
                     + ' ; taux calculé d’après l’' + (BASED[t.based_on] || t.based_on) + ' ; livraison : '
-                    + (SHIPPING[t.shipping_tax] || ('toujours « ' + t.shipping_tax + ' »')) + '.'));
+                    + (SHIPPING[t.shipping_tax] || ('toujours le type « ' + t.shipping_tax + ' »')) + '.'));
                 if (t.small_business.enabled) { box.appendChild(h('p', { class: 'ss-muted' }, 'Franchise en base : ' + t.small_business.mention)); }
 
-                box.appendChild(h('h3', {}, 'Taux des types de produits'));
-                box.appendChild(h('table', {}, h('tbody', {}, Object.keys(t.types).map(function (type) {
-                    return h('tr', {}, h('td', {}, type), h('td', {}, t.types[type]));
-                }).concat([h('tr', {}, h('td', { class: 'ss-muted' }, 'autres produits'), h('td', {}, t.default_rate))]))));
+                box.appendChild(h('h3', {}, 'Type de taxe de chaque type de produit'));
+                box.appendChild(h('table', {}, h('tbody', {}, Object.keys(t.product_types).map(function (type) {
+                    return h('tr', {}, h('td', {}, type), h('td', {}, t.product_types[type]));
+                }).concat([h('tr', {}, h('td', { class: 'ss-muted' }, 'autres produits'), h('td', {}, t.default_type))]))));
+                box.appendChild(h('p', { class: 'ss-muted' }, 'Ces correspondances, le type par défaut et les autres réglages : Plugins > Simple Shop > Taxes.'));
 
-                box.appendChild(h('h3', {}, 'Taux (' + t.rates.length + ')'));
-                box.appendChild(h('table', {}, h('thead', {}, h('tr', {}, ['Nom', 'Taux', 'Pays', 'Région', 'Codes postaux', 'Libellé (facture)', 'Priorité', 'Composée', 'Livraison', 'Catégorie', 'Mention']
-                    .map(function (l) { return h('th', { scope: 'col' }, l); }))),
-                    h('tbody', {}, t.rates.map(function (r) {
-                        return h('tr', {}, h('td', {}, r.name), h('td', { class: 'ss-num' }, String(r.rate).replace('.', ',') + ' %'), h('td', {}, r.country || 'tous'),
-                            h('td', {}, r.region), h('td', {}, r.postcodes), h('td', {}, r.label), h('td', { class: 'ss-num' }, String(r.priority)),
-                            h('td', {}, r.compound ? 'oui' : 'non'), h('td', {}, r.shipping ? 'oui' : 'non'), h('td', {}, r.category), h('td', {}, r.mention));
-                    }))));
+                box.appendChild(h('h3', {}, 'Types de taxe et taux'));
+                box.appendChild(h('p', { class: 'ss-muted' }, 'Un type de taxe contient un ou plusieurs taux. Pour vendre dans un autre pays, ajoutez au type un taux pour ce pays '
+                    + '(ex. « Taux réduit » : FR 5,5 %, BE 6 %). À l’adresse du client, le taux le plus précis l’emporte (code postal, région, pays, puis « tous pays ») ; '
+                    + 'deux priorités différentes donnent deux taxes cumulées.'));
+                var editor = h('div');
+                drawEditor(editor, types);
+                box.appendChild(editor);
 
                 var file = h('input', { type: 'file', accept: '.csv,text/csv,text/plain', class: 'ss-sr', tabindex: '-1', onchange: function () {
                     var f = file.files && file.files[0];
                     if (!f) { return; }
                     f.text().then(function (text) {
-                        var rows = fromCsv(text);
+                        var imported = fromCsv(text);
                         file.value = '';
-                        if (!rows.length) { self.notify('Aucun taux dans ce fichier.', true); return; }
-                        if (!window.confirm('Remplacer les ' + t.rates.length + ' taux actuels par les ' + rows.length + ' taux du fichier ?')) { return; }
-                        api('PUT', '/taxes/rates', { rates: rows })
-                            .then(function (res) { self.notify(res.data.count + ' taux importés.', false); load(); })
-                            .catch(function (e) { self.fail(e); });
+                        if (!imported.length) { self.notify('Aucun taux dans ce fichier.', true); return; }
+                        var n = imported.reduce(function (s, x) { return s + x.rates.length; }, 0);
+                        if (!window.confirm('Remplacer tous les types de taxe par les ' + imported.length + ' types (' + n + ' taux) du fichier ?')) { return; }
+                        save(imported);
                     });
                 } });
                 box.appendChild(h('div', { class: 'ss-bar', style: 'margin-top:.8rem' },
                     h('button', { class: 'ss-btn', type: 'button', onclick: function () {
-                        download(new Blob([toCsv(t.rates)], { type: 'text/csv;charset=utf-8' }), 'taux-de-taxe.csv');
-                    } }, 'Exporter les taux en CSV'),
-                    h('button', { class: 'ss-btn', type: 'button', onclick: function () { file.click(); } }, 'Importer un CSV (remplace les taux)…'), file));
-                box.appendChild(h('p', { class: 'ss-muted' }, 'CSV : colonnes ' + COLS.join(' ; ') + ' (séparateur « ; », virgule décimale, oui/non). '
-                    + 'Réglages et taux un par un : Plugins > Simple Shop > Taxes.'));
+                        types.push({ name: '', rates: [newRate('FR')] });
+                        drawEditor(editor, types);
+                        var all = editor.querySelectorAll('details.ss-mode');
+                        all[all.length - 1].querySelector('input').focus();
+                    } }, 'Ajouter un type de taxe'),
+                    h('button', { class: 'ss-btn ss-primary', type: 'button', onclick: function () { save(types); } }, 'Enregistrer les types de taxe'),
+                    h('button', { class: 'ss-btn', type: 'button', onclick: function () { load(); } }, 'Annuler les modifications')));
+                box.appendChild(h('div', { class: 'ss-bar', style: 'margin-top:.8rem' },
+                    h('button', { class: 'ss-btn', type: 'button', onclick: function () {
+                        download(new Blob([toCsv(t.tax_types)], { type: 'text/csv;charset=utf-8' }), 'taux-de-taxe.csv');
+                    } }, 'Exporter en CSV'),
+                    h('button', { class: 'ss-btn', type: 'button', onclick: function () { file.click(); } }, 'Importer un CSV (remplace tout)…'), file));
+                box.appendChild(h('p', { class: 'ss-muted' }, 'CSV : une ligne par taux, colonnes ' + COLS.join(' ; ') + ' (séparateur « ; », virgule décimale, oui/non ; '
+                    + 'les lignes d’un même type sont regroupées). L’export reflète la dernière version enregistrée.'));
             }
 
             function load() {

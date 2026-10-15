@@ -1,5 +1,5 @@
 <?php
-// Taxes (CONCEPTION-TAXES.md) : table des taux nommés, résolution par adresse, taxes multiples et
+// Taxes (docs/CONCEPTION-TAXES.md) : types de taxe et leurs taux, résolution par adresse, taxes multiples et
 // composées, livraison (taux le plus élevé / prorata / taux fixe), exonération, franchise en base, point d'extension,
 // facture d'un panier mixte (XSD EN 16931).
 // Lancement : YAML=<autoload symfony/yaml> php -d zend.assertions=1 -d assert.exception=1 tests/taxes.php
@@ -16,7 +16,7 @@ use Grav\Plugin\SimpleShop\Tax\TaxSettings;
 $grav = \SimpleShopTest\boot([], [], null);
 $eur = fn (int $c) => Money::of($c, 'EUR');
 
-// 1. Valeurs par défaut : TVA française, une table de taux nommés, exonération
+// 1. Valeurs par défaut : TVA française, types de taxe (chacun avec ses taux), exonération
 $s = TaxResolver::settings();
 assert(array_values($s['names']) === ['Taux normal', 'Taux intermédiaire', 'Taux réduit', 'Taux particulier', 'Taux zéro', 'Exonéré']);
 assert($s['default_rate'] === 'taux-normal' && $s['shipping_tax'] === 'items' && $s['based_on'] === 'shipping');
@@ -33,6 +33,20 @@ assert(TaxResolver::rateFor('book', 'Taux réduit', ['tax_rate' => 'Taux zéro']
 assert(TaxResolver::rateFor('book', 'Taux réduit', ['tax_class' => 'zero']) === 'taux-zero', 'ancien champ de fiche');
 assert(TaxResolver::rateFor('book', 'Taux réduit', ['tax_rate' => '']) === 'taux-reduit', 'fiche vide : taux du type');
 assert(TaxSettings::fromConfig(['taxes' => ['types' => [['type' => 'book', 'rate' => 'Taux zéro']]]])['types'] === ['book' => 'taux-zero']);
+assert(TaxSettings::fromConfig(['taxes' => ['product_types' => [['type' => 'book', 'tax_type' => 'Taux zéro']]]])['types'] === ['book' => 'taux-zero']);
+assert(TaxResolver::rateFor('book', 'Taux réduit', ['tax_type' => 'Exonéré']) === 'exonere', 'champ de fiche tax_type');
+// Format imbriqué (types de taxe → taux) : valeurs par défaut du plugin, aller-retour avec nest()
+$yaml = \Symfony\Component\Yaml\Yaml::parseFile(__DIR__ . '/../simple-shop.yaml');
+assert(count($yaml['taxes']['tax_types']) === 6 && TaxSettings::nest(TaxSettings::fromConfig($yaml)['rates']) == TaxSettings::defaultTaxTypes());
+$nested = ['taxes' => ['default_type' => 'Livres', 'tax_types' => [
+    ['name' => 'Livres', 'rates' => [['rate' => 5.5, 'country' => 'FR', 'label' => 'TVA 5,5 %'], ['rate' => 6, 'country' => 'BE', 'label' => 'TVA 6 %'], ['rate' => 7, 'country' => 'DE']]],
+    ['name' => 'Vide', 'rates' => []],
+]]];
+$ns = TaxSettings::fromConfig($nested);
+assert($ns['names'] === ['livres' => 'Livres'] && $ns['default_rate'] === 'livres' && count($ns['rates']) === 3, 'type sans taux ignoré');
+assert(TaxResolver::forRate('Livres', new TaxLocation('BE'), $nested)->basisPoints === 600 && TaxResolver::forRate('Livres', new TaxLocation('DE'), $nested)->components[0]->name === 'Livres 7 %');
+assert(TaxSettings::nest($ns['rates'])[0]['rates'][1] === ['rate' => 6, 'country' => 'BE', 'region' => '', 'postcodes' => '', 'label' => 'TVA 6 %', 'priority' => 1,
+    'compound' => false, 'shipping' => true, 'category' => 'S', 'mention' => ''], json_encode(TaxSettings::nest($ns['rates'])));
 
 // 2. Anciennes configurations reprises : CODE: {label, rate} ; classes + lignes {class, name}
 $legacy = TaxSettings::fromConfig(['taxes' => ['default' => 'TVA_5_5', 'rates' => ['TVA_5_5' => ['label' => 'TVA 5,5 %', 'rate' => 0.055], 'TVA_20' => ['label' => 'TVA 20 %', 'rate' => 0.2]]]]);

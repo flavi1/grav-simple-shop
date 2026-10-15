@@ -186,7 +186,8 @@ class SimpleShopPlugin extends Plugin
             $group->delete('/carriers/{key}', [$c, 'deleteCarrierMode']);
 
             $group->get('/taxes', [$c, 'taxes']);
-            $group->put('/taxes/rates', [$c, 'saveTaxRates']);
+            $group->put('/taxes/types', [$c, 'saveTaxTypes']);
+            $group->put('/taxes/rates', [$c, 'saveTaxTypes']);   // ancien nom (import CSV)
 
             $group->get('/bans', [$c, 'bans']);
             $group->post('/bans', [$c, 'ban']);
