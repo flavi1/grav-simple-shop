@@ -534,30 +534,36 @@ class ShopApiController extends AbstractApiController
     // Taxes (réglages complets : Plugins > Simple Shop ; ici : vue d'ensemble et import/export CSV des taux)
     // ------------------------------------------------------------------
 
-    /** GET /simple-shop/taxes — réglages normalisés (classes, taux en %, types de produits). */
+    /** Ligne de taux pour l'API et le CSV (taux en %). */
+    private static function taxRow(array $r): array
+    {
+        return ['name' => $r['name'], 'rate' => $r['bp'] / 100, 'country' => $r['country'], 'region' => $r['region'], 'postcodes' => implode(';', $r['postcodes']),
+            'label' => $r['label'], 'priority' => $r['priority'], 'compound' => $r['compound'], 'shipping' => $r['shipping'],
+            'category' => $r['category'], 'mention' => $r['mention']];
+    }
+
+    /** GET /simple-shop/taxes — réglages normalisés (taux en %, taux de chaque type de produit). */
     public function taxes(ServerRequestInterface $request): ResponseInterface
     {
         $this->requirePermission($request, self::PERM_READ);
         $s = \Grav\Plugin\SimpleShop\Tax\TaxResolver::settings();
-        $rates = array_map(static fn (array $r) => [
-            'class' => $r['class'], 'country' => $r['country'], 'region' => $r['region'], 'postcodes' => implode(';', $r['postcodes']),
-            'rate' => $r['bp'] / 100, 'name' => $r['name'], 'priority' => $r['priority'], 'compound' => $r['compound'],
-            'shipping' => $r['shipping'], 'category' => $r['category'], 'mention' => $r['mention'],
-        ], $s['rates']);
         $types = [];
         foreach (\Grav\Plugin\SimpleShop\Product\ProductTypes::all() as $name => $type) {
-            $types[$name] = \Grav\Plugin\SimpleShop\Tax\TaxResolver::classFor($name, $type->taxCode);
+            $types[$name] = $s['names'][\Grav\Plugin\SimpleShop\Tax\TaxResolver::rateFor($name, $type->taxCode)] ?? '';
         }
+        $shipping = $s['names'][$s['shipping_tax']] ?? $s['shipping_tax'];
 
         return ApiResponse::create([
-            'enabled' => $s['enabled'], 'prices_entered' => $s['prices_entered'], 'based_on' => $s['based_on'], 'shipping_tax' => $s['shipping_tax'],
-            'default_class' => $s['default_class'], 'small_business' => $s['small_business'], 'classes' => $s['classes'], 'rates' => $rates, 'types' => $types,
+            'enabled' => $s['enabled'], 'prices_entered' => $s['prices_entered'], 'based_on' => $s['based_on'], 'shipping_tax' => $shipping,
+            'default_rate' => $s['names'][$s['default_rate']] ?? '', 'small_business' => $s['small_business'],
+            'rates' => array_map([self::class, 'taxRow'], $s['rates']), 'types' => $types,
         ]);
     }
 
     /**
-     * PUT /simple-shop/taxes/rates — corps : {"rates": [{class, country, region, postcodes, rate, name, priority, compound, shipping, category, mention}]}
-     * Remplace la table des taux (import CSV) dans user/config/plugins/simple-shop.yaml.
+     * PUT /simple-shop/taxes/rates — corps : {"rates": [{name, rate, country, region, postcodes, label, priority, compound, shipping, category, mention}]}
+     * Remplace la table des taux (import CSV) dans user/config/plugins/simple-shop.yaml. Les taux encore utilisés
+     * (taux par défaut, types de produits, livraison) doivent rester présents.
      */
     public function saveTaxRates(ServerRequestInterface $request): ResponseInterface
     {
@@ -566,22 +572,23 @@ class ShopApiController extends AbstractApiController
         if (!is_array($rows) || $rows === [] || count($rows) > 5000) {
             throw new ValidationException('Le champ « rates » doit être une liste de taux (5 000 au plus).');
         }
-        $classes = \Grav\Plugin\SimpleShop\Tax\TaxResolver::settings()['classes'];
         $clean = [];
         $errors = [];
+        $keys = [];
         foreach (array_values($rows) as $i => $row) {
-            $n = \Grav\Plugin\SimpleShop\Tax\TaxSettings::normalizeRate($row);
+            $n = is_array($row) && !isset($row['class']) && !isset($row['key']) ? \Grav\Plugin\SimpleShop\Tax\TaxSettings::normalizeRate($row) : null;
             if ($n === null) {
-                $errors['ligne ' . ($i + 1)] = 'classe ou taux invalide';
+                $errors['ligne ' . ($i + 1)] = 'nom ou taux invalide';
                 continue;
             }
-            if (!isset($classes[$n['class']])) {
-                $errors['ligne ' . ($i + 1)] = 'classe inconnue : ' . $n['class'];
-                continue;
+            $keys[$n['key']] = true;
+            $clean[] = self::taxRow($n);
+        }
+        $s = \Grav\Plugin\SimpleShop\Tax\TaxResolver::settings();
+        foreach (array_unique(array_merge([$s['default_rate']], array_values($s['types']), in_array($s['shipping_tax'], \Grav\Plugin\SimpleShop\Tax\TaxSettings::SHIPPING_MODES, true) ? [] : [$s['shipping_tax']])) as $used) {
+            if (!isset($keys[$used])) {
+                $errors['taux « ' . ($s['names'][$used] ?? $used) . ' »'] = 'encore utilisé dans les réglages : à garder dans le fichier';
             }
-            $clean[] = ['class' => $n['class'], 'country' => $n['country'], 'region' => $n['region'], 'postcodes' => implode(';', $n['postcodes']),
-                'rate' => $n['bp'] / 100, 'name' => $n['name'], 'priority' => $n['priority'], 'compound' => $n['compound'],
-                'shipping' => $n['shipping'], 'category' => $n['category'], 'mention' => $n['mention']];
         }
         if ($errors !== []) {
             throw new ValidationException('Taux invalides.', $errors);
@@ -596,6 +603,7 @@ class ShopApiController extends AbstractApiController
             $data = is_file($path) ? (array) \Grav\Common\Yaml::parse((string) file_get_contents($path)) : ['enabled' => true];
             $data['taxes'] = is_array($data['taxes'] ?? null) ? $data['taxes'] : [];
             $data['taxes']['rates'] = $clean;
+            unset($data['taxes']['classes']);
             $tmp = $path . '.tmp-' . bin2hex(random_bytes(4));
             file_put_contents($tmp, \Grav\Common\Yaml::dump($data, 10));
             rename($tmp, $path);

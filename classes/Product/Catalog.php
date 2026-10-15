@@ -23,30 +23,30 @@ final class Catalog
     }
 
     /**
-     * Taxe d'une classe (ou d'un ancien code « TVA_5_5 ») à l'adresse qui décide du taux (voir Tax\TaxResolver) ;
-     * sans classe : la classe par défaut du site.
+     * Taxe d'un taux nommé (ou d'un ancien code « TVA_5_5 ») à l'adresse qui décide du taux (voir Tax\TaxResolver) ;
+     * sans nom : le taux par défaut du site.
      */
     public static function taxRate(?string $code = null, ?array $config = null): TaxRate
     {
-        $class = $code ?? \Grav\Plugin\SimpleShop\Tax\TaxResolver::settings($config)['default_class'];
+        $key = $code ?? \Grav\Plugin\SimpleShop\Tax\TaxResolver::settings($config)['default_rate'];
 
-        return \Grav\Plugin\SimpleShop\Tax\TaxResolver::forClass($class, null, $config);
+        return \Grav\Plugin\SimpleShop\Tax\TaxResolver::forRate($key, null, $config);
     }
 
     /**
-     * Contexte de calcul du prix d'un produit. Taxe : classe de la fiche (`tax_class`), sinon celle choisie pour le type
-     * dans l'administration, sinon celle du blueprint (`shop.tax`), sinon la classe par défaut.
+     * Contexte de calcul du prix d'un produit. Taxe : taux de la fiche (`tax_rate`), sinon celui choisi pour le type
+     * dans l'administration, sinon celui du blueprint (`shop.tax`), sinon le taux par défaut.
      */
     public static function context(ProductType $type, ?array $config = null, int $quantity = 1, $page = null): PriceContext
     {
         $explicit = $config !== null;
         $config ??= self::config();
         $header = $page ? (array) $page->header() : [];
-        $class = \Grav\Plugin\SimpleShop\Tax\TaxResolver::classFor($type->name, $type->taxCode, $header, $explicit ? $config : null);
+        $rateKey = \Grav\Plugin\SimpleShop\Tax\TaxResolver::rateFor($type->name, $type->taxCode, $header, $explicit ? $config : null);
 
         return new PriceContext(
             self::currency($config),
-            self::taxRate($class, $explicit ? $config : null),
+            self::taxRate($rateKey, $explicit ? $config : null),
             TaxManager::pricesEnteredHt($config) ? Price::HT : Price::TTC,
             new \DateTimeImmutable('today'),
             $quantity,

@@ -3,15 +3,21 @@
 namespace Grav\Plugin\SimpleShop\Tax;
 
 /**
- * Réglages des taxes (`plugins.simple-shop.taxes`), normalisés. Modèle de WooCommerce :
+ * Réglages des taxes (`plugins.simple-shop.taxes`), normalisés. Une seule notion : la **table des taux**.
  *
- *  - **classes** de taxe (ex. `standard`, `reduit`) attachées aux types de produits, jamais un taux ;
- *  - **table des taux** : pour chaque classe, des lignes pays / région / codes postaux / taux / nom / priorité / composée /
- *    s'applique à la livraison / catégorie de facture / mention ;
+ *  - chaque ligne a un **nom** (ex. « Taux réduit ») : c'est ce nom que choisissent les types de produits et les fiches ;
+ *  - plusieurs lignes peuvent porter le même nom pour d'autres pays / régions / codes postaux (vente à l'étranger, DOM,
+ *    taxes cumulées) : à l'adresse du client, on retient à chaque priorité la ligne la plus précise ;
+ *  - chaque ligne : taux, pays (vide = partout), région, codes postaux, libellé de facture, priorité, composée,
+ *    s'applique à la livraison, catégorie de facture électronique, mention (exonération) ;
  *  - réglages : prix saisis HT ou TTC, adresse qui décide du taux, taxe de la livraison, franchise en base.
  *
- * Valeurs par défaut : TVA française (20 / 10 / 5,5 / 2,1 / 0 %, exonéré). L'ancienne configuration (`taxes.default` +
- * `taxes.rates` sous forme `CODE: {label, rate}`) est reprise : chaque ancien code devient une classe à un taux (France).
+ * Valeurs par défaut : TVA française (20 / 10 / 5,5 / 2,1 / 0 %, exonéré). Formats antérieurs repris :
+ *  - `classes` + lignes `class` (octobre 2026) : le libellé de la classe devient le nom du taux, l'ancien nom de ligne son libellé ;
+ *  - `taxes.default` + `taxes.rates` sous forme `CODE: {label, rate}`.
+ *
+ * En interne, un taux est désigné par sa **clé** : le nom en minuscules sans accents (« taux-reduit »). Les anciens codes
+ * (`reduit`, `standard`, `TVA_5_5`…) restent compris (alias).
  */
 final class TaxSettings
 {
@@ -20,7 +26,8 @@ final class TaxSettings
     /** `items` : selon les articles (panier mixte : taux le plus élevé, comme WooCommerce) ; `items_prorata` : réparti au prorata HT. */
     public const SHIPPING_MODES = ['items', 'items_prorata'];
 
-    public const DEFAULT_CLASSES = [
+    /** Anciens codes de classe → nom du taux. */
+    public const LEGACY_NAMES = [
         'standard'      => 'Taux normal',
         'intermediaire' => 'Taux intermédiaire',
         'reduit'        => 'Taux réduit',
@@ -30,136 +37,164 @@ final class TaxSettings
     ];
 
     public const DEFAULT_RATES = [
-        ['class' => 'standard', 'country' => 'FR', 'rate' => 20, 'name' => 'TVA 20 %', 'category' => 'S'],
-        ['class' => 'intermediaire', 'country' => 'FR', 'rate' => 10, 'name' => 'TVA 10 %', 'category' => 'S'],
-        ['class' => 'reduit', 'country' => 'FR', 'rate' => 5.5, 'name' => 'TVA 5,5 %', 'category' => 'S'],
-        ['class' => 'particulier', 'country' => 'FR', 'rate' => 2.1, 'name' => 'TVA 2,1 %', 'category' => 'S'],
-        ['class' => 'zero', 'country' => 'FR', 'rate' => 0, 'name' => 'TVA 0 %', 'category' => 'Z'],
-        ['class' => 'exonere', 'country' => 'FR', 'rate' => 0, 'name' => 'Exonéré', 'category' => 'E', 'mention' => 'TVA non applicable'],
+        ['name' => 'Taux normal', 'country' => 'FR', 'rate' => 20, 'label' => 'TVA 20 %', 'category' => 'S'],
+        ['name' => 'Taux intermédiaire', 'country' => 'FR', 'rate' => 10, 'label' => 'TVA 10 %', 'category' => 'S'],
+        ['name' => 'Taux réduit', 'country' => 'FR', 'rate' => 5.5, 'label' => 'TVA 5,5 %', 'category' => 'S'],
+        ['name' => 'Taux particulier', 'country' => 'FR', 'rate' => 2.1, 'label' => 'TVA 2,1 %', 'category' => 'S'],
+        ['name' => 'Taux zéro', 'country' => 'FR', 'rate' => 0, 'label' => 'TVA 0 %', 'category' => 'Z'],
+        ['name' => 'Exonéré', 'country' => 'FR', 'rate' => 0, 'label' => 'Exonéré', 'category' => 'E', 'mention' => 'TVA non applicable'],
     ];
+
+    public const DEFAULT_RATE = 'Taux normal';
 
     /**
      * @return array{enabled: bool, prices_entered: string, based_on: string, shipping_tax: string, shop: array{country: string, region: string, postcode: string},
-     *               default_class: string, small_business: array{enabled: bool, mention: string}, classes: array<string, string>,
-     *               rates: list<array>, types: array<string, string>, legacy_codes: array<string, string>}
+     *               default_rate: string, small_business: array{enabled: bool, mention: string}, names: array<string, string>,
+     *               rates: list<array>, types: array<string, string>, aliases: array<string, string>}
+     *         Clés de taux (`default_rate`, `types`, `shipping_tax` fixe, `rates[].key`) ; `names` : clé → nom affiché.
      */
     public static function fromConfig(array $config): array
     {
         $t = is_array($config['taxes'] ?? null) ? $config['taxes'] : [];
-        $legacyCodes = [];
+        $aliases = [];
 
-        // Classes et taux : nouveau format (liste de lignes avec `class`), ou ancien (`CODE: {label, rate}`).
-        $classes = [];
+        // Ancien format à classes : code → libellé.
+        $classLabels = [];
         foreach ((array) ($t['classes'] ?? []) as $code => $label) {
             if (is_array($label)) {   // liste Admin2 : [{code, label}]
                 [$code, $label] = [(string) ($label['code'] ?? ''), (string) ($label['label'] ?? '')];
             }
-            $code = self::code((string) $code);
-            if ($code !== '') {
-                $classes[$code] = trim((string) $label) !== '' ? trim((string) $label) : $code;
+            if (trim((string) $code) !== '') {
+                $classLabels[trim((string) $code)] = trim((string) $label) !== '' ? trim((string) $label) : trim((string) $code);
             }
         }
+
         $rawRates = $t['rates'] ?? null;
         $rows = [];
         if (is_array($rawRates) && $rawRates !== [] && !array_is_list($rawRates)) {
+            // Très ancien format : CODE: {label, rate}
             foreach ($rawRates as $code => $def) {
                 if (!is_array($def) || !isset($def['rate']) || !is_numeric($def['rate'])) {
                     continue;
                 }
-                $code = self::code((string) $code);
                 $rate = (float) $def['rate'];
                 $rate = $rate <= 1 ? $rate * 100 : $rate;
-                $classes[$code] ??= (string) ($def['label'] ?? $code);
-                $rows[] = ['class' => $code, 'country' => 'FR', 'rate' => $rate, 'name' => (string) ($def['label'] ?? $code), 'category' => $rate > 0 ? 'S' : 'Z'];
-                $legacyCodes[$code] = $code;
+                $name = (string) ($def['label'] ?? $code);
+                $rows[] = ['name' => $name, 'country' => 'FR', 'rate' => $rate, 'label' => $name, 'category' => $rate > 0 ? 'S' : 'Z'];
+                $aliases[self::key((string) $code)] = self::key($name);
             }
         } elseif (is_array($rawRates)) {
-            $rows = $rawRates;
+            foreach ($rawRates as $row) {
+                if (is_array($row) && isset($row['class']) && !isset($row['key'])) {   // format à classes
+                    $code = trim((string) $row['class']);
+                    $name = $classLabels[$code] ?? self::LEGACY_NAMES[$code] ?? $code;
+                    $row = ['name' => $name, 'label' => (string) ($row['name'] ?? '')] + $row;
+                    unset($row['class']);
+                    $aliases[self::key($code)] = self::key($name);
+                }
+                $rows[] = $row;
+            }
         }
         if ($rows === []) {
             $rows = self::DEFAULT_RATES;
-            $classes += self::DEFAULT_CLASSES;
         }
 
         $rates = [];
+        $names = [];
         foreach ($rows as $row) {
             $n = self::normalizeRate($row);
             if ($n !== null) {
                 $rates[] = $n;
-                $classes[$n['class']] ??= $n['class'];
+                $names[$n['key']] ??= $n['name'];
             }
         }
 
-
-        // Type de produit → classe (surcharge du blueprint) : map `book: reduit` ou liste Admin2 [{type, class}].
-        $types = [];
-        foreach ((array) ($t['types'] ?? []) as $type => $class) {
-            if (is_array($class)) {
-                [$type, $class] = [(string) ($class['type'] ?? ''), (string) ($class['class'] ?? '')];
-            }
-            if ((string) $type !== '' && isset($classes[self::code((string) $class)])) {
-                $types[(string) $type] = self::code((string) $class);
+        // Anciens codes de classe (`reduit`…) et « TVA_5_5 » (blueprints, commandes) : alias vers le nom du taux.
+        foreach (self::LEGACY_NAMES as $code => $name) {
+            if (isset($names[self::key($name)])) {
+                $aliases[$code] ??= self::key($name);
             }
         }
-
-        // Anciens codes « TVA_5_5 » (blueprints, commandes) : classe française de même taux.
         foreach ($rates as $r) {
             if ($r['country'] === 'FR' && $r['category'] !== 'E') {
-                $legacy = 'TVA_' . str_replace('.', '_', rtrim(rtrim(number_format($r['bp'] / 100, 2, '.', ''), '0'), '.'));
-                $legacyCodes[$legacy] ??= $r['class'];
+                $legacy = self::key('TVA_' . str_replace('.', '_', rtrim(rtrim(number_format($r['bp'] / 100, 2, '.', ''), '0'), '.')));
+                $aliases[$legacy] ??= $r['key'];
+            }
+        }
+        foreach (array_keys($names) as $k) {
+            unset($aliases[$k]);   // un vrai nom de taux l'emporte sur un alias
+        }
+        $resolve = static function (string $ref) use ($names, $aliases): string {
+            $k = self::key($ref);
+            $k = $aliases[$k] ?? $k;
+
+            return isset($names[$k]) ? $k : '';
+        };
+
+        // Type de produit → taux (surcharge du blueprint) : liste Admin2 [{type, rate}] (ancien : {type, class}) ou map.
+        $types = [];
+        foreach ((array) ($t['types'] ?? []) as $type => $ref) {
+            if (is_array($ref)) {
+                [$type, $ref] = [(string) ($ref['type'] ?? ''), (string) ($ref['rate'] ?? $ref['class'] ?? '')];
+            }
+            $k = $resolve((string) $ref);
+            if ((string) $type !== '' && $k !== '') {
+                $types[(string) $type] = $k;
             }
         }
 
-        // Classe par défaut (un ancien code « TVA_5_5 » désigne la classe française de même taux).
-        $default = self::code((string) ($t['default_class'] ?? $t['default'] ?? ''));
-        $default = $legacyCodes[$default] ?? $default;
-        if (!isset($classes[$default])) {
-            $default = isset($classes['standard']) ? 'standard' : (string) array_key_first($classes);
-        }
-        foreach ($types as $type => $class) {
-            $types[$type] = $legacyCodes[$class] ?? $class;
+        $default = $resolve((string) ($t['default_rate'] ?? $t['default_class'] ?? $t['default'] ?? ''));
+        if ($default === '') {
+            $default = $resolve(self::DEFAULT_RATE) ?: (string) array_key_first($names);
         }
 
         $shop = is_array($t['shop'] ?? null) ? $t['shop'] : [];
         $sb = is_array($t['small_business'] ?? null) ? $t['small_business'] : [];
         $basedOn = (string) ($t['based_on'] ?? 'shipping');
         $shipping = (string) ($t['shipping_tax'] ?? 'items');
-        if (!in_array($shipping, self::SHIPPING_MODES, true) && !isset($classes[self::code($shipping)])) {
-            $shipping = 'items';
+        if (!in_array($shipping, self::SHIPPING_MODES, true)) {
+            $shipping = $resolve($shipping) ?: 'items';
         }
 
         return [
             'enabled'        => !array_key_exists('enabled', $t) || !empty($t['enabled']),
             'prices_entered' => strtolower((string) ($t['prices_entered'] ?? 'ht')) === 'ttc' ? 'ttc' : 'ht',
             'based_on'       => in_array($basedOn, self::BASED_ON, true) ? $basedOn : 'shipping',
-            'shipping_tax'   => in_array($shipping, self::SHIPPING_MODES, true) ? $shipping : self::code($shipping),
+            'shipping_tax'   => $shipping,
             'shop'           => [
                 'country'  => self::country((string) ($shop['country'] ?? $config['seller']['country'] ?? 'FR')) ?: 'FR',
                 'region'   => strtoupper(trim((string) ($shop['region'] ?? ''))),
                 'postcode' => trim((string) ($shop['postcode'] ?? $config['seller']['postal_code'] ?? '')),
             ],
-            'default_class'  => $default,
+            'default_rate'   => $default,
             'small_business' => [
                 'enabled' => !empty($sb['enabled']),
                 'mention' => trim((string) ($sb['mention'] ?? '')) ?: 'TVA non applicable, art. 293 B du CGI',
             ],
-            'classes'        => $classes,
+            'names'          => $names,
             'rates'          => $rates,
             'types'          => $types,
-            'legacy_codes'   => $legacyCodes,
+            'aliases'        => $aliases,
         ];
     }
 
-    /** Ligne de la table des taux normalisée, ou null si inutilisable. */
+    /**
+     * Ligne de la table des taux normalisée, ou null si inutilisable. Accepte une ligne saisie (`name`, `rate` en %,
+     * `label`…) ou déjà normalisée (`key`, `bp` : événement onSimpleShopTaxRates).
+     */
     public static function normalizeRate($row): ?array
     {
         if (!is_array($row)) {
             return null;
         }
-        $class = self::code((string) ($row['class'] ?? ''));
-        // Taux en % (« 5.5 », « 5,5 ») ; une ligne déjà normalisée (événement onSimpleShopTaxRates) porte `bp`.
+        if (isset($row['class']) && !isset($row['key'])) {   // ancienne ligne {class, name = libellé}
+            $row = ['key' => $row['class'], 'label' => $row['label'] ?? $row['name'] ?? ''] + array_diff_key($row, ['name' => 1]);
+        }
+        $name = trim((string) ($row['name'] ?? ''));
+        $key = self::key((string) ($row['key'] ?? $name));
+        // Taux en % (« 5.5 », « 5,5 ») ; une ligne déjà normalisée porte `bp`.
         $rate = isset($row['bp']) && !isset($row['rate']) ? (string) ((int) $row['bp'] / 100) : str_replace(',', '.', (string) ($row['rate'] ?? ''));
-        if ($class === '' || !is_numeric($rate) || (float) $rate < 0 || (float) $rate >= 100) {
+        if ($key === '' || !is_numeric($rate) || (float) $rate < 0 || (float) $rate >= 100) {
             return null;
         }
         $bp = (int) round((float) $rate * 100);
@@ -169,14 +204,16 @@ final class TaxSettings
         }
         $postcodes = $row['postcodes'] ?? $row['postcode'] ?? '';
         $postcodes = is_array($postcodes) ? $postcodes : preg_split('/[;,\s]+/', (string) $postcodes);
+        $pct = rtrim(rtrim(number_format($bp / 100, 3, ',', ''), '0'), ',') . ' %';
 
         return [
-            'class'     => $class,
+            'key'       => $key,
+            'name'      => $name !== '' ? $name : $key,
             'country'   => self::country((string) ($row['country'] ?? '')),
             'region'    => strtoupper(trim((string) ($row['region'] ?? $row['state'] ?? ''))),
             'postcodes' => array_values(array_filter(array_map('trim', $postcodes), 'strlen')),
             'bp'        => $bp,
-            'name'      => trim((string) ($row['name'] ?? '')) ?: rtrim(rtrim(number_format($bp / 100, 2, ',', ''), '0'), ',') . ' %',
+            'label'     => trim((string) ($row['label'] ?? '')) ?: ($name !== '' ? $name . ' ' . $pct : $pct),
             'priority'  => max(1, (int) ($row['priority'] ?? 1)),
             'compound'  => !empty($row['compound']),
             'shipping'  => !array_key_exists('shipping', $row) || !empty($row['shipping']),
@@ -185,12 +222,23 @@ final class TaxSettings
         ];
     }
 
-    /** Code de classe : minuscules, chiffres, `_` et `-` (les anciens codes « TVA_5_5 » sont gardés tels quels). */
-    public static function code(string $code): string
+    /** Clé d'un nom de taux : minuscules sans accents, mots séparés par « - » (« Taux réduit » → « taux-reduit »). */
+    public static function key(string $name): string
     {
-        $code = trim($code);
+        $s = trim($name);
+        if ($s === '') {
+            return '';
+        }
+        if (class_exists(\Normalizer::class)) {
+            $s = (string) \Normalizer::normalize($s, \Normalizer::FORM_D);
+            $s = (string) preg_replace('/\p{Mn}+/u', '', $s);
+        } else {
+            $s = strtr($s, ['é' => 'e', 'è' => 'e', 'ê' => 'e', 'ë' => 'e', 'à' => 'a', 'â' => 'a', 'î' => 'i', 'ï' => 'i', 'ô' => 'o', 'ù' => 'u', 'û' => 'u', 'ü' => 'u', 'ç' => 'c',
+                'É' => 'E', 'È' => 'E', 'Ê' => 'E', 'À' => 'A', 'Ç' => 'C']);
+        }
+        $s = strtolower((string) preg_replace('/[^A-Za-z0-9]+/', '-', $s));
 
-        return preg_match('/^[A-Za-z0-9_-]{1,40}$/', $code) ? $code : '';
+        return substr(trim($s, '-'), 0, 60);
     }
 
     private static function country(string $c): string
@@ -200,27 +248,32 @@ final class TaxSettings
         return preg_match('/^[A-Z]{2}$/', $c) ? $c : '';
     }
 
-    /** Options des listes de l'administration (blueprint `data-options@`) : classes de taxe. */
-    public static function classOptions(): array
+    private static function siteConfig(): array
     {
         try {
-            $config = (array) \Grav\Common\Grav::instance()['config']->get('plugins.simple-shop', []);
+            return (array) \Grav\Common\Grav::instance()['config']->get('plugins.simple-shop', []);
         } catch (\Throwable $e) {
-            $config = [];
+            return [];
         }
-
-        return self::fromConfig($config)['classes'];
     }
 
-    /** Options : modes de taxe de la livraison (dont « classe fixe »). */
+    /** Options des listes de l'administration (blueprint `data-options@`) : noms des taux (valeur = nom). */
+    public static function rateOptions(): array
+    {
+        $names = array_values(self::fromConfig(self::siteConfig())['names']);
+
+        return array_combine($names, $names) ?: [];
+    }
+
+    /** Options : modes de taxe de la livraison (dont « toujours tel taux »). */
     public static function shippingOptions(): array
     {
         $opts = [
             'items'         => 'Selon les articles du panier (panier mixte : taux le plus élevé, comme WooCommerce)',
             'items_prorata' => 'Selon les articles du panier, réparti au prorata du HT (pratique française recommandée)',
         ];
-        foreach (self::classOptions() as $code => $label) {
-            $opts[$code] = 'Toujours la classe « ' . $label . ' »';
+        foreach (self::rateOptions() as $name) {
+            $opts[$name] = 'Toujours « ' . $name . ' »';
         }
 
         return $opts;

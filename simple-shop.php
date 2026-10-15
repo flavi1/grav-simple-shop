@@ -48,7 +48,7 @@ class SimpleShopPlugin extends Plugin
         // Listes de l'administration (Plugins > Simple Shop > Taxes) : Grav 2 n'appelle une fonction `data-options@`
         // que si elle est autorisée (Blueprint::isSafeDynamicCall).
         if (method_exists(\Grav\Common\Data\Blueprint::class, 'addAllowedDynamicCallable')) {
-            foreach (['classOptions', 'shippingOptions', 'typeOptions'] as $m) {
+            foreach (['rateOptions', 'shippingOptions', 'typeOptions'] as $m) {
                 try {
                     \Grav\Common\Data\Blueprint::addAllowedDynamicCallable('Grav\\Plugin\\SimpleShop\\Tax\\TaxSettings::' . $m);
                 } catch (\Throwable $e) {

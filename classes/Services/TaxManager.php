@@ -7,8 +7,8 @@ use Grav\Plugin\SimpleShop\Tax\TaxResolver;
 use Grav\Plugin\SimpleShop\Tax\TaxSettings;
 
 /**
- * Raccourcis historiques vers le module de taxes (Tax\TaxSettings, Tax\TaxResolver) : base de saisie des prix, classe et
- * taux par défaut du site à l'adresse de la boutique. Le calcul d'un produit passe par Product\Catalog (taxe de sa classe).
+ * Raccourcis historiques vers le module de taxes (Tax\TaxSettings, Tax\TaxResolver) : base de saisie des prix, taux par
+ * défaut du site à l'adresse de la boutique. Le calcul d'un produit passe par Product\Catalog (taxe de son taux).
  */
 final class TaxManager
 {
@@ -17,30 +17,30 @@ final class TaxManager
         return (array) Grav::instance()['config']->get('plugins.simple-shop', []);
     }
 
-    /** @return array<string, array{label: string, rate: float}> Classes de taxe et leur taux à l'adresse de la boutique. */
+    /** @return array<string, array{label: string, rate: float}> Taux (clé → nom, taux à l'adresse de la boutique). */
     public static function rates(?array $config = null): array
     {
         $settings = TaxSettings::fromConfig($config ?? self::config());
         $out = [];
-        foreach ($settings['classes'] as $code => $label) {
-            $out[$code] = ['label' => $label, 'rate' => TaxResolver::forClass($code, null, $config ?? self::config())->toDecimal()];
+        foreach ($settings['names'] as $code => $label) {
+            $out[$code] = ['label' => $label, 'rate' => TaxResolver::forRate($code, null, $config ?? self::config())->toDecimal()];
         }
 
         return $out;
     }
 
-    /** Classe de taxe par défaut du site. */
+    /** Taux par défaut du site (clé). */
     public static function defaultCode(?array $config = null): string
     {
-        return TaxSettings::fromConfig($config ?? self::config())['default_class'];
+        return TaxSettings::fromConfig($config ?? self::config())['default_rate'];
     }
 
-    /** Taux de la classe par défaut à l'adresse de la boutique (ex. 0.2). */
+    /** Taux par défaut à l'adresse de la boutique (ex. 0.2). */
     public static function defaultRate(?array $config = null): float
     {
         $config ??= self::config();
 
-        return TaxResolver::forClass(self::defaultCode($config), null, $config)->toDecimal();
+        return TaxResolver::forRate(self::defaultCode($config), null, $config)->toDecimal();
     }
 
     /** Vrai si les prix des produits sont saisis hors taxe (défaut). */

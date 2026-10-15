@@ -8,9 +8,9 @@ use Grav\Plugin\SimpleShop\Pricing\TaxComponent;
 use Grav\Plugin\SimpleShop\Pricing\TaxRate;
 
 /**
- * Taxe applicable à une classe, pour une adresse, et taxe des frais de livraison (voir TaxSettings).
+ * Taxe d'un taux nommé (ex. « Taux réduit ») à une adresse, et taxe des frais de livraison (voir TaxSettings).
  *
- * Résolution (comme WooCommerce) : parmi les lignes de la classe, pour chaque priorité, la ligne la plus précise qui
+ * Résolution (comme WooCommerce) : parmi les lignes de ce nom, pour chaque priorité, la ligne la plus précise qui
  * correspond à l'adresse (code postal > région > pays > toutes) ; les taux retenus s'additionnent, les « composés »
  * s'appliquent ensuite. Aucune ligne : pas de taxe.
  *
@@ -43,7 +43,15 @@ final class TaxResolver
             try {
                 $rates = $settings['rates'];
                 Grav::instance()->fireEvent('onSimpleShopTaxRates', new \RocketTheme\Toolbox\Event\Event(['rates' => &$rates, 'settings' => $settings]));
-                $settings['rates'] = array_values(array_filter(array_map([TaxSettings::class, 'normalizeRate'], (array) $rates)));
+                $out = [];
+                foreach ((array) $rates as $row) {
+                    $n = TaxSettings::normalizeRate($row);
+                    if ($n !== null) {
+                        $n['key'] = $settings['aliases'][$n['key']] ?? $n['key'];
+                        $out[] = $n;
+                    }
+                }
+                $settings['rates'] = $out;
             } catch (\Throwable $e) {
             }
             self::$settings[$key] = $settings;
@@ -77,8 +85,18 @@ final class TaxResolver
         return new TaxLocation((string) ($address['country'] ?? $s['shop']['country']), (string) ($address['region'] ?? ''), $postcode);
     }
 
-    /** Taxe d'une classe à une adresse (adresse par défaut : location()). */
-    public static function forClass(string $class, ?TaxLocation $location = null, ?array $config = null): TaxRate
+    /** Clé du taux désigné par un nom, une clé ou un ancien code (« reduit », « TVA_5_5 ») ; '' si inconnu. */
+    public static function resolve(string $ref, ?array $config = null): string
+    {
+        $s = self::settings($config);
+        $k = TaxSettings::key($ref);
+        $k = $s['aliases'][$k] ?? $k;
+
+        return isset($s['names'][$k]) ? $k : '';
+    }
+
+    /** Taxe d'un taux (nom ou clé ; inconnu : taux par défaut) à une adresse (par défaut : location()). */
+    public static function forRate(string $name, ?TaxLocation $location = null, ?array $config = null): TaxRate
     {
         $s = self::settings($config);
         if (!$s['enabled']) {
@@ -87,15 +105,12 @@ final class TaxResolver
         if ($s['small_business']['enabled']) {
             return new TaxRate('franchise', 0, [new TaxComponent('Franchise en base', 0, false, true, 'E', $s['small_business']['mention'])]);
         }
-        $class = $s['legacy_codes'][$class] ?? $class;
-        if (!isset($s['classes'][$class])) {
-            $class = $s['default_class'];
-        }
+        $key = self::resolve($name, $config) ?: $s['default_rate'];
         $location ??= self::location($s);
 
         $best = [];
         foreach ($s['rates'] as $row) {
-            if ($row['class'] !== $class) {
+            if ($row['key'] !== $key) {
                 continue;
             }
             $score = $location->match($row);
@@ -110,35 +125,35 @@ final class TaxResolver
         ksort($best);
         $components = [];
         foreach ($best as [, $row]) {
-            $components[] = new TaxComponent($row['name'], $row['bp'], $row['compound'], $row['shipping'], $row['category'], $row['mention']);
+            $components[] = new TaxComponent($row['label'], $row['bp'], $row['compound'], $row['shipping'], $row['category'], $row['mention']);
         }
         if ($components === []) {
-            return new TaxRate($class, 0, [new TaxComponent('Sans taxe', 0, false, true, 'O')]);
+            return new TaxRate($key, 0, [new TaxComponent('Sans taxe', 0, false, true, 'O')]);
         }
 
         return count($components) === 1 && !$components[0]->compound
-            ? new TaxRate($class, $components[0]->basisPoints, $components)
-            : TaxRate::fromComponents($class, $components);
+            ? new TaxRate($key, $components[0]->basisPoints, $components)
+            : TaxRate::fromComponents($key, $components);
     }
 
-    /** Classe d'un produit : fiche (`tax_class`) > administration (type → classe) > blueprint (`shop.tax`) > classe par défaut. */
-    public static function classFor(?string $typeName, ?string $blueprintTax = null, array $header = [], ?array $config = null): string
+    /** Taux d'un produit (clé) : fiche (`tax_rate`) > administration (type → taux) > blueprint (`shop.tax`) > taux par défaut. */
+    public static function rateFor(?string $typeName, ?string $blueprintTax = null, array $header = [], ?array $config = null): string
     {
         $s = self::settings($config);
-        foreach ([(string) ($header['tax_class'] ?? ''), $s['types'][(string) $typeName] ?? '', (string) $blueprintTax] as $candidate) {
-            $candidate = $s['legacy_codes'][$candidate] ?? $candidate;
-            if ($candidate !== '' && isset($s['classes'][$candidate])) {
-                return $candidate;
+        foreach ([(string) (($header['tax_rate'] ?? '') ?: ($header['tax_class'] ?? '')), $s['types'][(string) $typeName] ?? '', (string) $blueprintTax] as $candidate) {
+            $k = $candidate !== '' ? self::resolve($candidate, $config) : '';
+            if ($k !== '') {
+                return $k;
             }
         }
 
-        return $s['default_class'];
+        return $s['default_rate'];
     }
 
     /**
-     * Taxe(s) des frais de livraison d'un colis, d'après la classe de ses articles expédiés.
+     * Taxe(s) des frais de livraison d'un colis, d'après le taux de ses articles expédiés.
      *
-     * @param array<string, int> $mix Classe → montant HT (centimes) des articles expédiés.
+     * @param array<string, int> $mix Clé de taux → montant HT (centimes) des articles expédiés.
      *
      * @return list<array{rate: ?TaxRate, weight: int}> Une part par taxe ; `rate` null = part non taxée.
      */
@@ -148,14 +163,14 @@ final class TaxResolver
         $mix = array_filter($mix, static fn ($v) => (int) $v > 0);
         $mode = $s['shipping_tax'];
         if (!in_array($mode, TaxSettings::SHIPPING_MODES, true)) {
-            return [['rate' => self::forClass($mode, $location, $config)->forShipping(), 'weight' => 1]];
+            return [['rate' => self::forRate($mode, $location, $config)->forShipping(), 'weight' => 1]];
         }
         if ($mix === []) {
-            $mix = [$s['default_class'] => 1];
+            $mix = [$s['default_rate'] => 1];
         }
         $parts = [];
-        foreach ($mix as $class => $ht) {
-            $parts[] = ['rate' => self::forClass((string) $class, $location, $config)->forShipping(), 'weight' => (int) $ht];
+        foreach ($mix as $key => $ht) {
+            $parts[] = ['rate' => self::forRate((string) $key, $location, $config)->forShipping(), 'weight' => (int) $ht];
         }
         if ($mode === 'items') {
             usort($parts, static fn ($a, $b) => ($b['rate']?->basisPoints ?? -1) <=> ($a['rate']?->basisPoints ?? -1));
@@ -163,7 +178,7 @@ final class TaxResolver
             return [['rate' => $parts[0]['rate'], 'weight' => 1]];
         }
 
-        // Prorata : les classes de même taxe sont regroupées.
+        // Prorata : les taux de même taxe sont regroupés.
         $merged = [];
         foreach ($parts as $p) {
             $key = $p['rate'] ? $p['rate']->code . '|' . $p['rate']->basisPoints : '-';

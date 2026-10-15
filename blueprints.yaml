@@ -50,7 +50,7 @@ form:
     taxes_fieldset:
       type: fieldset
       title: Taxes
-      help: "Comme WooCommerce : chaque type de produit a une CLASSE de taxe (ex. livres → Taux réduit), et chaque classe une liste de TAUX par pays (ou région, codes postaux). Valeurs par défaut : TVA française."
+      help: "Chaque type de produit choisit un TAUX par son nom (ex. livres → Taux réduit) ; un même nom peut avoir des lignes pour d'autres pays (vente à l'étranger). Valeurs par défaut : TVA française."
       fields:
         taxes.enabled:
           type: toggle
@@ -93,13 +93,13 @@ form:
         taxes.shop.postcode:
           type: text
           label: Code postal de la boutique
-        taxes.default_class:
+        taxes.default_rate:
           type: select
-          label: Classe de taxe par défaut
-          help: "Pour un produit dont le type n'a pas de classe."
-          default: standard
-          data-options@: '\Grav\Plugin\SimpleShop\Tax\TaxSettings::classOptions'
-          options: { standard: 'Taux normal', intermediaire: 'Taux intermédiaire', reduit: 'Taux réduit', particulier: 'Taux particulier', zero: 'Taux zéro', exonere: 'Exonéré' }
+          label: Taux par défaut
+          help: "Pour un produit dont le type n'a pas de taux."
+          default: 'Taux normal'
+          data-options@: '\Grav\Plugin\SimpleShop\Tax\TaxSettings::rateOptions'
+          options: { 'Taux normal': 'Taux normal', 'Taux intermédiaire': 'Taux intermédiaire', 'Taux réduit': 'Taux réduit', 'Taux particulier': 'Taux particulier', 'Taux zéro': 'Taux zéro', 'Exonéré': 'Exonéré' }
         taxes.small_business.enabled:
           type: toggle
           label: Franchise en base de TVA
@@ -112,36 +112,30 @@ form:
           type: text
           label: Mention de franchise
           default: 'TVA non applicable, art. 293 B du CGI'
-        taxes.classes:
-          type: list
-          label: Classes de taxe
-          help: "Code (lettres, chiffres, tiret) et libellé. Les commandes passées gardent leur taxe."
-          style: vertical
-          fields:
-            .code:
-              type: text
-              label: Code
-              placeholder: reduit
-              validate: { required: true, pattern: '[A-Za-z0-9_-]{1,40}' }
-            .label:
-              type: text
-              label: Libellé
-              placeholder: Taux réduit
         taxes.rates:
           type: list
           label: Taux
-          help: "Pour une classe et une adresse, on retient à chaque priorité la ligne la plus précise (code postal, puis région, puis pays, puis « tous ») ; plusieurs priorités = plusieurs taxes cumulées."
+          help: "Les types de produits et les fiches choisissent un taux par son nom. Pour vendre ailleurs, ajouter une ligne du même nom avec un autre pays (ex. « Taux réduit », BE, 6 %) : à l'adresse du client, on retient la ligne la plus précise (code postal, puis région, puis pays, puis « tous »). Deux priorités différentes = deux taxes cumulées."
           style: vertical
           fields:
-            .class:
-              type: select
-              label: Classe
-              data-options@: '\Grav\Plugin\SimpleShop\Tax\TaxSettings::classOptions'
-              options: { standard: 'Taux normal', intermediaire: 'Taux intermédiaire', reduit: 'Taux réduit', particulier: 'Taux particulier', zero: 'Taux zéro', exonere: 'Exonéré' }
+            .name:
+              type: text
+              label: Nom
+              placeholder: Taux réduit
+              validate: { required: true }
+            .rate:
+              type: text
+              label: Taux (%)
+              placeholder: '5.5'
+              validate: { required: true, pattern: '[0-9]+([.,][0-9]{1,4})?' }
             .country:
               type: text
-              label: Pays (vide = tous)
+              label: Pays (code à deux lettres ; vide = tous)
               placeholder: FR
+            .label:
+              type: text
+              label: Libellé sur la facture (facultatif)
+              placeholder: TVA 5,5 %
             .region:
               type: text
               label: Région (code, facultatif)
@@ -149,15 +143,6 @@ form:
               type: text
               label: Codes postaux (facultatif)
               help: "Séparés par « ; ». « 20* » = commence par 20 ; « 97100...97199 » = intervalle."
-            .rate:
-              type: text
-              label: Taux (%)
-              placeholder: '5.5'
-              validate: { required: true, pattern: '[0-9]+([.,][0-9]{1,4})?' }
-            .name:
-              type: text
-              label: Nom (affiché et sur la facture)
-              placeholder: TVA 5,5 %
             .priority:
               type: number
               label: Priorité
@@ -192,19 +177,19 @@ form:
               placeholder: 'TVA non applicable, art. 261-4-4°-a du CGI'
         taxes.types:
           type: list
-          label: Classe de chaque type de produit
-          help: "Remplace la classe déclarée dans le blueprint du type (ex. book → Taux réduit). Une fiche peut aussi avoir sa propre classe."
+          label: Taux de chaque type de produit
+          help: "Remplace le taux déclaré dans le blueprint du type (ex. book → Taux réduit). Une fiche peut aussi avoir son propre taux."
           style: vertical
           fields:
             .type:
               type: select
               label: Type de produit
               data-options@: '\Grav\Plugin\SimpleShop\Tax\TaxSettings::typeOptions'
-            .class:
+            .rate:
               type: select
-              label: Classe de taxe
-              data-options@: '\Grav\Plugin\SimpleShop\Tax\TaxSettings::classOptions'
-              options: { standard: 'Taux normal', intermediaire: 'Taux intermédiaire', reduit: 'Taux réduit', particulier: 'Taux particulier', zero: 'Taux zéro', exonere: 'Exonéré' }
+              label: Taux
+              data-options@: '\Grav\Plugin\SimpleShop\Tax\TaxSettings::rateOptions'
+              options: { 'Taux normal': 'Taux normal', 'Taux intermédiaire': 'Taux intermédiaire', 'Taux réduit': 'Taux réduit', 'Taux particulier': 'Taux particulier', 'Taux zéro': 'Taux zéro', 'Exonéré': 'Exonéré' }
 
     delivery_fieldset:
       type: fieldset

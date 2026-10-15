@@ -3,7 +3,7 @@
 namespace Grav\Plugin\SimpleShop\Pricing;
 
 /**
- * Taxe applicable à un montant : code (classe de taxe, ex. `reduit`, ou ancien code `TVA_5_5`) et taux effectif en points
+ * Taxe applicable à un montant : code (clé du taux, ex. `taux-reduit`, ou ancien code `reduit` / `TVA_5_5`) et taux effectif en points
  * de base (550 = 5,5 %), composée d'une ou plusieurs taxes élémentaires (TaxComponent : ex. taxe fédérale + taxe de
  * province, priorités et taxes composées comme dans WooCommerce). Une seule composante dans le cas courant. Immuable.
  */

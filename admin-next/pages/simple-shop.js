@@ -1412,8 +1412,8 @@
          */
         showTaxes() {
             var self = this;
-            var COLS = ['classe', 'pays', 'region', 'codes_postaux', 'taux', 'nom', 'priorite', 'composee', 'livraison', 'categorie', 'mention'];
-            var KEYS = ['class', 'country', 'region', 'postcodes', 'rate', 'name', 'priority', 'compound', 'shipping', 'category', 'mention'];
+            var COLS = ['nom', 'taux', 'pays', 'region', 'codes_postaux', 'libelle', 'priorite', 'composee', 'livraison', 'categorie', 'mention'];
+            var KEYS = ['name', 'rate', 'country', 'region', 'postcodes', 'label', 'priority', 'compound', 'shipping', 'category', 'mention'];
             var box = h('div');
             var SHIPPING = { items: 'selon les articles du panier (panier mixte : taux le plus élevé)', items_prorata: 'selon les articles, au prorata du HT' };
             var BASED = { shipping: 'adresse de livraison du client', billing: 'adresse de facturation du client', shop: 'adresse de la boutique' };
@@ -1438,10 +1438,10 @@
                 var rows = [];
                 lines.forEach(function (line, i) {
                     var c = line.split(delim).map(function (x) { return x.trim().replace(/^"|"$/g, ''); });
-                    if (i === 0 && c[0].toLowerCase() === 'classe') { return; }
+                    if (i === 0 && c[0].toLowerCase() === 'nom') { return; }
                     var yes = function (v, d) { return v === '' || v === undefined ? d : /^(oui|yes|1|true|vrai)$/i.test(v); };
-                    rows.push({ class: c[0], country: c[1] || '', region: c[2] || '', postcodes: c[3] || '', rate: (c[4] || '').replace(',', '.'),
-                        name: c[5] || '', priority: parseInt(c[6] || '1', 10) || 1, compound: yes(c[7], false), shipping: yes(c[8], true),
+                    rows.push({ name: c[0], rate: (c[1] || '').replace(',', '.'), country: c[2] || '', region: c[3] || '', postcodes: c[4] || '',
+                        label: c[5] || '', priority: parseInt(c[6] || '1', 10) || 1, compound: yes(c[7], false), shipping: yes(c[8], true),
                         category: c[9] || '', mention: c[10] || '' });
                 });
                 return rows;
@@ -1451,20 +1451,20 @@
                 box.innerHTML = '';
                 box.appendChild(h('p', {}, (t.enabled ? 'Taxes activées' : 'Taxes désactivées') + ' ; prix des fiches saisis ' + t.prices_entered.toUpperCase()
                     + ' ; taux calculé d’après l’' + (BASED[t.based_on] || t.based_on) + ' ; livraison : '
-                    + (SHIPPING[t.shipping_tax] || ('toujours la classe « ' + (t.classes[t.shipping_tax] || t.shipping_tax) + ' »')) + '.'));
+                    + (SHIPPING[t.shipping_tax] || ('toujours « ' + t.shipping_tax + ' »')) + '.'));
                 if (t.small_business.enabled) { box.appendChild(h('p', { class: 'ss-muted' }, 'Franchise en base : ' + t.small_business.mention)); }
 
-                box.appendChild(h('h3', {}, 'Classes des types de produits'));
+                box.appendChild(h('h3', {}, 'Taux des types de produits'));
                 box.appendChild(h('table', {}, h('tbody', {}, Object.keys(t.types).map(function (type) {
-                    return h('tr', {}, h('td', {}, type), h('td', {}, t.classes[t.types[type]] || t.types[type]));
-                }).concat([h('tr', {}, h('td', { class: 'ss-muted' }, 'autres produits'), h('td', {}, t.classes[t.default_class] || t.default_class))]))));
+                    return h('tr', {}, h('td', {}, type), h('td', {}, t.types[type]));
+                }).concat([h('tr', {}, h('td', { class: 'ss-muted' }, 'autres produits'), h('td', {}, t.default_rate))]))));
 
                 box.appendChild(h('h3', {}, 'Taux (' + t.rates.length + ')'));
-                box.appendChild(h('table', {}, h('thead', {}, h('tr', {}, ['Classe', 'Pays', 'Région', 'Codes postaux', 'Taux', 'Nom', 'Priorité', 'Composée', 'Livraison', 'Catégorie', 'Mention']
+                box.appendChild(h('table', {}, h('thead', {}, h('tr', {}, ['Nom', 'Taux', 'Pays', 'Région', 'Codes postaux', 'Libellé (facture)', 'Priorité', 'Composée', 'Livraison', 'Catégorie', 'Mention']
                     .map(function (l) { return h('th', { scope: 'col' }, l); }))),
                     h('tbody', {}, t.rates.map(function (r) {
-                        return h('tr', {}, h('td', {}, t.classes[r.class] || r.class), h('td', {}, r.country || 'tous'), h('td', {}, r.region), h('td', {}, r.postcodes),
-                            h('td', { class: 'ss-num' }, String(r.rate).replace('.', ',') + ' %'), h('td', {}, r.name), h('td', { class: 'ss-num' }, String(r.priority)),
+                        return h('tr', {}, h('td', {}, r.name), h('td', { class: 'ss-num' }, String(r.rate).replace('.', ',') + ' %'), h('td', {}, r.country || 'tous'),
+                            h('td', {}, r.region), h('td', {}, r.postcodes), h('td', {}, r.label), h('td', { class: 'ss-num' }, String(r.priority)),
                             h('td', {}, r.compound ? 'oui' : 'non'), h('td', {}, r.shipping ? 'oui' : 'non'), h('td', {}, r.category), h('td', {}, r.mention));
                     }))));
 
@@ -1487,7 +1487,7 @@
                     } }, 'Exporter les taux en CSV'),
                     h('button', { class: 'ss-btn', type: 'button', onclick: function () { file.click(); } }, 'Importer un CSV (remplace les taux)…'), file));
                 box.appendChild(h('p', { class: 'ss-muted' }, 'CSV : colonnes ' + COLS.join(' ; ') + ' (séparateur « ; », virgule décimale, oui/non). '
-                    + 'Classes, réglages et taux un par un : Plugins > Simple Shop > Taxes.'));
+                    + 'Réglages et taux un par un : Plugins > Simple Shop > Taxes.'));
             }
 
             function load() {
