@@ -42,38 +42,35 @@ Extraits le 15/10/2026 du dépôt du site `senonevero.flavieng.com` (`private/gr
 
 - Grav 2.0 est installé **une fois** dans `/shared/grav-2/` et sert plusieurs domaines (`/domains/<domaine>/private/grav` = dossier
   `user://` de chaque site, routeur global `www/index.php`, routeur de domaine `shared/manager/grav/Domain.php`).
-- Ce plugin est déployé dans **`/shared/grav-2/user/plugins/simple-shop/`**, partagé par tous les domaines.
+- Ce plugin est déployé dans **`/shared/grav-2/user/plugins/simple-shop/`** (chemin absolu chez OVH : `/home/<identifiant>/shared/…`), partagé par tous les domaines.
 - Grav cherche un plugin d'abord dans le dossier du site (`user://plugins`, soit `/domains/<domaine>/private/grav/plugins/simple-shop`),
   **puis** dans le dossier partagé. Une copie restée dans un site masque donc la version partagée : la supprimer de ce site
   pour qu'il utilise la version partagée.
-- **Désactivé par défaut** (`enabled: false` dans `simple-shop.yaml`), puisque le dossier est commun à tous les domaines : chaque site
+- **Désactivé par défaut**, comme tous les plugins `mvc` et `simple-shop-*` (`enabled: false` dans `simple-shop.yaml`), puisque le dossier est commun à tous les domaines : chaque site
   l'active dans sa propre configuration (`user/config/plugins/simple-shop.yaml` : `enabled: true`, ou Admin2 > Plugins).
 - Fichiers publics : le routeur de domaine ne sert depuis `/user/plugins/…` que les ressources statiques (CSS, JS, images, polices) ;
   `.php`, `.yaml`, `.md`, `.json`, `.lock`… répondent 403.
 
-## Déploiement (GitHub Actions → FTP)
+## Déploiement (GitHub Actions → rsync sur SSH)
 
-Chaque push sur `main` lance `.github/workflows/deploy.yml` :
+Chaque push sur `main` lance `.github/workflows/deploy.yml` (même principe que « Deploy to OVH via rsync/ssh » du site) :
 1. **Contrôle** : `php -l` sur tous les fichiers PHP (hors bibliothèques tierces).
-2. **Envoi FTP** (action `SamKirkland/FTP-Deploy-Action`) vers `/shared/grav-2/user/plugins/simple-shop/` : seuls les fichiers
-   **modifiés depuis le dernier envoi** partent (état mémorisé sur le serveur dans `.ftp-deploy-sync-state.json`) ; un fichier
-   supprimé du dépôt est supprimé du serveur ; les fichiers que le dépôt n'a jamais envoyés ne sont **jamais** touchés.
-   Exclus : `.git*`, `.github/`, `tests/`, `docs/`, `AGENTS.md`.
-3. Relance à la main possible : onglet *Actions* → *Déploiement FTP* → *Run workflow*.
+2. **Envoi** : `rsync --delete` sur SSH (mot de passe via `sshpass`) vers `/home/<identifiant>/shared/grav-2/user/plugins/simple-shop/`.
+   Le dossier du plugin devient l'image exacte du dépôt (un fichier supprimé du dépôt disparaît du serveur), sauf `.git*`,
+   `.github/`, `tests/`, `docs/`, `AGENTS.md`, jamais envoyés. Rien n'est touché en dehors de `…/plugins/simple-shop/`.
+3. Relance à la main : onglet *Actions* → *Déploiement (rsync/ssh)* → *Run workflow* (ou *Re-run all jobs* d'une exécution).
 
-**Mise en place (une fois par dépôt)** — GitHub → dépôt `flavi1/grav-simple-shop` → *Settings* → *Secrets and variables* → *Actions* :
-- onglet *Secrets* → *New repository secret*, trois fois :
-  - `FTP_SERVER` : hôte FTP de l'hébergement (ex. `ftp.clusterXXX.hosting.ovh.net`, voir l'espace client OVH → Hébergement → *FTP - SSH*) ;
-  - `FTP_USERNAME` : identifiant FTP ;
-  - `FTP_PASSWORD` : mot de passe FTP.
-- onglet *Variables* (facultatif, valeurs par défaut entre parenthèses) :
-  - `FTP_PLUGINS_DIR` (`/shared/grav-2/user/plugins/`) : dossier des plugins **tel que vu à la connexion FTP**, avec `/` final ;
-  - `FTP_PROTOCOL` (`ftps`) : mettre `ftp` si le serveur refuse le FTP chiffré ;
-  - `FTP_PORT` (`21`).
-- Avec l'outil `gh` : `gh secret set FTP_SERVER -R flavi1/grav-simple-shop` (idem pour les deux autres ; la valeur est demandée, rien n'est affiché).
+**Mise en place (une fois par dépôt)** — GitHub → dépôt `flavi1/grav-simple-shop` → *Settings* → *Secrets and variables* → *Actions*.
+Les noms gardent le préfixe `FTP_` (premier essai en FTP) mais ce sont les identifiants de l'hébergement, valables aussi en SSH :
+- *Secrets* : `FTP_SERVER` (hôte, ex. `ftp.clusterNNN.hosting.ovh.net` ; le workflow essaie aussi `ssh.clusterNNN.hosting.ovh.net`),
+  `FTP_USERNAME` (identifiant de l'hébergement), `FTP_PASSWORD`.
+- *Variables* (facultatives) :
+  - `FTP_PLUGINS_DIR` : chemin **absolu** du dossier des plugins partagés, avec ou sans `/` final ; par défaut
+    `/home/<FTP_USERNAME>/shared/grav-2/user/plugins` (chemin d'un hébergement OVH) ;
+  - `SSH_HOST` : hôte SSH s'il diffère des deux ci-dessus ; `SSH_PORT` (`22`).
+- SSH doit être ouvert sur l'hébergement (offre OVH Pro ou supérieure : c'est déjà le cas pour le déploiement du site).
 
-Premier envoi : tous les fichiers partent (quelques minutes). Si le dossier existait déjà (copie manuelle), il est complété et
-mis à jour, sans suppression de fichiers inconnus. Vérifier ensuite par FTP la présence de `simple-shop.php` dans le dossier attendu.
+Vérification : le journal de l'étape « Envoi » liste les fichiers transmis ; `simple-shop.php` doit être présent dans le dossier.
 
 ## Environnement de développement
 

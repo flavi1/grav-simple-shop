@@ -1,6 +1,7 @@
-# Déploiement du plugin dans le dossier partagé de Grav (/shared/grav-2/user/plugins/simple-shop/) par FTP.
-# Mise en place (secrets FTP_SERVER, FTP_USERNAME, FTP_PASSWORD ; variables facultatives) : voir AGENTS.md, « Déploiement ».
-name: Déploiement FTP
+# Déploiement du plugin dans le dossier partagé de Grav (<home>/shared/grav-2/user/plugins/simple-shop/) par rsync sur SSH,
+# comme le site senonevero.flavieng.com, avec les identifiants de l'hébergement (secrets FTP_SERVER, FTP_USERNAME, FTP_PASSWORD).
+# Mise en place et variables facultatives : voir AGENTS.md, « Déploiement ».
+name: Déploiement (rsync/ssh)
 
 on:
   push:
@@ -8,7 +9,7 @@ on:
   workflow_dispatch:
 
 concurrency:
-  group: deploy-ftp
+  group: deploy
   cancel-in-progress: false
 
 jobs:
@@ -28,36 +29,44 @@ jobs:
           find . -name '*.php' -not -path './.git/*' -not -path './vendor/*' -print0 | xargs -0 -n1 -P4 php -l > /dev/null
 
   deploy:
-    name: Envoi FTP
+    name: Envoi rsync/ssh
     needs: lint
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
-      - name: Secrets FTP présents ?
+      - name: Outils (sshpass, rsync)
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq sshpass rsync > /dev/null
+      - name: Envoi vers le dossier partagé des plugins
         env:
-          FTP_SERVER: ${{ secrets.FTP_SERVER }}
-          FTP_USERNAME: ${{ secrets.FTP_USERNAME }}
-          FTP_PASSWORD: ${{ secrets.FTP_PASSWORD }}
+          SSHPASS: ${{ secrets.FTP_PASSWORD }}
+          REMOTE_HOST: ${{ secrets.FTP_SERVER }}
+          REMOTE_USER: ${{ secrets.FTP_USERNAME }}
+          PLUGINS_DIR: ${{ vars.FTP_PLUGINS_DIR }}
+          SSH_HOST: ${{ vars.SSH_HOST }}
+          SSH_PORT: ${{ vars.SSH_PORT || '22' }}
         run: |
-          if [ -z "$FTP_SERVER" ] || [ -z "$FTP_USERNAME" ] || [ -z "$FTP_PASSWORD" ]; then
+          set -euo pipefail
+          if [ -z "$SSHPASS" ] || [ -z "$REMOTE_HOST" ] || [ -z "$REMOTE_USER" ]; then
             echo "::error::Secrets FTP_SERVER / FTP_USERNAME / FTP_PASSWORD absents : voir AGENTS.md, « Déploiement »."
             exit 1
           fi
-      - name: Envoi vers ${{ vars.FTP_PLUGINS_DIR || '/shared/grav-2/user/plugins/' }}simple-shop/
-        uses: SamKirkland/FTP-Deploy-Action@v4.3.5
-        with:
-          server: ${{ secrets.FTP_SERVER }}
-          username: ${{ secrets.FTP_USERNAME }}
-          password: ${{ secrets.FTP_PASSWORD }}
-          protocol: ${{ vars.FTP_PROTOCOL || 'ftps' }}
-          port: ${{ vars.FTP_PORT || 21 }}
-          server-dir: ${{ vars.FTP_PLUGINS_DIR || '/shared/grav-2/user/plugins/' }}simple-shop/
-          exclude: |
-            **/.git*
-            **/.git*/**
-            .github/**
-            tests/**
-            docs/**
-            AGENTS.md
+          # Dossier : variable FTP_PLUGINS_DIR (avec ou sans « / » final), sinon /home/<identifiant>/shared/grav-2/user/plugins (OVH).
+          DIR="${PLUGINS_DIR:-/home/$REMOTE_USER/shared/grav-2/user/plugins}"
+          DIR="${DIR%/}"
+          # Hôte SSH : variable SSH_HOST, sinon FTP_SERVER ; chez OVH, « ftp.clusterNNN… » a pour équivalent SSH « ssh.clusterNNN… ».
+          SSH_OPTS="-p $SSH_PORT -o StrictHostKeyChecking=accept-new -o ConnectTimeout=20 -o PubkeyAuthentication=no"
+          HOST=""
+          for h in $SSH_HOST $REMOTE_HOST $(echo "$REMOTE_HOST" | sed -n 's/^ftp\./ssh./p'); do
+            if sshpass -e ssh $SSH_OPTS "$REMOTE_USER@$h" "test -d '$DIR'" 2>/tmp/ssh.err; then HOST="$h"; break; fi
+            echo "Connexion ou dossier refusé via un des hôtes essayés : $(tail -1 /tmp/ssh.err || true)"
+          done
+          if [ -z "$HOST" ]; then
+            echo "::error::Connexion SSH impossible, ou dossier $DIR absent (voir AGENTS.md, « Déploiement »)."
+            exit 1
+          fi
+          sshpass -e rsync -rltzvO --delete \
+            --exclude '/.git' --exclude '/.github' --exclude '/.gitignore' --exclude '/tests' --exclude '/docs' --exclude '/AGENTS.md' \
+            --exclude '/.ftp-deploy-sync-state.json' \
+            -e "ssh $SSH_OPTS" ./ "$REMOTE_USER@$HOST:$DIR/simple-shop/"
