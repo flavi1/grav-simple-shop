@@ -398,6 +398,7 @@ class CustomerManager
 
         if ($sessionCode && hash_equals((string) $sessionCode, (string) $inputCode)) {
             $this->session->shop_order->email_verified = true;
+            $this->regenerateSessionId();
             
             // Nettoyage complet de l'état OTP au succès (Dette #6)
             unset(
@@ -539,6 +540,7 @@ class CustomerManager
 
         $this->setCustomerData($customerData);
         $this->session->shop_order->email_verified = true;
+        $this->regenerateSessionId();
 
         // Restauration conditionnelle de l'ancien panier (uniquement si le
         // panier courant est vide). ⚠️ Dette : les quantités restaurées ne
@@ -721,6 +723,23 @@ class CustomerManager
         $this->clearRememberCookie();
 
         unset($this->session->shop_order);
+        $this->regenerateSessionId();
+    }
+
+    /**
+     * Nouvel identifiant de session (données conservées) à chaque changement d'identité : client identifié (code OTP,
+     * cookie « Se souvenir de moi ») ou déconnecté. Empêche la fixation de session (un identifiant imposé avant
+     * l'identification ne donne pas accès au compte ensuite).
+     */
+    private function regenerateSessionId(): void
+    {
+        try {
+            if (method_exists($this->session, 'regenerateId') && session_status() === PHP_SESSION_ACTIVE && !headers_sent()) {
+                $this->session->regenerateId();
+            }
+        } catch (\Throwable $e) {
+            $this->grav['log']->warning('[SimpleShop] Renouvellement de session impossible : ' . $e->getMessage());
+        }
     }
     
     /**

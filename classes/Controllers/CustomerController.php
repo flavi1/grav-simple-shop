@@ -130,18 +130,6 @@ class CustomerController extends AbstractController
     private const BANNED_MESSAGE = 'Cette adresse e-mail est bannie. Veuillez nous contacter.';
 
     /**
-     * Secret de repli utilisé pour signer les liens de désabonnement
-     * newsletter si aucune configuration dédiée n'est définie.
-     *
-     * ⚠️ Peu robuste : à ne considérer que comme filet de sécurité. Il est
-     * recommandé de définir `plugins.simple-shop.newsletter_unsubscribe_secret`
-     * dans la configuration du plugin (blueprint à exposer, cf. rappel).
-     *
-     * @var string
-     */
-    private const UNSUBSCRIBE_SECRET_FALLBACK = 'simple-shop-unsubscribe-secret';
-
-    /**
      * Récupère le gestionnaire client depuis le conteneur Grav.
      *
      * @return CustomerManager Le service de gestion du client.
@@ -1023,21 +1011,50 @@ class CustomerController extends AbstractController
      * newsletter (HMAC).
      *
      * Recommandation : définir `plugins.simple-shop.newsletter_unsubscribe_secret`
-     * dans la configuration du plugin. À défaut, on retombe sur le salt
-     * système puis sur l'e-mail de l'auteur du site, moins robustes.
+     * dans la configuration du plugin (16 caractères au moins). À défaut : clé
+     * privée du site (Grav 2), sinon un secret aléatoire propre au site.
      *
      * @return string Le secret à utiliser pour le HMAC.
      */
     private function unsubscribeSecret(): string
     {
-        $config = $this->grav['config'];
+        $configured = (string) $this->grav['config']->get('plugins.simple-shop.newsletter_unsubscribe_secret', '');
+        if (strlen($configured) >= 16) {
+            return $configured;
+        }
 
-        $secret = $config->get('plugins.simple-shop.newsletter_unsubscribe_secret')
-            ?: $config->get('system.security.salt')
-            ?: $config->get('site.author.email')
-            ?: self::UNSUBSCRIBE_SECRET_FALLBACK;
+        // Clé privée du site (Grav 2 : `user/config/security-private.php`, jamais exposée à la configuration ni à Twig),
+        // dérivée pour cet usage. Ne JAMAIS retomber sur une valeur publique (e-mail de l'auteur, constante du code :
+        // ce dépôt est public, les jetons deviendraient falsifiables).
+        if (method_exists(\Grav\Common\Security::class, 'getNonceKey')) {
+            try {
+                return hash_hmac('sha256', 'simple-shop|unsubscribe', \Grav\Common\Security::getNonceKey());
+            } catch (\Throwable $e) {
+            }
+        }
 
-        return (string) $secret;
+        return self::localSecret($this->grav);
+    }
+
+    /** Secret aléatoire propre au site, créé une fois dans `user://data/simple-shop/.secret` (repli). */
+    private static function localSecret($grav): string
+    {
+        $dir = $grav['locator']->findResource('user://data/simple-shop', true, true);
+        $file = $dir . '/.secret';
+        $value = is_file($file) ? trim((string) @file_get_contents($file)) : '';
+        if (strlen($value) < 32) {
+            @mkdir($dir, 0775, true);
+            $value = bin2hex(random_bytes(32));
+            $tmp = $file . '.tmp-' . bin2hex(random_bytes(4));
+            file_put_contents($tmp, $value, LOCK_EX);
+            @chmod($tmp, 0600);
+            if (!@rename($tmp, $file) || !is_file($file)) {
+                @unlink($tmp);
+            }
+            $value = trim((string) @file_get_contents($file)) ?: $value;
+        }
+
+        return $value;
     }
 
     /**

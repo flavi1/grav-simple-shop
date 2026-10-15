@@ -22,6 +22,9 @@ use \RocketTheme\Toolbox\Event\Event;
 
 class CartController extends AbstractController
 {
+    /** Quantité maximale d'une ligne de panier (limite les montants absurdes sur un produit sans stock limité). */
+    public const MAX_LINE_QUANTITY = 999;
+
     public function __construct(?Grav $grav = null, ?\Grav\Plugin\Mvc\Request $request = null)
     {
         parent::__construct($grav, $request);
@@ -369,19 +372,24 @@ class CartController extends AbstractController
 						$options = $type ? $type->options($page, is_array($rawOptions) ? $rawOptions : []) : [];
 					} catch (\InvalidArgumentException $e) {
 						$this->addMessage($e->getMessage(), 'error');
-						return $this->redirect($this->grav['base_url_absolute'] . $productRoute);
+						return $this->redirect($page->url(true));
 					}
 					if (InventoryManager::getProductData($productRoute, $options) === false) {
 						$this->addMessage("Ce produit n'est pas en vente pour le moment.", 'error');
-						return $this->redirect($this->grav['base_url_absolute'] . $productRoute);
+						return $this->redirect($page->url(true));
 					}
 
 					$virtualStock = InventoryManager::getVirtualStock($productRoute);
 					$currentQty = CartStorage::lineQuantity($cartId, CartStorage::lineId($productRoute, $options));
 
+					if ($currentQty >= self::MAX_LINE_QUANTITY) {
+						$this->addMessage("Quantité maximale atteinte pour cet article.", 'notice');
+						return $this->redirect($absoluteCartUrl);
+					}
+
 					if ($virtualStock === 0 && $currentQty === 0) {
 						$this->addMessage("Désolé, l'article est en rupture de stock.", 'error');
-						return $this->redirect($this->grav['base_url_absolute'] . $productRoute);
+						return $this->redirect($page->url(true));
 					}
 
 					$maxAllowable = $virtualStock + $currentQty;
@@ -404,6 +412,7 @@ class CartController extends AbstractController
 					$quantity = $this->post('quantity', FILTER_VALIDATE_INT, false);
 
 					if ($lineId !== null && $quantity !== false) {
+						$quantity = min($quantity, self::MAX_LINE_QUANTITY);
 						if ($quantity > 0) {
 							$virtualStock = InventoryManager::getVirtualStock((string) CartStorage::lineRoute($cartId, $lineId));
 							$currentQty = CartStorage::lineQuantity($cartId, $lineId);

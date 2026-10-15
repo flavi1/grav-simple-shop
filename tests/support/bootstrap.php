@@ -81,6 +81,7 @@ namespace SimpleShopTest {
         public function published(): bool { return ($this->header['published'] ?? true) !== false; }
         public function template(): string { return $this->template; }
         public function route(): string { return $this->route; }
+        public function url($include_host = false): string { return ($include_host ? 'https://shop.test' : '') . $this->route; }
         public function filePath(): ?string { return $this->file; }
         public function path(): ?string { return $this->file ? dirname($this->file) : null; }
     }
