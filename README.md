@@ -1,11 +1,15 @@
 # Simple Shop
 
+> Dépôt : https://github.com/flavi1/grav-simple-shop — plugins associés : `mvc` (requis), `simple-shop-payment-*`,
+> `simple-shop-carrier-*`. Contexte de travail, décisions et historique : `AGENTS.md`.
+
 Plugin e-commerce pour Grav 2.0 : panier, identification du client par code
 à usage unique (OTP) envoyé par e-mail, livraison par zones, paiement
 (passerelles séparées, ex. Stripe), commandes, factures Factur-X et
 administration via l'API et Admin2.
 
-Périmètre : vente à des particuliers (B2C), en euros, un seul taux de TVA.
+Périmètre : vente à des particuliers (B2C) ; devise réglable (`currency`, défaut EUR) ; taxes par table de taux nommés
+(TVA française par défaut, variantes par pays possibles, voir « Taxes »).
 Le plugin sait résoudre toutes les destinations (`Delivery\ZoneResolver` :
 `FR-METRO`, `FR-CORSE`, `FR-OM`, `EU-ZONE-1`, `INTERNATIONAL`) ; les zones
 réellement desservies par un site se règlent dans `plugins.simple-shop.delivery.allowed_zones`
@@ -74,7 +78,7 @@ Au démarrage du paiement, la passerelle enregistre un **instantané** de la com
 `/stripe/webhook` (événement `payment_intent.succeeded`, signature vérifiée avec `webhook_secret`) et
 `Services\OrderFinalizer` crée la commande sans session : même idempotence (référence = PaymentIntent), un seul jeu d'e-mails,
 déstockage identique. Le montant encaissé et le total recalculé du panier doivent correspondre, sinon la commande n'est pas
-créée et l'incident est journalisé pour rapprochement manuel. Configuration pas à pas : `private/prompts/TODO.md`.
+créée et l'incident est journalisé pour rapprochement manuel. Configuration pas à pas : `AGENTS.md` du plugin `simple-shop-payment-stripe`.
 
 ## Types de produits
 
@@ -242,9 +246,16 @@ API (préfixe `/api/v1/simple-shop`), permissions `api.simple-shop.read` /
 `PUT /carrier-constraints` (`{constraints: [...]}`), `POST /carriers/providers/{id}/test`, `GET|POST /bans`,
 `DELETE /bans/{email}`.
 
+## Installation
+
+Dossier `user/plugins/simple-shop/` (sur l'hébergement mutualisé : `/shared/grav-2/user/plugins/simple-shop/`, déployé par
+GitHub Actions, voir `AGENTS.md`). Requiert le plugin `mvc`, plus au moins une passerelle `simple-shop-payment-*`. Tous sont
+**désactivés par défaut** (dossier partagé par plusieurs sites) : les activer dans la configuration du site
+(`user/config/plugins/<nom>.yaml` : `enabled: true`, ou Admin2 > Plugins).
+
 ## Configuration et données
 
-- `simple-shop.yaml` : valeurs par défaut (routes, OTP, zones de livraison, TVA, e-mails de statut…).
+- `simple-shop.yaml` : valeurs par défaut (routes, OTP, zones de livraison, taxes, e-mails de statut…).
 - La configuration réelle du site (`user/config`) n'est **pas** versionnée ni
   déployée : seuls les modèles `*.dist.yaml` le sont, sans secret. Les clés
   Stripe et les identifiants SMTP se saisissent sur le serveur.

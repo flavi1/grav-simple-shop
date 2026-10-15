@@ -1,0 +1,9 @@
+# Outils et fichiers locaux
+.DS_Store
+*.swp
+.idea/
+.vscode/
+# État du déploiement FTP (conservé sur le serveur uniquement)
+.ftp-deploy-sync-state.json
+# Configuration réelle d'un site : jamais dans ce dépôt public
+*-private.php

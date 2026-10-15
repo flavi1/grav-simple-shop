@@ -221,6 +221,13 @@ namespace {
         require $plugins . '/simple-shop/vendor/autoload.php';   // Factur-X, FPDF/FPDI
     }
     // Thème du site : déclare le type de produit « book » (Grav\Theme\Bookstore::bookPrice…). NoJs est doublé plus haut.
+    // Les tests se lancent depuis une copie du site d'origine (plugins voisins + thème bookstore) : voir AGENTS.md.
+    foreach (['/themes/bookstore/bookstore.php', '/plugins/mvc/classes/AbstractController.php', '/plugins/simple-shop-payment-test/classes/Gateways/PaymentGatewayTest.php'] as $needed) {
+        if (!is_file(dirname($plugins) . $needed)) {
+            fwrite(STDERR, "Fichier requis absent : " . dirname($plugins) . $needed . "\nLancer les tests depuis private/grav/plugins/simple-shop d'une copie du site, plugins voisins clonés (AGENTS.md, « Environnement de développement »).\n");
+            exit(2);
+        }
+    }
     require dirname($plugins) . '/themes/bookstore/bookstore.php';
     spl_autoload_register(function ($c) use ($plugins) {
         $map = [
