@@ -31,7 +31,7 @@ use Atgp\FacturX\XsdValidator;
  * bloqué par une imperfection de structure XML) — à re-valider avant mise en
  * production réelle contre le XSD officiel (fourni dans le paquet
  * `atgp/factur-x`, dossier `xsd/`), ou via un outil en ligne dédié (voir
- * NOTES-TODO.md : Testeur Factur-X de la FNFE-MPE).
+ * AGENTS.md : Testeur Factur-X de la FNFE-MPE ; validé le 15/10/2026).
  *
  * Limitations métier assumées (voir échanges de conception) :
  *  - uniquement des clients B2C ;

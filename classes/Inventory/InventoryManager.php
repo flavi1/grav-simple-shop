@@ -205,7 +205,7 @@ class InventoryManager
      * CHAQUE appel comme précédemment.
      *
      * ⚠️ CORRECTIF (bug de performance/verrouillage SQLite, voir
-     * NOTES-TODO.md) : la version précédente ré-exécutait l'intégralité de
+     * docs/HISTORIQUE.md) : la version précédente ré-exécutait l'intégralité de
      * `shop.sql` (plusieurs `CREATE TABLE IF NOT EXISTS`) à CHAQUE appel de
      * cette méthode. Or `getDatabase()` est appelée de très nombreuses fois
      * par requête (`InventoryManager::getProductData()` pour chaque article

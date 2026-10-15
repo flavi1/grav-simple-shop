@@ -82,12 +82,10 @@ La table des factures doit intégrer un champ de statut et un champ de suivi du 
   confirmation de commande envoyé au client (voir `Services\OrderMailer::sendOrderConfirmation()`),
   généré à la demande lors de cet envoi si elle n'existe pas encore en cache.
   Le client ne télécharge donc jamais sa facture lui-même.
-* Interface admin (`/admin/simple-shop-orders`, voir
-  `templates/admin/simple-shop-orders.html.twig`) : chaque commande affiche
-  désormais deux lignes enfants supplémentaires dans le treegrid — « Adresse
-  de livraison » et « Facture » (numéro, lien de téléchargement ADMIN
-  UNIQUEMENT via la route virtuelle `simple-shop-invoice-download`, et
-  formulaire dédié de changement de statut e-reporting).
+* Interface admin : page « Boutique » d'Admin2 (`admin-next/pages/simple-shop.js`, API
+  `/api/v1/simple-shop/*`) : détail de commande avec adresse de livraison, facture
+  (téléchargement réservé à l'administration) et statut e-reporting. (L'ancienne
+  page Admin 1 `/admin/simple-shop-orders` a été retirée le 15/10/2026.)
 
 7. Événement Grav dédié : `onSimpleShopInvoiceStatusChanged`
 
@@ -95,7 +93,7 @@ Chaque changement de statut e-reporting (y compris la création de la facture,
 avec `old_status = null`) déclenche l'événement Grav
 `onSimpleShopInvoiceStatusChanged` (voir
 `InvoiceManager::fireInvoiceStatusChangedEvent()`), symétrique à
-`onSimpleShopOrderStatusChanged` (voir `OrderManager` et `NOTES-TODO.md`).
+`onSimpleShopOrderStatusChanged` (voir `OrderManager`).
 
 Payload de l'événement (accessible via `$event['...']`) :
   - `order_reference` (string)      : référence de la commande concernée ;

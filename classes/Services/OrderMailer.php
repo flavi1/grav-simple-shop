@@ -27,7 +27,7 @@ use Symfony\Component\Mime\Address;
  * dédiés : `templates/email/order-confirmation.html.twig` et
  * `templates/email/order-seller-notify.html.twig`.
  *
- * PIÈCE JOINTE FACTURE (voir CDC-E-REPORTING.md et NOTES-TODO.md) :
+ * PIÈCE JOINTE FACTURE (voir CDC-E-REPORTING.md) :
  * conformément au CDC (« le client reçoit sa facture par mail dès
  * validation du paiement, il ne la télécharge jamais lui-même »), le PDF
  * Factur-X de la commande est généré (à la demande, avec mise en cache

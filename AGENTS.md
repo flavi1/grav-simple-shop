@@ -208,16 +208,10 @@ simple-shop).
   avec les vrais SIRET et n° de TVA du site.
 - [ ] Signaler à Admin2 (getgrav/grav-plugin-admin2) le défaut `media_order` (voir « Pièges connus ») ; Admin2 2.1.9 → 2.1.31 sur le serveur.
 
-## À supprimer par le propriétaire (fichiers devenus inutiles, gardés tels quels lors de la migration)
-| Fichier | Raison |
-|---|---|
-| `templates/admin/simple-shop-carriers.html.twig`, `templates/admin/simple-shop-orders.html.twig` | ancienne administration (Admin 1), remplacée par la page Admin2 ; plus chargés |
-| `css/admin-orders.css` | style de l'ancienne page des commandes |
-| `blueprints/plugins/simple-shop/carriers.yaml` | formulaire transporteurs de l'ancienne administration, remplacé par l'édition validée de l'API |
-| `classes/Delivery/LegalShippingFloor.php` | ancien plancher Darcos, remplacé par les contraintes globales ; plus utilisé |
-| `NOTES-TODO.md` | notes reprises dans le README et ici ; sa section Factur-X décrit l'ancien XML BASIC (dépassée depuis le 14/10/2026) |
-
-Commande : `git rm <chemin>`, commit, push (le déploiement FTP retire le fichier du serveur).
+## Fichiers retirés le 15/10/2026
+Ancienne administration Admin 1 (`templates/admin/`, `css/admin-orders.css`, `blueprints/plugins/simple-shop/carriers.yaml`),
+`classes/Delivery/LegalShippingFloor.php` (remplacé par les contraintes globales), `NOTES-TODO.md` (repris ici et dans le README).
+Aucun code ne les utilisait.
 
 ## Historique
 - `git log` : commits d'origine (messages en français, un par étape).
