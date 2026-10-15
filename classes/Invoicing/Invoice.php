@@ -181,7 +181,8 @@ class Invoice
             }
         }
         if (!empty($this->seller['siret'])) {
-            $pdf->Cell(0, 5, $this->t('SIRET : ' . $this->seller['siret']), 0, 1);
+            $digits = preg_replace('/\D/', '', (string) $this->seller['siret']);
+            $pdf->Cell(0, 5, $this->t((strlen($digits) === 9 ? 'SIREN : ' : 'SIRET : ') . $this->seller['siret']), 0, 1);
         }
         if (!empty($this->seller['vat_number'])) {
             $pdf->Cell(0, 5, $this->t('TVA intracommunautaire : ' . $this->seller['vat_number']), 0, 1);
@@ -230,10 +231,19 @@ class Invoice
 
         $pdf->SetFont('LiberationSans', '', 10);
         foreach ($amounts['lines'] as $line) {
-            $pdf->Cell(90, 7, $this->t($line['title']), 1);
-            $pdf->Cell(20, 7, (string) $line['quantity'], 1, 0, 'C');
-            $pdf->Cell(35, 7, $fmt($line['unit_ttc_cents']) . $cur, 1, 0, 'R');
-            $pdf->Cell(35, 7, $fmt($line['line_ttc_cents']) . $cur, 1, 1, 'R');
+            // Désignation sur plusieurs lignes si besoin (un libellé long débordait sur la colonne Qté).
+            $wrapped = $this->wrap($pdf, $this->t($line['title']), 88);
+            $h = 7 * max(1, count($wrapped));
+            if ($pdf->GetY() + $h > $pdf->GetPageHeight() - 25) {
+                $pdf->AddPage();
+            }
+            $x = $pdf->GetX();
+            $y = $pdf->GetY();
+            $pdf->MultiCell(90, 7, implode("\n", $wrapped), 1, 'L');
+            $pdf->SetXY($x + 90, $y);
+            $pdf->Cell(20, $h, (string) $line['quantity'], 1, 0, 'C');
+            $pdf->Cell(35, $h, $fmt($line['unit_ttc_cents']) . $cur, 1, 0, 'R');
+            $pdf->Cell(35, $h, $fmt($line['line_ttc_cents']) . $cur, 1, 1, 'R');
         }
 
         $pdf->Ln(4);
@@ -275,6 +285,27 @@ class Invoice
      * @return string Texte converti (ISO-8859-1), ou texte d'origine si la
      *                conversion échoue.
      */
+    /** Découpe un texte (déjà converti en cp1252) en lignes d'au plus $width mm dans la police courante. */
+    private function wrap($pdf, string $text, float $width): array
+    {
+        $lines = [];
+        $current = '';
+        foreach (preg_split('/\s+/', trim($text)) ?: [] as $word) {
+            $try = $current === '' ? $word : $current . ' ' . $word;
+            if ($current !== '' && $pdf->GetStringWidth($try) > $width) {
+                $lines[] = $current;
+                $current = $word;
+            } else {
+                $current = $try;
+            }
+        }
+        if ($current !== '') {
+            $lines[] = $current;
+        }
+
+        return $lines ?: [''];
+    }
+
     private function t(string $text): string
     {
         $converted = @iconv('UTF-8', 'CP1252//TRANSLIT', $text);
