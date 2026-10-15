@@ -8,14 +8,11 @@
 > Extrait du site d'origine : seules les sections utiles à ce plugin sont gardées (numérotation d'origine).
 
 ## 0. Préparation du serveur (une fois)
-1. Sauvegardez `private/grav/config` en local avant de récupérer `main` (les fichiers de config suivis quittent le dépôt).
-2. Déployez `main`. Vérifiez dans le journal du workflow que `private/grav/config` n'est pas touché.
-3. Sur le serveur, vérifiez que ces réglages existent (modèles : fichiers `*.dist.yaml`) :
-   - `config/plugins/simple-shop-payment-stripe.yaml` : `enabled: true`, `use_javascript: true`, clés **de test** Stripe (`sk_test_…`, `pk_test_…`) ;
+1. Sur le serveur, vérifiez que ces réglages existent :
+   - `config/plugins/simple-shop-payment-stripe.yaml` : `enabled: true`, clés **de test** Stripe ;
    - `config/plugins/email.yaml` : SMTP renseigné ;
    - `config/plugins/simple-shop/carriers.yaml` : au moins une règle pour la zone `FR-METRO`.
-4. Régénérez les clés Stripe et le sel Grav (voir `REMOVE.md` pour `security-private.php`).
-5. Videz le cache Grav (supprimez le contenu de `cache/` côté serveur ou `bin/grav clear-cache`).
+2. Videz le cache Grav.
 
 ## 1. Page Admin2 « Boutique »
 Prérequis : plugins `api` et `admin2` installés et actifs ; vous avez un compte administrateur.
@@ -118,16 +115,12 @@ l'ancienne clé `vat_rate` n'est plus lue.
 
 ## 10. Livraison HT, suivi, configuration déployée (lot du 2026-10-13, branche `claude/config-deploy-2`)
 
-1. **Déploiement** : dans GitHub → *Actions*, le job « Deploy to OVH » est vert, y compris les étapes « Appliquer la configuration » et « Appliquer les comptes ».
-   Sur le serveur : `config/groups.yaml` contient `shop-manager`, `config/plugins/simple-shop/carriers.yaml` est la nouvelle version, `accounts/claude.yaml` existe. Videz le cache Grav.
 2. **Prix de livraison HT dans le tunnel** (validé dans le simulateur) : panier d'un livre à 12,95 € TTC (≈ 340 g avec emballage, 29 mm). Attendu à l'étape livraison :
    « Lettre suivie » **8,35 €** (7,91 € HT × 1,055) et « Colissimo Domicile » **7,99 €** (7,57 € HT × 1,055, grille Facilité 2025). Le « Retrait à l'atelier » n'apparaît plus.
 3. **Plancher Darcos** : avec un panier de 35 € ou plus, « Livraison standard (symbolique dès 35 € d'achat) » apparaît à **0,01 €** ; sous 35 €, elle n'apparaît pas.
 4. **Emballage** : dans Plugins → Simple Shop → Livraison, passez le poids d'emballage à 2000 g : « Lettre suivie » disparaît (limite 2 kg). Remettez 40.
 5. **Numéro de suivi** : Admin2 → Boutique → une commande → « Suivi du colis » : saisir `6A12345678901`, « Enregistrer le suivi » → le lien « Page de suivi » apparaît.
    Passer la commande en « Expédiée » : l'e-mail client contient le numéro et le lien « Suivre mon colis ». Une saisie invalide (`<b>`) est refusée.
-6. **Compte `claude`** : se connecter à Admin2 avec le compte de test (mot de passe fourni à Claude hors dépôt) ; vérifier l'accès aux pages Boutique, Utilisateurs, Configuration.
-   Puis supprimer le compte (voir `REMOVE.md`).
 
 ## 11. Transporteurs : administration et Colissimo (lot du 2026-10-13)
 

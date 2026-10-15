@@ -41,7 +41,7 @@ Extraits le 15/10/2026 du dépôt du site `senonevero.flavieng.com` (`private/gr
 ## Installation sur le serveur (hébergement mutualisé multi-domaines)
 
 - Grav 2.0 est installé **une fois** dans `/shared/grav-2/` et sert plusieurs domaines (`/domains/<domaine>/private/grav` = dossier
-  `user://` de chaque site, routeur global `www/index.php`, routeur de domaine `shared/manager/grav/Domain.php`).
+  `user://` de chaque site ; routeurs hors de ces dépôts).
 - Ce plugin est déployé dans **`/shared/grav-2/user/plugins/simple-shop/`** (chemin absolu chez OVH : `/home/<identifiant>/shared/…`), partagé par tous les domaines.
 - Grav cherche un plugin d'abord dans le dossier du site (`user://plugins`, soit `/domains/<domaine>/private/grav/plugins/simple-shop`),
   **puis** dans le dossier partagé. Une copie restée dans un site masque donc la version partagée : la supprimer de ce site
@@ -100,7 +100,7 @@ for t in tests/*.php; do YAML=$YAML php -d zend.assertions=1 -d assert.exception
 
 Chaque script affiche `OK`. `tests/checkout-flow.php` (tunnel complet avec doublures de Grav, `tests/support/bootstrap.php`) **doit
 rester vert**. Les autres : `pricing`, `product-types`, `price-basis`, `invoice` (XSD Factur-X officiel), `cart-options`, `taxes`,
-`constraints`, `carriers-pricing`, `local-pickup`, `mode-editor`. Le plugin Colissimo a ses propres tests (variable `SS` = dossier de
+`constraints`, `carriers-pricing`, `local-pickup`, `mode-editor`, `security`. Le plugin Colissimo a ses propres tests (variable `SS` = dossier de
 simple-shop).
 
 ## Conventions (reprises du site d'origine)
@@ -210,6 +210,18 @@ simple-shop).
 Ancienne administration Admin 1 (`templates/admin/`, `css/admin-orders.css`, `blueprints/plugins/simple-shop/carriers.yaml`),
 `classes/Delivery/LegalShippingFloor.php` (remplacé par les contraintes globales), `NOTES-TODO.md` (repris ici et dans le README).
 Aucun code ne les utilisait.
+
+## Sécurité (audit du 15/10/2026, avant publication du dépôt)
+Contrôlé : aucun secret dans le code ni dans l'historique (anciennes clés Stripe de test remplacées) ; API admin entièrement soumise
+aux permissions ; nonces sur tous les formulaires publics ; SQL préparé (seuls `LIMIT`/`OFFSET` entiers et noms de colonnes
+internes sont concaténés) ; sorties Twig échappées (`|raw` seulement pour les nonces et le formulaire de la passerelle) ; pas
+d'`innerHTML` avec des données ; retour de paiement lié à la session et au montant ; redirections internes seulement
+(`safeBackUrl`, `$page->url(true)`) ; fichiers clients nommés par empreinte SHA-256 de l'e-mail.
+Corrigé ce jour : **fixation de session** (identifiant renouvelé à l'identification, à la connexion automatique et à la
+déconnexion) ; **jetons de désabonnement falsifiables** (en Grav 2, `system.security.salt` n'existe plus : le secret retombait
+sur l'e-mail public de l'auteur ; désormais dérivé de la clé privée du site, `Security::getNonceKey()`, ou d'un secret aléatoire
+local) ; redirection vers un produit construite par Grav ; quantité d'une ligne plafonnée (999). Test : `tests/security.php`.
+Signalement des failles : `SECURITY.md`.
 
 ## Historique
 - `git log` : commits d'origine (messages en français, un par étape).
