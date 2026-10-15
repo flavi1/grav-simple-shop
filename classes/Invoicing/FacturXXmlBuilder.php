@@ -17,7 +17,7 @@ use Grav\Plugin\SimpleShop\Services\AddressFields;
  *  - prix net d'une ligne (BT-146) = prix unitaire **HT** ; montant de ligne (BT-131) = HT × quantité ;
  *  - un bloc TVA par taux (BG-23) : base = somme des lignes HT, TVA = arrondi(base × taux) ;
  *  - total TTC (BT-112) = HT + TVA ; arrondi (BT-114) = montant encaissé − BT-112 ;
- *  - commande payée en ligne : déjà payé (BT-113) = montant encaissé, reste dû (BT-115) = 0 ;
+ *  - commande payée en ligne : déjà payé (BT-113) = montant encaissé, reste dû (BT-115) = 0, échéance (BT-9) = date du paiement ;
  *  - catégorie de TVA `S` (taux normal ou réduit, le taux est précisé), `Z` pour un taux nul ;
  *  - client B2C (pas de SIRET/TVA acheteur ; adresse électronique = e-mail), aucune remise ou charge d'en-tête ;
  *  - règles françaises (BR-FR) : cadre de facturation BT-23 (B2 par défaut), mentions escompte / pénalités / frais de
@@ -179,6 +179,9 @@ class FacturXXmlBuilder
                 . '<ram:RateApplicablePercent>' . self::percent($tax['bp']) . '</ram:RateApplicablePercent>'
                 . '</ram:ApplicableTradeTax>';
         }
+        // Échéance (BT-9) = date du paiement : commande payée en ligne à sa création (règle BR-FR-CO-09 pour B2/S2/M2).
+        $xml .= '<ram:SpecifiedTradePaymentTerms><ram:DueDateDateTime><udt:DateTimeString format="102">' . $issueDate
+            . '</udt:DateTimeString></ram:DueDateDateTime></ram:SpecifiedTradePaymentTerms>';
         $xml .= '<ram:SpecifiedTradeSettlementHeaderMonetarySummation>'
             . '<ram:LineTotalAmount>' . self::amount($t['line_total_ht_cents']) . '</ram:LineTotalAmount>'
             . '<ram:TaxBasisTotalAmount>' . self::amount($t['line_total_ht_cents']) . '</ram:TaxBasisTotalAmount>'

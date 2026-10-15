@@ -84,6 +84,7 @@ assert($r['rounding'] === 1, 'RoundingAmount présent');
 assert(strpos($xml, '<ram:ChargeAmount>12.27</ram:ChargeAmount>') !== false, 'prix net HT (et non TTC) sur la ligne');
 // Règles françaises (testeur FNFE, BR-FR) : cadre de facturation, mentions, SIREN, adresses électroniques, livré à
 assert(str_contains($xml, '<ram:BusinessProcessSpecifiedDocumentContextParameter><ram:ID>B2</ram:ID>'), 'BT-23 = B2');
+assert(str_contains($xml, '<ram:SpecifiedTradePaymentTerms><ram:DueDateDateTime><udt:DateTimeString format="102">20261014</udt:DateTimeString>'), 'BT-9 = date du paiement (BR-FR-CO-09)');
 foreach (['AAB', 'PMD', 'PMT'] as $code) {
     assert(str_contains($xml, '<ram:SubjectCode>' . $code . '</ram:SubjectCode>'), "mention {$code}");
 }

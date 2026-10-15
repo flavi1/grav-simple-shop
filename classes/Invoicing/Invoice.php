@@ -257,7 +257,7 @@ class Invoice
 
         $pdf->Ln(10);
         $pdf->SetFont('LiberationSans', '', 8);
-        $pdf->MultiCell(0, 4, $this->t('Facture électronique au format Factur-X (norme EN 16931). Client particulier (B2C). Facture payée à la commande.'));
+        $pdf->MultiCell(0, 4, $this->t('Facture électronique au format Factur-X (norme EN 16931). Client particulier (B2C). Facture payée le ' . date('d/m/Y', strtotime($createdAt) ?: time()) . ' (à la commande).'));
         foreach ((array) ($this->seller['notes'] ?? []) as $note) {
             $pdf->MultiCell(0, 4, $this->t((string) $note));
         }
