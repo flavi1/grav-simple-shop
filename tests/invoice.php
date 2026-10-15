@@ -13,7 +13,8 @@ use Grav\Plugin\SimpleShop\Pricing\TaxRate;
 $grav = \SimpleShopTest\boot([], [], null);   // configuration du plugin (taxe du site) pour Invoice::build()
 $site = new TaxRate('TVA_5_5', 550);
 $seller = ['name' => 'Éditions Test', 'address_line1' => '1 rue du Livre', 'postal_code' => '75001', 'city' => 'Paris',
-    'country' => 'FR', 'siret' => '12345678900011', 'vat_number' => 'FR00123456789'];
+    'country' => 'FR', 'siret' => '12345678900011', 'vat_number' => 'FR00123456789', 'billing_mode' => 'B2',
+    'notes' => ['AAB' => "Pas d'escompte.", 'PMD' => 'Pas de pénalités.', 'PMT' => "Pas d'indemnité."]];
 $customer = json_encode(['firstname' => 'Marie', 'lastname' => 'Curie', 'street' => '1 rue de la Paix', 'postal-code' => '75002', 'city' => 'Paris']);
 
 /** Vérifie le XML : XSD officiel + règles de calcul EN 16931. Retourne les valeurs lues. */
@@ -81,6 +82,15 @@ $xml = (new FacturXXmlBuilder($order, ['invoice_number' => 'FACT-2026-00001'], $
 $r = $check($xml, 4389);
 assert($r['rounding'] === 1, 'RoundingAmount présent');
 assert(strpos($xml, '<ram:ChargeAmount>12.27</ram:ChargeAmount>') !== false, 'prix net HT (et non TTC) sur la ligne');
+// Règles françaises (testeur FNFE, BR-FR) : cadre de facturation, mentions, SIREN, adresses électroniques, livré à
+assert(str_contains($xml, '<ram:BusinessProcessSpecifiedDocumentContextParameter><ram:ID>B2</ram:ID>'), 'BT-23 = B2');
+foreach (['AAB', 'PMD', 'PMT'] as $code) {
+    assert(str_contains($xml, '<ram:SubjectCode>' . $code . '</ram:SubjectCode>'), "mention {$code}");
+}
+assert(str_contains($xml, '<ram:SpecifiedLegalOrganization><ram:ID schemeID="0002">123456789</ram:ID>'), 'BT-30 = SIREN (9 chiffres)');
+assert(str_contains($xml, '<ram:URIID schemeID="0225">123456789</ram:URIID>'), 'BT-34 = SIREN, schéma 0225');
+assert(str_contains($xml, '<ram:ShipToTradeParty><ram:Name>Marie Curie</ram:Name>'), 'livré à (BG-13)');
+assert(!preg_match('~<ram:([A-Za-z]+)(?: [^>]*)?/>|<ram:([A-Za-z]+)></ram:\2>~', $xml), 'aucun élément vide (PEPPOL-EN16931-R008)');
 
 // 2. Sans écart d'arrondi : pas de RoundingAmount
 $order2 = ['shipping_ttc_cents' => 0, 'shipping_ht_cents' => 0, 'shipping_tax_code' => 'TVA_5_5', 'shipping_tax_bp' => 550, 'currency' => 'EUR'] + $order;
@@ -104,6 +114,18 @@ $check((new FacturXXmlBuilder($legacy, ['invoice_number' => 'FACT-2026-00003'], 
 // 4. PDF Factur-X complet (FPDF + XML embarqué)
 $pdf = (new Invoice($order, $items, ['invoice_number' => 'FACT-2026-00001', 'vat_rate' => 0.055], $seller))->build();
 assert(strncmp($pdf, '%PDF', 4) === 0 && strpos($pdf, 'factur-x.xml') !== false, 'PDF Factur-X avec XML embarqué');
+// PDF/A-3 : toutes les polices embarquées (ISO 19005-3, 6.2.11.4.1) — vérifié avec pdffonts si disponible
+$tmpPdf = sys_get_temp_dir() . '/facture-test-' . getmypid() . '.pdf';
+file_put_contents($tmpPdf, $pdf);
+exec('pdffonts ' . escapeshellarg($tmpPdf) . ' 2>/dev/null', $fonts, $rc);
+if ($rc === 0) {
+    $rows = array_slice($fonts, 2);
+    assert($rows !== [], 'polices listées');
+    foreach ($rows as $row) {
+        assert(preg_match('/\byes\s+(yes|no)\s+(yes|no)\s+\d+\s+\d+\s*$/', $row) === 1 && !str_contains($row, 'Helvetica'), 'police non embarquée : ' . $row);
+    }
+}
+@unlink($tmpPdf);
 
 // 5. Panier : mêmes montants que la commande
 $cart = ['/livres/a' => ['title' => 'Un livre', 'quantity' => 2, 'price' => 12.95, 'unit_ht_cents' => 1227, 'unit_ttc_cents' => 1295, 'tax_code' => 'TVA_5_5', 'tax_bp' => 550]];

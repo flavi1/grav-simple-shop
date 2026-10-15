@@ -71,3 +71,13 @@ seller:
   country: 'FR'
   siret: ''
   vat_number: ''
+# Mentions des factures électroniques (règles françaises BR-FR, réforme 2026-2027).
+invoicing:
+  # Cadre de facturation (BT-23) : B2 = livraison de biens, facture déjà payée (vente en ligne payée à la commande).
+  # S2 = prestations de services déjà payées, M2 = mixte déjà payée.
+  billing_mode: B2
+  # Mentions obligatoires (BT-22, notes de la facture) : escompte, pénalités de retard, frais de recouvrement.
+  notes:
+    AAB: "Pas d'escompte pour paiement anticipé."
+    PMD: "Facture payée à la commande : pas de pénalités de retard."
+    PMT: "Facture payée à la commande : pas d'indemnité forfaitaire pour frais de recouvrement."

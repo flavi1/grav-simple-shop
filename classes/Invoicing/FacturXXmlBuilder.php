@@ -19,7 +19,9 @@ use Grav\Plugin\SimpleShop\Services\AddressFields;
  *  - total TTC (BT-112) = HT + TVA ; arrondi (BT-114) = montant encaissé − BT-112 ;
  *  - commande payée en ligne : déjà payé (BT-113) = montant encaissé, reste dû (BT-115) = 0 ;
  *  - catégorie de TVA `S` (taux normal ou réduit, le taux est précisé), `Z` pour un taux nul ;
- *  - client B2C (pas de SIRET/TVA acheteur), aucune remise ou charge d'en-tête.
+ *  - client B2C (pas de SIRET/TVA acheteur ; adresse électronique = e-mail), aucune remise ou charge d'en-tête ;
+ *  - règles françaises (BR-FR) : cadre de facturation BT-23 (B2 par défaut), mentions escompte / pénalités / frais de
+ *    recouvrement (BT-22), SIREN du vendeur (BT-30) et son adresse électronique (BT-34, schéma 0225), livré à (BG-13).
  *
  * @package Grav\Plugin\SimpleShop\Invoicing
  */
@@ -92,8 +94,10 @@ class FacturXXmlBuilder
             (string) ($this->seller['postal_code'] ?? ''),
             (string) ($this->seller['city'] ?? ''),
             (string) ($this->seller['country'] ?? 'FR'),
-            (string) ($this->seller['siret'] ?? ''),
-            (string) ($this->seller['vat_number'] ?? '')
+            self::siren((string) ($this->seller['siret'] ?? '')),
+            (string) ($this->seller['vat_number'] ?? ''),
+            // Adresse électronique du vendeur (BT-34, règle BR-FR-13) : son SIREN, schéma 0225 (annuaire PPF).
+            self::siren((string) ($this->seller['siret'] ?? '')) !== '' ? ['0225', self::siren((string) $this->seller['siret'])] : null
         );
 
         $buyerXml = $this->buildTradePartyXml(
@@ -105,8 +109,37 @@ class FacturXXmlBuilder
             (string) ($billing['city'] ?? ($customer['city'] ?? '')),
             (string) ($customer['country'] ?? 'FR'),
             '',
+            '',
+            // Adresse électronique de l'acheteur (BT-49, règle BR-FR-12) : particulier sans SIREN → son e-mail (schéma EM).
+            trim((string) ($customer['email'] ?? '')) !== '' ? ['EM', trim((string) $customer['email'])] : null
+        );
+
+        // Livré à (BG-13) : point de retrait choisi, sinon l'adresse du client.
+        $shipping = json_decode((string) ($this->order['shipping_data'] ?? '{}'), true) ?: [];
+        $point = is_array($shipping['pickup_point'] ?? null) ? $shipping['pickup_point'] : null;
+        $shipToXml = $this->buildTradePartyXml(
+            'ShipToTradeParty',
+            $point ? (string) ($point['name'] ?? $billingName) : trim(((string) ($customer['firstname'] ?? '')) . ' ' . ((string) ($customer['lastname'] ?? ''))),
+            (string) ($point['street'] ?? ($customer['street'] ?? '')),
+            $point ? '' : (string) ($customer['address-complement'] ?? ''),
+            (string) ($point['postal-code'] ?? ($customer['postal-code'] ?? '')),
+            (string) ($point['city'] ?? ($customer['city'] ?? '')),
+            (string) ($customer['country'] ?? 'FR'),
+            '',
             ''
         );
+
+        // Mentions (BT-22) : escompte, pénalités de retard, frais de recouvrement (règle BR-FR-05).
+        $notesXml = '';
+        foreach ((array) ($this->seller['notes'] ?? []) as $code => $text) {
+            if (in_array($code, ['AAB', 'PMD', 'PMT'], true) && trim((string) $text) !== '') {
+                $notesXml .= '<ram:IncludedNote><ram:Content>' . $this->esc(trim((string) $text)) . '</ram:Content>'
+                    . '<ram:SubjectCode>' . $code . '</ram:SubjectCode></ram:IncludedNote>';
+            }
+        }
+        // Cadre de facturation (BT-23, règle BR-FR-08) : B2 = biens, facture déjà payée.
+        $billingMode = (string) ($this->seller['billing_mode'] ?? 'B2');
+        $billingMode = preg_match('/^[BSM][1-9]$/', $billingMode) ? $billingMode : 'B2';
 
         $xml = '<?xml version="1.0" encoding="UTF-8"?>' . "\n";
         $xml .= '<rsm:CrossIndustryInvoice '
@@ -116,6 +149,7 @@ class FacturXXmlBuilder
             . 'xmlns:udt="urn:un:unece:uncefact:data:standard:UnqualifiedDataType:100">';
 
         $xml .= '<rsm:ExchangedDocumentContext>'
+            . '<ram:BusinessProcessSpecifiedDocumentContextParameter><ram:ID>' . $billingMode . '</ram:ID></ram:BusinessProcessSpecifiedDocumentContextParameter>'
             . '<ram:GuidelineSpecifiedDocumentContextParameter>'
             . '<ram:ID>' . self::PROFILE_URN . '</ram:ID>'
             . '</ram:GuidelineSpecifiedDocumentContextParameter>'
@@ -125,13 +159,14 @@ class FacturXXmlBuilder
             . '<ram:ID>' . $this->esc((string) ($this->invoiceRow['invoice_number'] ?? '')) . '</ram:ID>'
             . '<ram:TypeCode>380</ram:TypeCode>'
             . '<ram:IssueDateTime><udt:DateTimeString format="102">' . $issueDate . '</udt:DateTimeString></ram:IssueDateTime>'
+            . $notesXml
             . '</rsm:ExchangedDocument>';
 
         $xml .= '<rsm:SupplyChainTradeTransaction>';
         $xml .= $linesXml;
 
         $xml .= '<ram:ApplicableHeaderTradeAgreement>' . $sellerXml . $buyerXml . '</ram:ApplicableHeaderTradeAgreement>';
-        $xml .= '<ram:ApplicableHeaderTradeDelivery/>';
+        $xml .= '<ram:ApplicableHeaderTradeDelivery>' . $shipToXml . '</ram:ApplicableHeaderTradeDelivery>';
 
         $xml .= '<ram:ApplicableHeaderTradeSettlement>';
         $xml .= '<ram:InvoiceCurrencyCode>' . $currency . '</ram:InvoiceCurrencyCode>';
@@ -186,6 +221,14 @@ class FacturXXmlBuilder
             . '</ram:IncludedSupplyChainTradeLineItem>';
     }
 
+    /** SIREN (9 chiffres) tiré d'un SIRET (14 chiffres) ou d'un SIREN saisi ; chaîne vide si illisible. */
+    public static function siren(string $siretOrSiren): string
+    {
+        $digits = preg_replace('/\D/', '', $siretOrSiren);
+
+        return strlen($digits) === 14 || strlen($digits) === 9 ? substr($digits, 0, 9) : '';
+    }
+
     /** Centimes → « 12.95 » (montants négatifs : « -0.01 »). */
     private static function amount(int $cents): string
     {
@@ -227,14 +270,16 @@ class FacturXXmlBuilder
         string $postalCode,
         string $city,
         string $country,
-        string $siret,
-        string $vatNumber
+        string $siren,
+        string $vatNumber,
+        ?array $endpoint = null
     ): string {
         $xml = '<ram:' . $tag . '>';
         $xml .= '<ram:Name>' . $this->esc($name) . '</ram:Name>';
 
-        if ($siret !== '') {
-            $xml .= '<ram:SpecifiedLegalOrganization><ram:ID schemeID="0002">' . $this->esc($siret) . '</ram:ID></ram:SpecifiedLegalOrganization>';
+        // Immatriculation légale (BT-30) : SIREN, schéma 0002 (règle BR-FR-10 : 9 chiffres).
+        if ($siren !== '') {
+            $xml .= '<ram:SpecifiedLegalOrganization><ram:ID schemeID="0002">' . $this->esc($siren) . '</ram:ID></ram:SpecifiedLegalOrganization>';
         }
 
         $xml .= '<ram:PostalTradeAddress>';
@@ -252,6 +297,11 @@ class FacturXXmlBuilder
         }
         $xml .= '<ram:CountryID>' . $this->esc($country !== '' ? $country : 'FR') . '</ram:CountryID>';
         $xml .= '</ram:PostalTradeAddress>';
+
+        if ($endpoint !== null) {
+            $xml .= '<ram:URIUniversalCommunication><ram:URIID schemeID="' . $this->esc($endpoint[0]) . '">' . $this->esc($endpoint[1])
+                . '</ram:URIID></ram:URIUniversalCommunication>';
+        }
 
         if ($vatNumber !== '') {
             $xml .= '<ram:SpecifiedTaxRegistration><ram:ID schemeID="VA">' . $this->esc($vatNumber) . '</ram:ID></ram:SpecifiedTaxRegistration>';

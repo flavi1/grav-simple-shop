@@ -167,6 +167,7 @@ class InvoiceManager
     public static function getSellerData(): array
     {
         $config = (array) (Grav::instance()['config']->get('plugins.simple-shop.seller') ?? []);
+        $invoicing = (array) (Grav::instance()['config']->get('plugins.simple-shop.invoicing') ?? []);
 
         return [
             'name'          => (string) ($config['name'] ?? ''),
@@ -177,6 +178,8 @@ class InvoiceManager
             'country'       => (string) ($config['country'] ?? 'FR'),
             'siret'         => (string) ($config['siret'] ?? ''),
             'vat_number'    => (string) ($config['vat_number'] ?? ''),
+            'billing_mode'  => (string) ($invoicing['billing_mode'] ?? 'B2'),
+            'notes'         => array_filter((array) ($invoicing['notes'] ?? []), static fn ($v) => is_string($v) && trim($v) !== ''),
         ];
     }
 

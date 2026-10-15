@@ -163,6 +163,10 @@ Numéro saisi dans Admin2 (`PATCH /orders/{reference}/tracking`, table `order_tr
   l'e-reporting. Prix net des lignes = HT ; un bloc TVA par taux (base = somme des HT, TVA = arrondi(base × taux)) ;
   l'écart avec le montant encaissé va en arrondi (BT-114) ; commande payée : déjà payé (BT-113) = encaissé, reste dû 0.
   Catégorie de TVA `S` (taux réduit compris). XML validé contre le XSD officiel (`tests/invoice.php`).
+  Règles françaises (BR-FR, testeur FNFE-MPE) : cadre de facturation BT-23 (`invoicing.billing_mode`, B2 par défaut), mentions
+  escompte / pénalités / frais de recouvrement (`invoicing.notes`, codes AAB, PMD, PMT), SIREN du vendeur (tiré du SIRET) et son
+  adresse électronique (schéma 0225), e-mail de l'acheteur (schéma EM), adresse de livraison. PDF/A-3 : polices Liberation Sans
+  embarquées (`fonts/`, licence SIL OFL ; les polices standard de FPDF ne sont pas embarquées).
   La facture PDF est jointe à l'e-mail de confirmation. Les anomalies sont journalisées dans `logs/simple-shop/invoices.log`.
 - `Services\OrderMailer` : e-mails de confirmation, de notification vendeur et
   de changement de statut (`status_emails`, par défaut expédiée / annulée /

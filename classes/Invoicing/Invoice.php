@@ -150,15 +150,26 @@ class Invoice
         $customer = AddressFields::normalize(json_decode((string) ($this->order['customer_data'] ?? '{}'), true) ?: []);
         $billing  = AddressFields::normalize(json_decode((string) ($this->order['billing_data'] ?? '{}'), true) ?: []);
 
-        $pdf = new \setasign\Fpdi\Fpdi();
+        // PDF/A-3 (ISO 19005-3, 6.2.11.4.1) : toutes les polices doivent être embarquées. Les 14 polices standard
+        // (Helvetica…) ne le sont jamais : on utilise Liberation Sans (licence SIL OFL, métriques identiques à
+        // Helvetica/Arial), embarquée depuis fonts/ (définitions FPDF générées par makefont, codage cp1252).
+        $pdf = new class () extends \setasign\Fpdi\Fpdi {
+            public function useFontDir(string $dir): void
+            {
+                $this->fontpath = rtrim($dir, '/') . '/';
+            }
+        };
+        $pdf->useFontDir(dirname(__DIR__, 2) . '/fonts');
+        $pdf->AddFont('LiberationSans', '', 'LiberationSans-Regular.php');
+        $pdf->AddFont('LiberationSans', 'B', 'LiberationSans-Bold.php');
         $pdf->SetAutoPageBreak(true, 20);
         $pdf->AddPage();
         $pdf->SetMargins(15, 15, 15);
 
         // En-tête vendeur.
-        $pdf->SetFont('Helvetica', 'B', 14);
+        $pdf->SetFont('LiberationSans', 'B', 14);
         $pdf->Cell(0, 8, $this->t((string) ($this->seller['name'] ?? '')), 0, 1);
-        $pdf->SetFont('Helvetica', '', 10);
+        $pdf->SetFont('LiberationSans', '', 10);
         foreach ([
             (string) ($this->seller['address_line1'] ?? ''),
             (string) ($this->seller['address_line2'] ?? ''),
@@ -179,9 +190,9 @@ class Invoice
         $pdf->Ln(6);
 
         // Titre + numéro + date + référence commande.
-        $pdf->SetFont('Helvetica', 'B', 16);
+        $pdf->SetFont('LiberationSans', 'B', 16);
         $pdf->Cell(0, 10, $this->t('FACTURE ' . (string) ($this->invoiceRow['invoice_number'] ?? '')), 0, 1, 'R');
-        $pdf->SetFont('Helvetica', '', 10);
+        $pdf->SetFont('LiberationSans', '', 10);
         $createdAt = (string) ($this->order['created_at'] ?? 'now');
         $pdf->Cell(0, 5, $this->t('Date : ' . date('d/m/Y', strtotime($createdAt) ?: time())), 0, 1, 'R');
         $pdf->Cell(0, 5, $this->t('Commande : ' . (string) ($this->order['order_reference'] ?? '')), 0, 1, 'R');
@@ -189,9 +200,9 @@ class Invoice
         $pdf->Ln(6);
 
         // Adresse client (facturation, avec repli sur l'adresse client/livraison).
-        $pdf->SetFont('Helvetica', 'B', 11);
+        $pdf->SetFont('LiberationSans', 'B', 11);
         $pdf->Cell(0, 6, $this->t('Facturé à :'), 0, 1);
-        $pdf->SetFont('Helvetica', '', 10);
+        $pdf->SetFont('LiberationSans', '', 10);
 
         $billingName = (string) ($billing['name'] ?? trim(((string) ($customer['firstname'] ?? '')) . ' ' . ((string) ($customer['lastname'] ?? ''))));
         $addressLines = [
@@ -210,14 +221,14 @@ class Invoice
         $pdf->Ln(8);
 
         // Tableau des lignes.
-        $pdf->SetFont('Helvetica', 'B', 10);
+        $pdf->SetFont('LiberationSans', 'B', 10);
         $pdf->SetFillColor(230, 230, 230);
-        $pdf->Cell(90, 7, $this->t('Designation'), 1, 0, 'L', true);
-        $pdf->Cell(20, 7, $this->t('Qte'), 1, 0, 'C', true);
+        $pdf->Cell(90, 7, $this->t('Désignation'), 1, 0, 'L', true);
+        $pdf->Cell(20, 7, $this->t('Qté'), 1, 0, 'C', true);
         $pdf->Cell(35, 7, $this->t('PU TTC'), 1, 0, 'R', true);
         $pdf->Cell(35, 7, $this->t('Total TTC'), 1, 1, 'R', true);
 
-        $pdf->SetFont('Helvetica', '', 10);
+        $pdf->SetFont('LiberationSans', '', 10);
         foreach ($amounts['lines'] as $line) {
             $pdf->Cell(90, 7, $this->t($line['title']), 1);
             $pdf->Cell(20, 7, (string) $line['quantity'], 1, 0, 'C');
@@ -227,7 +238,7 @@ class Invoice
 
         $pdf->Ln(4);
 
-        $pdf->SetFont('Helvetica', '', 10);
+        $pdf->SetFont('LiberationSans', '', 10);
         $pdf->Cell(145, 6, $this->t('Total HT'), 0, 0, 'R');
         $pdf->Cell(35, 6, $fmt($totals['line_total_ht_cents']) . $cur, 0, 1, 'R');
         foreach ($totals['taxes'] as $tax) {
@@ -240,20 +251,23 @@ class Invoice
             $pdf->Cell(145, 6, $this->t('Arrondi'), 0, 0, 'R');
             $pdf->Cell(35, 6, ($totals['rounding_cents'] < 0 ? '-' : '') . $fmt(abs($totals['rounding_cents'])) . $cur, 0, 1, 'R');
         }
-        $pdf->SetFont('Helvetica', 'B', 11);
+        $pdf->SetFont('LiberationSans', 'B', 11);
         $pdf->Cell(145, 8, $this->t('Total TTC'), 0, 0, 'R');
         $pdf->Cell(35, 8, $fmt($totals['due_cents']) . $cur, 0, 1, 'R');
 
         $pdf->Ln(10);
-        $pdf->SetFont('Helvetica', 'I', 8);
-        $pdf->MultiCell(0, 4, $this->t('Facture electronique au format Factur-X (norme EN 16931). Client particulier (B2C).'));
+        $pdf->SetFont('LiberationSans', '', 8);
+        $pdf->MultiCell(0, 4, $this->t('Facture électronique au format Factur-X (norme EN 16931). Client particulier (B2C). Facture payée à la commande.'));
+        foreach ((array) ($this->seller['notes'] ?? []) as $note) {
+            $pdf->MultiCell(0, 4, $this->t((string) $note));
+        }
 
         return $pdf->Output('S');
     }
 
     /**
      * Convertit un texte UTF-8 vers l'encodage ISO-8859-1 attendu par les
-     * polices standard de FPDF (Helvetica...), avec translittération des
+     * polices de FPDF (codage cp1252), avec translittération des
      * caractères accentués non représentables.
      *
      * @param string $text Texte source (UTF-8).
@@ -263,7 +277,7 @@ class Invoice
      */
     private function t(string $text): string
     {
-        $converted = @iconv('UTF-8', 'ISO-8859-1//TRANSLIT', $text);
+        $converted = @iconv('UTF-8', 'CP1252//TRANSLIT', $text);
 
         return $converted !== false ? $converted : $text;
     }

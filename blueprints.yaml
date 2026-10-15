@@ -171,7 +171,35 @@ form:
         seller.siret:
           type: text
           label: SIRET
+          help: "14 chiffres. Le SIREN (9 premiers chiffres) identifie le vendeur dans la facture électronique."
+          validate:
+            pattern: '[0-9 ]{14,17}'
 
         seller.vat_number:
           type: text
           label: Numéro de TVA intracommunautaire
+          help: "Ex. FR12345678901. Obligatoire sur une facture avec TVA (règle EN 16931 BR-S-02)."
+
+        invoicing.billing_mode:
+          type: select
+          label: Cadre de facturation (facture électronique)
+          default: B2
+          options:
+            B2: "B2 — livraison de biens, facture déjà payée"
+            S2: "S2 — prestations de services, facture déjà payée"
+            M2: "M2 — biens et services, facture déjà payée"
+
+        invoicing.notes.AAB:
+          type: text
+          label: Mention escompte
+          default: "Pas d'escompte pour paiement anticipé."
+
+        invoicing.notes.PMD:
+          type: text
+          label: Mention pénalités de retard
+          default: "Facture payée à la commande : pas de pénalités de retard."
+
+        invoicing.notes.PMT:
+          type: text
+          label: Mention frais de recouvrement
+          default: "Facture payée à la commande : pas d'indemnité forfaitaire pour frais de recouvrement."
