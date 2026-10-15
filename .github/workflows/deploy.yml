@@ -1,0 +1,63 @@
+# Déploiement du plugin dans le dossier partagé de Grav (/shared/grav-2/user/plugins/simple-shop/) par FTP.
+# Mise en place (secrets FTP_SERVER, FTP_USERNAME, FTP_PASSWORD ; variables facultatives) : voir AGENTS.md, « Déploiement ».
+name: Déploiement FTP
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-ftp
+  cancel-in-progress: false
+
+jobs:
+  lint:
+    name: Syntaxe PHP
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.3'
+          tools: none
+      - name: php -l
+        run: |
+          find . -name '*.php' -not -path './.git/*' -not -path './vendor/*' -print0 | xargs -0 -n1 -P4 php -l > /dev/null
+
+  deploy:
+    name: Envoi FTP
+    needs: lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Secrets FTP présents ?
+        env:
+          FTP_SERVER: ${{ secrets.FTP_SERVER }}
+          FTP_USERNAME: ${{ secrets.FTP_USERNAME }}
+          FTP_PASSWORD: ${{ secrets.FTP_PASSWORD }}
+        run: |
+          if [ -z "$FTP_SERVER" ] || [ -z "$FTP_USERNAME" ] || [ -z "$FTP_PASSWORD" ]; then
+            echo "::error::Secrets FTP_SERVER / FTP_USERNAME / FTP_PASSWORD absents : voir AGENTS.md, « Déploiement »."
+            exit 1
+          fi
+      - name: Envoi vers ${{ vars.FTP_PLUGINS_DIR || '/shared/grav-2/user/plugins/' }}simple-shop/
+        uses: SamKirkland/FTP-Deploy-Action@v4.3.5
+        with:
+          server: ${{ secrets.FTP_SERVER }}
+          username: ${{ secrets.FTP_USERNAME }}
+          password: ${{ secrets.FTP_PASSWORD }}
+          protocol: ${{ vars.FTP_PROTOCOL || 'ftps' }}
+          port: ${{ vars.FTP_PORT || 21 }}
+          server-dir: ${{ vars.FTP_PLUGINS_DIR || '/shared/grav-2/user/plugins/' }}simple-shop/
+          exclude: |
+            **/.git*
+            **/.git*/**
+            .github/**
+            tests/**
+            docs/**
+            AGENTS.md

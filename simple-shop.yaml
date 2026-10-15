@@ -1,4 +1,6 @@
-enabled: true
+# Désactivé par défaut : le dossier des plugins est partagé par tous les sites ; chaque site l'active dans
+# sa configuration (user/config/plugins/simple-shop.yaml : enabled: true, ou Admin2 > Plugins).
+enabled: false
 # Anti-spam des codes de connexion (OTP), vérifié côté serveur
 otp:
   resend_delay: 60        # secondes entre deux envois pour une même session
