@@ -170,10 +170,10 @@ form:
 
         seller.siret:
           type: text
-          label: SIRET
-          help: "14 chiffres. Le SIREN (9 premiers chiffres) identifie le vendeur dans la facture électronique."
+          label: SIRET (ou SIREN)
+          help: "14 chiffres (ou les 9 du SIREN). Le SIREN identifie le vendeur dans la facture électronique."
           validate:
-            pattern: '[0-9 ]{14,17}'
+            pattern: '[0-9 ]{9,17}'
 
         seller.vat_number:
           type: text
