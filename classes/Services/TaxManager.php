@@ -3,119 +3,53 @@
 namespace Grav\Plugin\SimpleShop\Services;
 
 use Grav\Common\Grav;
+use Grav\Plugin\SimpleShop\Tax\TaxResolver;
+use Grav\Plugin\SimpleShop\Tax\TaxSettings;
 
 /**
- * Taxes de la boutique (TVA).
- *
- * Les PRIX DES PRODUITS sont saisis HORS TAXE (`plugins.simple-shop.taxes.prices_entered: ht`) ;
- * tout le reste du tunnel (panier, livraison, paiement, commande, facture)
- * travaille en TTC, comme avant : la conversion se fait à un seul endroit, ici,
- * à la lecture du prix du produit ({@see \Grav\Plugin\SimpleShop\Inventory\InventoryManager}).
- *
- * Les types de taxes (code => libellé + taux) se gèrent dans l'administration :
- *
- *     taxes:
- *       prices_entered: ht        # ht | ttc
- *       default: TVA_5_5          # code appliqué à tout le site
- *       rates:
- *         TVA_5_5: { label: 'TVA 5,5 %', rate: 0.055 }
- *         TVA_20:  { label: 'TVA 20 %',  rate: 0.20 }
- *
- * Limite assumée : un seul code pour tout le site (produits ET livraison). Un
- * code par produit ou par ligne de frais de port demanderait une facture
- * multi-taux (voir CONCEPTION-TRANSPORTEURS.md).
- *
- * Arrondi : le prix unitaire TTC est arrondi au centime (demi supérieur) ; la
- * ligne vaut prix unitaire TTC × quantité. La TVA d'une facture est le total
- * TTC moins le total HT.
+ * Raccourcis historiques vers le module de taxes (Tax\TaxSettings, Tax\TaxResolver) : base de saisie des prix, classe et
+ * taux par défaut du site à l'adresse de la boutique. Le calcul d'un produit passe par Product\Catalog (taxe de sa classe).
  */
 final class TaxManager
 {
-    public const DEFAULT_CODE = 'TVA_5_5';
-
-    /** Types de taxes disponibles quand la configuration n'en définit pas. */
-    private const DEFAULT_RATES = [
-        'TVA_5_5' => ['label' => 'TVA 5,5 %', 'rate' => 0.055],
-        'TVA_20'  => ['label' => 'TVA 20 %',  'rate' => 0.20],
-    ];
-
     private static function config(): array
     {
         return (array) Grav::instance()['config']->get('plugins.simple-shop', []);
     }
 
-    /**
-     * Types de taxes disponibles : code => ['label' => string, 'rate' => float].
-     *
-     * Accepte `rates` sous forme de table (code => définition) ou de liste
-     * d'éléments portant leur `code` (format d'un champ « liste » d'Admin).
-     *
-     * @return array<string, array{label: string, rate: float}>
-     */
+    /** @return array<string, array{label: string, rate: float}> Classes de taxe et leur taux à l'adresse de la boutique. */
     public static function rates(?array $config = null): array
     {
-        $config ??= self::config();
-        $raw = $config['taxes']['rates'] ?? null;
-        $rates = [];
-
-        if (is_array($raw)) {
-            foreach ($raw as $key => $def) {
-                if (!is_array($def)) {
-                    continue;
-                }
-                $code = (string) ($def['code'] ?? (is_string($key) ? $key : ''));
-                if ($code === '' || !isset($def['rate']) || !is_numeric($def['rate'])) {
-                    continue;
-                }
-                $rate = (float) $def['rate'];
-                // Un taux saisi en pourcentage (5.5) est converti (0.055).
-                if ($rate > 1) {
-                    $rate /= 100;
-                }
-                if ($rate < 0 || $rate >= 1) {
-                    continue;
-                }
-                $rates[$code] = ['label' => (string) ($def['label'] ?? $code), 'rate' => $rate];
-            }
+        $settings = TaxSettings::fromConfig($config ?? self::config());
+        $out = [];
+        foreach ($settings['classes'] as $code => $label) {
+            $out[$code] = ['label' => $label, 'rate' => TaxResolver::forClass($code, null, $config ?? self::config())->toDecimal()];
         }
 
-        return $rates !== [] ? $rates : self::DEFAULT_RATES;
+        return $out;
     }
 
-    /** Code de la taxe appliquée à tout le site. */
+    /** Classe de taxe par défaut du site. */
     public static function defaultCode(?array $config = null): string
     {
-        $config ??= self::config();
-        $code = (string) ($config['taxes']['default'] ?? self::DEFAULT_CODE);
-
-        return isset(self::rates($config)[$code]) ? $code : (string) array_key_first(self::rates($config));
+        return TaxSettings::fromConfig($config ?? self::config())['default_class'];
     }
 
-    /**
-     * Taux appliqué à tout le site (ex. 0.055).
-     *
-     * Repli historique : l'ancienne clé `vat_rate`, si aucune taxe n'est configurée.
-     */
+    /** Taux de la classe par défaut à l'adresse de la boutique (ex. 0.2). */
     public static function defaultRate(?array $config = null): float
     {
         $config ??= self::config();
 
-        if (!isset($config['taxes']['rates']) && isset($config['vat_rate']) && is_numeric($config['vat_rate'])) {
-            return (float) $config['vat_rate'];
-        }
-
-        return self::rates($config)[self::defaultCode($config)]['rate'];
+        return TaxResolver::forClass(self::defaultCode($config), null, $config)->toDecimal();
     }
 
     /** Vrai si les prix des produits sont saisis hors taxe (défaut). */
     public static function pricesEnteredHt(?array $config = null): bool
     {
-        $config ??= self::config();
-
-        return strtolower((string) ($config['taxes']['prices_entered'] ?? 'ht')) !== 'ttc';
+        return TaxSettings::fromConfig($config ?? self::config())['prices_entered'] !== 'ttc';
     }
 
-    /** Prix TTC (au centime) d'un montant saisi dans la fiche produit. */
+    /** Ancienne aide (Twig `shop_price_ttc`) : TTC au taux par défaut d'un montant saisi. Préférer Catalog::price(). */
     public static function toTtc(float $entered, ?array $config = null): float
     {
         $config ??= self::config();
@@ -125,7 +59,7 @@ final class TaxManager
             : self::round2($entered);
     }
 
-    /** Prix HT (au centime) correspondant à un montant TTC. */
+    /** Prix HT (au centime) correspondant à un montant TTC, au taux par défaut. */
     public static function toHt(float $ttc, ?array $config = null): float
     {
         return self::round2($ttc / (1 + self::defaultRate($config)));

@@ -531,6 +531,85 @@ class ShopApiController extends AbstractApiController
     }
 
     // ------------------------------------------------------------------
+    // Taxes (réglages complets : Plugins > Simple Shop ; ici : vue d'ensemble et import/export CSV des taux)
+    // ------------------------------------------------------------------
+
+    /** GET /simple-shop/taxes — réglages normalisés (classes, taux en %, types de produits). */
+    public function taxes(ServerRequestInterface $request): ResponseInterface
+    {
+        $this->requirePermission($request, self::PERM_READ);
+        $s = \Grav\Plugin\SimpleShop\Tax\TaxResolver::settings();
+        $rates = array_map(static fn (array $r) => [
+            'class' => $r['class'], 'country' => $r['country'], 'region' => $r['region'], 'postcodes' => implode(';', $r['postcodes']),
+            'rate' => $r['bp'] / 100, 'name' => $r['name'], 'priority' => $r['priority'], 'compound' => $r['compound'],
+            'shipping' => $r['shipping'], 'category' => $r['category'], 'mention' => $r['mention'],
+        ], $s['rates']);
+        $types = [];
+        foreach (\Grav\Plugin\SimpleShop\Product\ProductTypes::all() as $name => $type) {
+            $types[$name] = \Grav\Plugin\SimpleShop\Tax\TaxResolver::classFor($name, $type->taxCode);
+        }
+
+        return ApiResponse::create([
+            'enabled' => $s['enabled'], 'prices_entered' => $s['prices_entered'], 'based_on' => $s['based_on'], 'shipping_tax' => $s['shipping_tax'],
+            'default_class' => $s['default_class'], 'small_business' => $s['small_business'], 'classes' => $s['classes'], 'rates' => $rates, 'types' => $types,
+        ]);
+    }
+
+    /**
+     * PUT /simple-shop/taxes/rates — corps : {"rates": [{class, country, region, postcodes, rate, name, priority, compound, shipping, category, mention}]}
+     * Remplace la table des taux (import CSV) dans user/config/plugins/simple-shop.yaml.
+     */
+    public function saveTaxRates(ServerRequestInterface $request): ResponseInterface
+    {
+        $this->requirePermission($request, self::PERM_WRITE);
+        $rows = $this->getRequestBody($request)['rates'] ?? null;
+        if (!is_array($rows) || $rows === [] || count($rows) > 5000) {
+            throw new ValidationException('Le champ « rates » doit être une liste de taux (5 000 au plus).');
+        }
+        $classes = \Grav\Plugin\SimpleShop\Tax\TaxResolver::settings()['classes'];
+        $clean = [];
+        $errors = [];
+        foreach (array_values($rows) as $i => $row) {
+            $n = \Grav\Plugin\SimpleShop\Tax\TaxSettings::normalizeRate($row);
+            if ($n === null) {
+                $errors['ligne ' . ($i + 1)] = 'classe ou taux invalide';
+                continue;
+            }
+            if (!isset($classes[$n['class']])) {
+                $errors['ligne ' . ($i + 1)] = 'classe inconnue : ' . $n['class'];
+                continue;
+            }
+            $clean[] = ['class' => $n['class'], 'country' => $n['country'], 'region' => $n['region'], 'postcodes' => implode(';', $n['postcodes']),
+                'rate' => $n['bp'] / 100, 'name' => $n['name'], 'priority' => $n['priority'], 'compound' => $n['compound'],
+                'shipping' => $n['shipping'], 'category' => $n['category'], 'mention' => $n['mention']];
+        }
+        if ($errors !== []) {
+            throw new ValidationException('Taux invalides.', $errors);
+        }
+
+        $path = $this->grav['locator']->findResource('user://config/plugins/simple-shop.yaml', true, true);
+        $lock = fopen($path . '.lock', 'c');
+        if ($lock === false || !flock($lock, LOCK_EX)) {
+            throw new \RuntimeException('Configuration verrouillée.');
+        }
+        try {
+            $data = is_file($path) ? (array) \Grav\Common\Yaml::parse((string) file_get_contents($path)) : ['enabled' => true];
+            $data['taxes'] = is_array($data['taxes'] ?? null) ? $data['taxes'] : [];
+            $data['taxes']['rates'] = $clean;
+            $tmp = $path . '.tmp-' . bin2hex(random_bytes(4));
+            file_put_contents($tmp, \Grav\Common\Yaml::dump($data, 10));
+            rename($tmp, $path);
+        } finally {
+            flock($lock, LOCK_UN);
+            fclose($lock);
+        }
+        \Grav\Plugin\SimpleShop\Tax\TaxResolver::reset();
+        $this->grav['log']->info('[SimpleShop][API] Table des taux importée par ' . $this->getUser($request)->username . ' : ' . count($clean) . ' taux');
+
+        return ApiResponse::create(['saved' => true, 'count' => count($clean)]);
+    }
+
+    // ------------------------------------------------------------------
     // Adresses e-mail bannies
     // ------------------------------------------------------------------
 

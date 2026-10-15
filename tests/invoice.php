@@ -130,9 +130,9 @@ if ($rc === 0) {
 
 // 5. Panier : mêmes montants que la commande
 $cart = ['/livres/a' => ['title' => 'Un livre', 'quantity' => 2, 'price' => 12.95, 'unit_ht_cents' => 1227, 'unit_ttc_cents' => 1295, 'tax_code' => 'TVA_5_5', 'tax_bp' => 550]];
-$ac = OrderAmounts::fromCart($cart, ['name' => 'Colissimo', 'price' => 7.99, 'price_cents' => 799], $site, 'EUR');
+$ac = OrderAmounts::fromCart($cart, ['name' => 'Colissimo', 'price' => 7.99, 'price_cents' => 799], [['rate' => $site, 'weight' => 1]], 'EUR');
 assert($ac['total_ttc_cents'] === 3389 && $ac['shipping']['unit_ht_cents'] === 757 && $ac['items_ht_cents'] === 2454, 'panier en centimes');
-$ac = OrderAmounts::fromCart($cart, ['price' => 7.99], $site, 'EUR');   // ancienne session : prix décimal seul
+$ac = OrderAmounts::fromCart($cart, ['price' => 7.99], [['rate' => $site, 'weight' => 1]], 'EUR');   // ancienne session : prix décimal seul
 assert($ac['total_ttc_cents'] === 3389, 'ancienne session de livraison relue');
 
 // 6. Migration additive d'une base existante (schéma d'avant les centimes) : colonnes ajoutées, données intactes, rejouable

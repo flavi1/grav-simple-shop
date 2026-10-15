@@ -271,7 +271,7 @@
 
         draw() {
             var self = this;
-            var tabs = [['orders', 'Commandes'], ['carriers', 'Transporteurs'], ['bans', 'Adresses bannies']];
+            var tabs = [['orders', 'Commandes'], ['carriers', 'Transporteurs'], ['taxes', 'Taxes'], ['bans', 'Adresses bannies']];
 
             this.root.innerHTML = '';
             this.messageBox = h('div');
@@ -301,6 +301,7 @@
 
             if (this.tab === 'orders') { this.showOrders(); }
             if (this.tab === 'carriers') { this.showCarriers(); }
+            if (this.tab === 'taxes') { this.showTaxes(); }
             if (this.tab === 'bans') { this.showBans(); }
         }
 
@@ -1402,6 +1403,100 @@
         }
 
         // ---------------- Adresses bannies ----------------
+
+        // ---------------- Taxes ----------------
+
+        /**
+         * Vue d'ensemble des taxes et import/export CSV de la table des taux (ex. taux de TVA de chaque pays de l'UE pour
+         * le guichet unique OSS). Les réglages se modifient dans Plugins > Simple Shop > Taxes.
+         */
+        showTaxes() {
+            var self = this;
+            var COLS = ['classe', 'pays', 'region', 'codes_postaux', 'taux', 'nom', 'priorite', 'composee', 'livraison', 'categorie', 'mention'];
+            var KEYS = ['class', 'country', 'region', 'postcodes', 'rate', 'name', 'priority', 'compound', 'shipping', 'category', 'mention'];
+            var box = h('div');
+            var SHIPPING = { items: 'selon les articles du panier (panier mixte : taux le plus élevé)', items_prorata: 'selon les articles, au prorata du HT' };
+            var BASED = { shipping: 'adresse de livraison du client', billing: 'adresse de facturation du client', shop: 'adresse de la boutique' };
+
+            function toCsv(rates) {
+                var lines = [COLS.join(';')];
+                rates.forEach(function (r) {
+                    lines.push(KEYS.map(function (k) {
+                        var v = r[k];
+                        if (typeof v === 'boolean') { return v ? 'oui' : 'non'; }
+                        if (k === 'rate') { return String(v).replace('.', ','); }
+                        return String(v === null || v === undefined ? '' : v).replace(/;/g, ',');
+                    }).join(';'));
+                });
+                return '\ufeff' + lines.join('\r\n') + '\r\n';
+            }
+
+            function fromCsv(text) {
+                var lines = text.replace(/^\ufeff/, '').split(/\r?\n/).filter(function (l) { return l.trim() !== ''; });
+                if (!lines.length) { return []; }
+                var delim = lines[0].indexOf(';') > -1 ? ';' : (lines[0].indexOf('\t') > -1 ? '\t' : ',');
+                var rows = [];
+                lines.forEach(function (line, i) {
+                    var c = line.split(delim).map(function (x) { return x.trim().replace(/^"|"$/g, ''); });
+                    if (i === 0 && c[0].toLowerCase() === 'classe') { return; }
+                    var yes = function (v, d) { return v === '' || v === undefined ? d : /^(oui|yes|1|true|vrai)$/i.test(v); };
+                    rows.push({ class: c[0], country: c[1] || '', region: c[2] || '', postcodes: c[3] || '', rate: (c[4] || '').replace(',', '.'),
+                        name: c[5] || '', priority: parseInt(c[6] || '1', 10) || 1, compound: yes(c[7], false), shipping: yes(c[8], true),
+                        category: c[9] || '', mention: c[10] || '' });
+                });
+                return rows;
+            }
+
+            function draw(t) {
+                box.innerHTML = '';
+                box.appendChild(h('p', {}, (t.enabled ? 'Taxes activées' : 'Taxes désactivées') + ' ; prix des fiches saisis ' + t.prices_entered.toUpperCase()
+                    + ' ; taux calculé d’après l’' + (BASED[t.based_on] || t.based_on) + ' ; livraison : '
+                    + (SHIPPING[t.shipping_tax] || ('toujours la classe « ' + (t.classes[t.shipping_tax] || t.shipping_tax) + ' »')) + '.'));
+                if (t.small_business.enabled) { box.appendChild(h('p', { class: 'ss-muted' }, 'Franchise en base : ' + t.small_business.mention)); }
+
+                box.appendChild(h('h3', {}, 'Classes des types de produits'));
+                box.appendChild(h('table', {}, h('tbody', {}, Object.keys(t.types).map(function (type) {
+                    return h('tr', {}, h('td', {}, type), h('td', {}, t.classes[t.types[type]] || t.types[type]));
+                }).concat([h('tr', {}, h('td', { class: 'ss-muted' }, 'autres produits'), h('td', {}, t.classes[t.default_class] || t.default_class))]))));
+
+                box.appendChild(h('h3', {}, 'Taux (' + t.rates.length + ')'));
+                box.appendChild(h('table', {}, h('thead', {}, h('tr', {}, ['Classe', 'Pays', 'Région', 'Codes postaux', 'Taux', 'Nom', 'Priorité', 'Composée', 'Livraison', 'Catégorie', 'Mention']
+                    .map(function (l) { return h('th', { scope: 'col' }, l); }))),
+                    h('tbody', {}, t.rates.map(function (r) {
+                        return h('tr', {}, h('td', {}, t.classes[r.class] || r.class), h('td', {}, r.country || 'tous'), h('td', {}, r.region), h('td', {}, r.postcodes),
+                            h('td', { class: 'ss-num' }, String(r.rate).replace('.', ',') + ' %'), h('td', {}, r.name), h('td', { class: 'ss-num' }, String(r.priority)),
+                            h('td', {}, r.compound ? 'oui' : 'non'), h('td', {}, r.shipping ? 'oui' : 'non'), h('td', {}, r.category), h('td', {}, r.mention));
+                    }))));
+
+                var file = h('input', { type: 'file', accept: '.csv,text/csv,text/plain', class: 'ss-sr', tabindex: '-1', onchange: function () {
+                    var f = file.files && file.files[0];
+                    if (!f) { return; }
+                    f.text().then(function (text) {
+                        var rows = fromCsv(text);
+                        file.value = '';
+                        if (!rows.length) { self.notify('Aucun taux dans ce fichier.', true); return; }
+                        if (!window.confirm('Remplacer les ' + t.rates.length + ' taux actuels par les ' + rows.length + ' taux du fichier ?')) { return; }
+                        api('PUT', '/taxes/rates', { rates: rows })
+                            .then(function (res) { self.notify(res.data.count + ' taux importés.', false); load(); })
+                            .catch(function (e) { self.fail(e); });
+                    });
+                } });
+                box.appendChild(h('div', { class: 'ss-bar', style: 'margin-top:.8rem' },
+                    h('button', { class: 'ss-btn', type: 'button', onclick: function () {
+                        download(new Blob([toCsv(t.rates)], { type: 'text/csv;charset=utf-8' }), 'taux-de-taxe.csv');
+                    } }, 'Exporter les taux en CSV'),
+                    h('button', { class: 'ss-btn', type: 'button', onclick: function () { file.click(); } }, 'Importer un CSV (remplace les taux)…'), file));
+                box.appendChild(h('p', { class: 'ss-muted' }, 'CSV : colonnes ' + COLS.join(' ; ') + ' (séparateur « ; », virgule décimale, oui/non). '
+                    + 'Classes, réglages et taux un par un : Plugins > Simple Shop > Taxes.'));
+            }
+
+            function load() {
+                api('GET', '/taxes').then(function (res) { draw(res.data); }).catch(function (e) { self.fail(e); });
+            }
+
+            this.body.appendChild(box);
+            load();
+        }
 
         showBans() {
             var self = this;

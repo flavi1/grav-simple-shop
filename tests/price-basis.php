@@ -19,7 +19,7 @@ $pages = [
 // Avant : site en HT
 $grav = \SimpleShopTest\boot([], array_values($pages), null);
 $before = array_map(fn ($r) => Catalog::price($r)?->unitTtc->amount, ['/livres/paru', '/livres/futur', '/livres/explicite', '/divers/affiche']);
-assert($before === [1295, 1500, 1055, 1055], json_encode($before));
+assert($before === [1295, 1500, 1055, 1200], json_encode($before));   // affiche : classe par défaut (20 %)
 $dataDir = $grav['locator']->findResource('user://data/simple-shop', true, true);
 $config = (array) $grav['config']->get('plugins.simple-shop');
 assert(PriceBasisMigration::run($grav['pages']->all(), $dataDir, $config) === null, 'site toujours en HT : rien à faire');
@@ -38,7 +38,7 @@ assert(strpos($paru, "product_price: '12.95'") !== false && strpos($paru, "produ
 assert(strpos($paru, "title: Paru") !== false && strpos($paru, 'product_quantity: 5') !== false, 'autres lignes intactes');
 assert(strpos(file_get_contents($pages['futur']->file), "product_presale_price: '15.00'") !== false, '14.2180 HT → 15.00 TTC');
 assert(strpos(file_get_contents($pages['explicit']->file), "product_price: '10'") !== false, 'base explicite : non convertie');
-assert(strpos(file_get_contents($pages['generic']->file), "product_price: '10.55'") !== false, 'produit générique converti');
+assert(strpos(file_get_contents($pages['generic']->file), "product_price: '12.00'") !== false, 'produit générique converti');
 
 // Prix publics inchangés, lus désormais en TTC (en mémoire comme sur disque)
 $after = array_map(fn ($r) => Catalog::price($r)?->unitTtc->amount, ['/livres/paru', '/livres/futur', '/livres/explicite', '/divers/affiche']);

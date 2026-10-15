@@ -70,7 +70,7 @@ $m = $cart[CartStorage::lineId('/boutique/t-shirt', ['taille' => 'M'])];
 $l = $cart[CartStorage::lineId('/boutique/t-shirt', ['taille' => 'L', 'broderie' => 'Marie'])];
 assert($m['quantity'] === 1 && $m['options'] === ['taille' => 'M'] && $m['route'] === '/boutique/t-shirt');
 assert($l['quantity'] === 2 && $l['options'] === ['broderie' => 'Marie', 'taille' => 'L'], json_encode($l['options']));
-assert($m['unit_ttc_cents'] === 1055 && $l['unit_ttc_cents'] === 1266, 'prix selon les options : ' . $m['unit_ttc_cents'] . ' / ' . $l['unit_ttc_cents']);
+assert($m['unit_ttc_cents'] === 1200 && $l['unit_ttc_cents'] === 1440, 'prix (classe par défaut : taux normal 20 %) selon les options : ' . $m['unit_ttc_cents'] . ' / ' . $l['unit_ttc_cents']);
 
 // 3. Stock réservé par produit (toutes options confondues) : 5 en stock, 3 au panier
 assert(InventoryManager::getVirtualStock('/boutique/t-shirt') === 2, 'stock virtuel = 5 − 3');
@@ -88,7 +88,7 @@ $created = null;
 $ref = CartStorage::toOrder(null, $created, ['cart_id' => $session->shop_order->cart_id, 'customer' => [], 'shipping' => [], 'billing' => []]);
 $item = InventoryManager::getDatabase()->query("SELECT * FROM order_item WHERE order_reference = '{$ref}'")->fetch(PDO::FETCH_ASSOC);
 assert($item['line_id'] === $l['line_id'] && json_decode($item['options'], true) === ['broderie' => 'Marie', 'taille' => 'L'], json_encode($item));
-assert((int) $item['unit_ttc_cents'] === 1266 && (int) $item['quantity'] === 2);
+assert((int) $item['unit_ttc_cents'] === 1440 && (int) $item['quantity'] === 2);
 assert(str_contains(file_get_contents($shirt->file), "product_quantity: '3'") || str_contains(file_get_contents($shirt->file), 'product_quantity: 3'), 'stock 5 → 3');
 
 // 6. Reprise des anciennes lignes cart_item (sans options) dans cart_line

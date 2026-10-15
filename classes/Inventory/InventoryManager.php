@@ -31,7 +31,7 @@ class InventoryManager
         [$page, $type] = $resolved;
 
         try {
-            $price = $type->price($page, $options, Catalog::context($type));
+            $price = $type->price($page, $options, Catalog::context($type, null, 1, $page));
             $stockPhysical = $type->stock($page, $options);
         } catch (\Throwable $e) {
             Grav::instance()['log']->error("[SimpleShop] Produit {$productRoute} : " . $e->getMessage());
@@ -253,6 +253,7 @@ class InventoryManager
             'shipping_ttc_cents' => 'INTEGER',
             'shipping_tax_code'  => 'TEXT',
             'shipping_tax_bp'    => 'INTEGER',
+            'shipping_taxes'     => 'TEXT',
         ],
         'order_item' => [
             'unit_ht_cents'  => 'INTEGER',
@@ -262,6 +263,7 @@ class InventoryManager
             'product_type'   => 'TEXT',
             'line_id'        => 'TEXT',
             'options'        => 'TEXT',
+            'taxes'          => 'TEXT',
         ],
     ];
 

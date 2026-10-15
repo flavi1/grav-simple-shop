@@ -50,39 +50,161 @@ form:
     taxes_fieldset:
       type: fieldset
       title: Taxes
-      help: "Les prix des fiches produit sont saisis HT ou TTC (réglage ci-dessous, modifiable par fiche) ; la boutique affiche, encaisse et facture en TTC. Changer ce réglage convertit une fois les fiches existantes (prix TTC inchangé)."
+      help: "Comme WooCommerce : chaque type de produit a une CLASSE de taxe (ex. livres → Taux réduit), et chaque classe une liste de TAUX par pays (ou région, codes postaux). Valeurs par défaut : TVA française."
       fields:
+        taxes.enabled:
+          type: toggle
+          label: Activer les taxes
+          default: 1
+          highlight: 1
+          options: { 1: Oui, 0: Non }
+          validate: { type: bool }
         taxes.prices_entered:
           type: select
           label: Les prix des fiches produit sont saisis
+          help: "Changer ce réglage convertit une fois les fiches existantes (prix TTC inchangé). Une fiche peut avoir sa propre base (« Prix saisis »)."
           default: ht
           options:
             ht: Hors taxe (HT)
             ttc: Toutes taxes comprises (TTC)
-        taxes.default:
+        taxes.based_on:
+          type: select
+          label: Taux calculé d'après
+          help: "Avant que le client ait saisi son adresse (fiche produit, panier), l'adresse de la boutique est utilisée."
+          default: shipping
+          options:
+            shipping: "L'adresse de livraison du client"
+            billing: "L'adresse de facturation du client"
+            shop: "L'adresse de la boutique"
+        taxes.shipping_tax:
+          type: select
+          label: Taxe des frais de livraison
+          help: "En France, la livraison suit le taux des articles livrés ; pour un panier à plusieurs taux, la répartition au prorata est la pratique recommandée."
+          default: items
+          data-options@: '\Grav\Plugin\SimpleShop\Tax\TaxSettings::shippingOptions'
+          options:
+            items: 'Selon les articles du panier (panier mixte : taux le plus élevé)'
+            items_prorata: Selon les articles du panier, au prorata du HT
+        taxes.shop.country:
           type: text
-          label: Code de la taxe appliquée à tout le site
-          help: "Doit correspondre à un code de la liste ci-dessous (ex. TVA_5_5). Un type de produit peut imposer le sien (`shop.tax` de son blueprint, ex. book → TVA_5_5) ; la livraison suit ce code."
-          default: TVA_5_5
-        taxes.rates:
+          label: Pays de la boutique (code ISO à deux lettres)
+          default: FR
+          validate: { pattern: '[A-Za-z]{2}' }
+        taxes.shop.postcode:
+          type: text
+          label: Code postal de la boutique
+        taxes.default_class:
+          type: select
+          label: Classe de taxe par défaut
+          help: "Pour un produit dont le type n'a pas de classe."
+          default: standard
+          data-options@: '\Grav\Plugin\SimpleShop\Tax\TaxSettings::classOptions'
+          options: { standard: 'Taux normal', intermediaire: 'Taux intermédiaire', reduit: 'Taux réduit', particulier: 'Taux particulier', zero: 'Taux zéro', exonere: 'Exonéré' }
+        taxes.small_business.enabled:
+          type: toggle
+          label: Franchise en base de TVA
+          help: "Aucune TVA facturée ; la mention ci-dessous est imprimée sur les factures."
+          default: 0
+          highlight: 0
+          options: { 1: Oui, 0: Non }
+          validate: { type: bool }
+        taxes.small_business.mention:
+          type: text
+          label: Mention de franchise
+          default: 'TVA non applicable, art. 293 B du CGI'
+        taxes.classes:
           type: list
-          label: Types de taxes
-          help: "Un type par ligne : code, libellé, taux (0.055 pour 5,5 %)."
+          label: Classes de taxe
+          help: "Code (lettres, chiffres, tiret) et libellé. Les commandes passées gardent leur taxe."
           style: vertical
           fields:
             .code:
               type: text
               label: Code
-              placeholder: TVA_5_5
+              placeholder: reduit
+              validate: { required: true, pattern: '[A-Za-z0-9_-]{1,40}' }
             .label:
               type: text
               label: Libellé
-              placeholder: TVA 5,5 %
+              placeholder: Taux réduit
+        taxes.rates:
+          type: list
+          label: Taux
+          help: "Pour une classe et une adresse, on retient à chaque priorité la ligne la plus précise (code postal, puis région, puis pays, puis « tous ») ; plusieurs priorités = plusieurs taxes cumulées."
+          style: vertical
+          fields:
+            .class:
+              type: select
+              label: Classe
+              data-options@: '\Grav\Plugin\SimpleShop\Tax\TaxSettings::classOptions'
+              options: { standard: 'Taux normal', intermediaire: 'Taux intermédiaire', reduit: 'Taux réduit', particulier: 'Taux particulier', zero: 'Taux zéro', exonere: 'Exonéré' }
+            .country:
+              type: text
+              label: Pays (vide = tous)
+              placeholder: FR
+            .region:
+              type: text
+              label: Région (code, facultatif)
+            .postcodes:
+              type: text
+              label: Codes postaux (facultatif)
+              help: "Séparés par « ; ». « 20* » = commence par 20 ; « 97100...97199 » = intervalle."
             .rate:
+              type: text
+              label: Taux (%)
+              placeholder: '5.5'
+              validate: { required: true, pattern: '[0-9]+([.,][0-9]{1,4})?' }
+            .name:
+              type: text
+              label: Nom (affiché et sur la facture)
+              placeholder: TVA 5,5 %
+            .priority:
               type: number
-              label: Taux
-              step: 0.001
-              placeholder: '0.055'
+              label: Priorité
+              default: 1
+              validate: { min: 1 }
+            .compound:
+              type: toggle
+              label: Composée (calculée sur le prix déjà taxé)
+              default: 0
+              highlight: 0
+              options: { 1: Oui, 0: Non }
+              validate: { type: bool }
+            .shipping:
+              type: toggle
+              label: S'applique aux frais de livraison
+              default: 1
+              highlight: 1
+              options: { 1: Oui, 0: Non }
+              validate: { type: bool }
+            .category:
+              type: select
+              label: Catégorie (facture électronique)
+              default: S
+              options:
+                S: Taux normal ou réduit
+                Z: Taux zéro
+                E: 'Exonéré (mention obligatoire)'
+                O: Hors champ de la TVA
+            .mention:
+              type: text
+              label: Mention sur la facture (exonération)
+              placeholder: 'TVA non applicable, art. 261-4-4°-a du CGI'
+        taxes.types:
+          type: list
+          label: Classe de chaque type de produit
+          help: "Remplace la classe déclarée dans le blueprint du type (ex. book → Taux réduit). Une fiche peut aussi avoir sa propre classe."
+          style: vertical
+          fields:
+            .type:
+              type: select
+              label: Type de produit
+              data-options@: '\Grav\Plugin\SimpleShop\Tax\TaxSettings::typeOptions'
+            .class:
+              type: select
+              label: Classe de taxe
+              data-options@: '\Grav\Plugin\SimpleShop\Tax\TaxSettings::classOptions'
+              options: { standard: 'Taux normal', intermediaire: 'Taux intermédiaire', reduit: 'Taux réduit', particulier: 'Taux particulier', zero: 'Taux zéro', exonere: 'Exonéré' }
 
     delivery_fieldset:
       type: fieldset

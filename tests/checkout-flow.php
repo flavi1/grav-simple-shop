@@ -119,8 +119,8 @@ assert(count($items) === 1 && (int) $items[0]['quantity'] === 2 && abs((float) $
 // Instantané par ligne : prix HT/TTC en centimes, taxe et type figés (la facture ne relit plus la configuration).
 assert((int) $order['total_cents'] === 3389 && $order['currency'] === 'EUR', 'total en centimes');
 assert((int) $order['shipping_ttc_cents'] === 799 && (int) $order['shipping_ht_cents'] === 757 && (int) $order['shipping_tax_bp'] === 550, 'livraison : 7,99 TTC = 7,57 HT à 5,5 %');
-assert((int) $items[0]['unit_ttc_cents'] === 1295 && (int) $items[0]['unit_ht_cents'] === 1227 && $items[0]['tax_code'] === 'TVA_5_5'
-    && (int) $items[0]['tax_bp'] === 550 && $items[0]['product_type'] === 'book', 'ligne : 12,95 TTC, 12,27 HT, TVA_5_5, book');
+assert((int) $items[0]['unit_ttc_cents'] === 1295 && (int) $items[0]['unit_ht_cents'] === 1227 && $items[0]['tax_code'] === 'reduit'
+    && (int) $items[0]['tax_bp'] === 550 && $items[0]['product_type'] === 'book', 'ligne : 12,95 TTC, 12,27 HT, classe reduit, book');
 assert(json_decode($order['shipping_data'], true)['key'] === 'colis');
 assert(strpos(file_get_contents($book->file), "product_quantity: '8'") !== false || strpos(file_get_contents($book->file), 'product_quantity: 8') !== false, 'stock 10 → 8 : ' . file_get_contents($book->file));
 $invoice = $db->query('SELECT * FROM invoice')->fetch(PDO::FETCH_ASSOC);

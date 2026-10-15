@@ -85,6 +85,7 @@ class ShippingManager
         $packaging = self::packaging((array) $grav['config']->get('plugins.simple-shop', []));
 
         $shippable = 0;
+        $taxMix = [];
         foreach ($cartItems as $key => $item) {
             $route = (string) ($item['route'] ?? $key);
             // Montant de la ligne en centimes (prix calculé par le type), ramené en euros pour les règles de livraison.
@@ -102,6 +103,10 @@ class ShippingManager
                 $metrics = $type->shipping($page, (array) ($item['options'] ?? []));
                 if ($metrics !== null) {
                     $shippable += (int) $item['quantity'];
+                    // Classe de taxe → HT des articles expédiés : décide de la taxe des frais de livraison (Tax\TaxResolver).
+                    if (!empty($item['tax_code'])) {
+                        $taxMix[$item['tax_code']] = ($taxMix[$item['tax_code']] ?? 0) + (int) ($item['unit_ht_cents'] ?? 0) * (int) $item['quantity'];
+                    }
                     $totalWeight += $metrics['weight_g'] * (int) $item['quantity'];
                     // Les exemplaires sont empilés : l'épaisseur s'additionne.
                     $stackThickness += $metrics['thickness_mm'] * (int) $item['quantity'];
@@ -120,6 +125,7 @@ class ShippingManager
             'subtotal'  => $basketSubtotal,
             'shippable' => $shippable,
             'subtotals' => $subtotals,
+            'tax_mix'   => $taxMix,
             'weight'    => $totalWeight,
             'thickness' => $stackThickness
         ];
@@ -152,17 +158,34 @@ class ShippingManager
      * sont saisis HT. Un palier à 0 (livraison offerte) reste à 0 : la marge ne s'y ajoute pas.
      * Les contraintes globales (ShippingConstraints) s'appliquent ensuite, sur le TTC.
      */
-    public static function priceTtc(float $gridPrice, array $margin, array $config): float
+    public static function priceTtc(float $gridPrice, array $margin, array $config, array $metrics = []): float
     {
         $price = $gridPrice;
         if ($price > 0) {
             $price = $price * (1 + max(0.0, (float) ($margin['percent'] ?? 0)) / 100) + max(0.0, (float) ($margin['fixed'] ?? 0));
         }
         if (self::pricesEnteredHt($config)) {
-            $price = $price * (1 + \Grav\Plugin\SimpleShop\Services\TaxManager::defaultRate($config));
+            // Taxe de la livraison selon les articles expédiés (classe(s) de taxe, voir Tax\TaxResolver::shippingParts()).
+            $parts = \Grav\Plugin\SimpleShop\Tax\TaxResolver::shippingParts((array) ($metrics['tax_mix'] ?? []), null, $config);
+            $cents = \Grav\Plugin\SimpleShop\Pricing\Money::fromLegacyDecimal(max(0.0, $price), 'EUR')->amount;
+
+            return \Grav\Plugin\SimpleShop\Tax\TaxResolver::shippingTtcFromHt($cents, $parts) / 100;
         }
 
         return round($price, 2);
+    }
+
+    /** Taux effectif de la livraison pour ce panier (affichage du détail du calcul). */
+    public static function shippingRate(array $metrics, ?array $config = null): float
+    {
+        $parts = \Grav\Plugin\SimpleShop\Tax\TaxResolver::shippingParts((array) ($metrics['tax_mix'] ?? []), null, $config);
+        $total = array_sum(array_column($parts, 'weight')) ?: 1;
+        $bp = 0;
+        foreach ($parts as $p) {
+            $bp += ($p['rate']?->basisPoints ?? 0) * $p['weight'] / $total;
+        }
+
+        return round($bp / 10000, 4);
     }
 
     /**
@@ -241,7 +264,7 @@ class ShippingManager
         $grid = $freeApplied ? 0.0 : $matched;
         // Forfait : le prix saisi est le prix voulu, sans marge.
         $margin = $flat ? [] : (array) ($mode['margin'] ?? []);
-        $before = self::priceTtc($grid, $margin, $config);
+        $before = self::priceTtc($grid, $margin, $config, $metrics);
 
         // Contraintes globales (lois, offres commerciales), dans l'ordre de la liste.
         [$final, $applied] = ShippingConstraints::apply($before, (string) ($mode['key'] ?? ''), $metrics, $constraints);
@@ -252,7 +275,7 @@ class ShippingManager
             'after_margin'       => $grid > 0
                 ? round($grid * (1 + max(0.0, (float) ($margin['percent'] ?? 0)) / 100) + max(0.0, (float) ($margin['fixed'] ?? 0)), 4)
                 : 0.0,
-            'vat_rate'           => self::pricesEnteredHt($config) ? \Grav\Plugin\SimpleShop\Services\TaxManager::defaultRate($config) : 0.0,
+            'vat_rate'           => self::pricesEnteredHt($config) ? self::shippingRate($metrics, $config) : 0.0,
             'price_before_constraints' => $before,
             'constraints'        => $applied,
             'free_applied'       => $freeApplied,
@@ -284,14 +307,14 @@ class ShippingManager
         }
 
         $grid = max(0.0, (float) ($mode['flat_price'] ?? 0));
-        $before = self::priceTtc($grid, [], $config);
+        $before = self::priceTtc($grid, [], $config, $metrics);
         [$final, $applied] = ShippingConstraints::apply($before, (string) ($mode['key'] ?? ''), $metrics, $constraints);
 
         return ['quote' => [
             'price'                    => $final,
             'grid_price'               => $grid,
             'after_margin'             => $grid,
-            'vat_rate'                 => self::pricesEnteredHt($config) ? \Grav\Plugin\SimpleShop\Services\TaxManager::defaultRate($config) : 0.0,
+            'vat_rate'                 => self::pricesEnteredHt($config) ? self::shippingRate($metrics, $config) : 0.0,
             'price_before_constraints' => $before,
             'constraints'              => $applied,
             'free_applied'             => false,

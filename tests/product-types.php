@@ -33,7 +33,7 @@ $grav = \SimpleShopTest\boot([], $pages, null);
 // 1. Découverte : le type « book » vient du blueprint du thème, avec sa taxe
 $types = ProductTypes::all();
 assert(isset($types['book']), 'type book découvert dans themes/bookstore/blueprints/book.yaml');
-assert($types['book']->taxCode === 'TVA_5_5', 'taxe du type book');
+assert($types['book']->taxCode === 'reduit', 'classe de taxe du type book');
 assert(ProductTypes::errors() === [], 'aucune erreur de déclaration : ' . implode(' | ', ProductTypes::errors()));
 
 // 2. Prix du type book
@@ -45,7 +45,7 @@ assert(Catalog::price('/livres/futur-sans-prevente') === null, 'à paraître san
 assert(Catalog::price('/livres/ailleurs') === null, 'vendu ailleurs : non vendable ici');
 $p = Catalog::price('/livres/ttc');
 assert($p && $p->unitTtc->amount === 1000 && $p->enteredAs === Price::TTC, 'saisie TTC sur la fiche conservée');
-assert(json_decode(json_encode($p), true)['tax_code'] === 'TVA_5_5' && json_decode(json_encode($p), true)['currency'] === 'EUR', 'contrat : taxe et devise dans la réponse');
+assert(json_decode(json_encode($p), true)['tax_code'] === 'reduit' && json_decode(json_encode($p), true)['currency'] === 'EUR', 'contrat : taxe et devise dans la réponse');
 
 // 3. Expédition et présentation du type book (épaisseur en cm → mm ; 100 g par défaut)
 [$page, $type] = Catalog::resolve('/livres/paru');
@@ -60,7 +60,7 @@ assert($type->presentation($page, [])['label'] === 'Futur', 'présentation book'
 assert($type->name === ProductTypes::FALLBACK, 'gabarit non déclaré + product_price → type générique');
 assert($type->shipping($page, []) === ['weight_g' => 80, 'thickness_mm' => 3], 'expédition générique (mm)');
 assert($type->stock($page, []) === 2, 'stock générique');
-assert(Catalog::price('/divers/affiche')->unitTtc->amount === 1055, 'générique : 10 € HT → 10,55 € TTC (taxe du site)');
+assert(Catalog::price('/divers/affiche')->unitTtc->amount === 1200, 'générique : 10 € HT → 12,00 € TTC (classe par défaut, taux normal)');
 assert(Catalog::resolve('/a-propos') === null, 'page sans prix : pas un produit');
 try {
     $type->options($page, ['taille' => 'A2']);

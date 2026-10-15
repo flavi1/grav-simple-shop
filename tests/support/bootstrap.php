@@ -182,6 +182,7 @@ namespace SimpleShopTest {
 
         Grav::reset();
         \Grav\Plugin\SimpleShop\Product\ProductTypes::reset();
+        \Grav\Plugin\SimpleShop\Tax\TaxResolver::reset();
         $grav = Grav::instance();
         $config = \Symfony\Component\Yaml\Yaml::parseFile($plugins . '/simple-shop/simple-shop.yaml');
         $config = array_replace_recursive($config, $configOverrides);

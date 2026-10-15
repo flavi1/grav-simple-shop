@@ -99,6 +99,9 @@ class CartStorage
                 'unit_ht_cents' => $price ? $price->unitHt->amount : 0,
                 'tax_code' => $price ? $price->tax->code : null,
                 'tax_bp' => $price ? $price->tax->basisPoints : null,
+                'tax_components' => $price ? array_map(static fn ($c) => $c->jsonSerialize(), $price->tax->components) : [],
+                // Article expédié (le type renvoie des mesures) : seuls ceux-là décident de la taxe de la livraison.
+                'shippable' => $type ? $type->shipping($page, $options) !== null : true,
                 'currency' => $price ? $price->currency() : null,
                 'product_type' => $type ? $type->name : null,
                 'quantity' => (int)$item['quantity'],
@@ -424,9 +427,9 @@ class CartStorage
             // Insertion de la commande
             $stmtOrder = $db->prepare("
                 INSERT INTO \"order\" (order_reference, customer_data, shipping_data, billing_data, total_amount, status,
-                    currency, total_cents, shipping_ht_cents, shipping_ttc_cents, shipping_tax_code, shipping_tax_bp)
+                    currency, total_cents, shipping_ht_cents, shipping_ttc_cents, shipping_tax_code, shipping_tax_bp, shipping_taxes)
                 VALUES (:ref, :customer, :shipping, :billing, :total, 'paid',
-                    :currency, :total_cents, :ship_ht, :ship_ttc, :ship_code, :ship_bp)
+                    :currency, :total_cents, :ship_ht, :ship_ttc, :ship_code, :ship_bp, :ship_taxes)
             ");
             $siteTax = \Grav\Plugin\SimpleShop\Product\Catalog::taxRate();
             $stmtOrder->execute([
@@ -437,10 +440,13 @@ class CartStorage
                 ':total'       => $totalAmount,
                 ':currency'    => $amounts['currency'],
                 ':total_cents' => $amounts['total_ttc_cents'],
-                ':ship_ht'     => $ship['unit_ht_cents'] ?? 0,
-                ':ship_ttc'    => $ship['unit_ttc_cents'] ?? 0,
+                ':ship_ht'     => $amounts['shipping_ht_cents'],
+                ':ship_ttc'    => $amounts['shipping_ttc_cents'],
                 ':ship_code'   => $ship['tax_code'] ?? $siteTax->code,
                 ':ship_bp'     => $ship['tax_bp'] ?? $siteTax->basisPoints,
+                // Une part par taxe (panier mixte au prorata) : titre, HT, TTC, taxe et ses composantes.
+                ':ship_taxes'  => json_encode(array_map(static fn ($l) => ['title' => $l['title'], 'ht' => $l['unit_ht_cents'], 'ttc' => $l['unit_ttc_cents'],
+                    'code' => $l['tax_code'], 'bp' => $l['tax_bp'], 'taxes' => $l['taxes']], $amounts['shipping_lines']), JSON_UNESCAPED_UNICODE),
             ]);
 
             // Rattachement du paiement à la commande : la clé primaire garantit
@@ -464,8 +470,8 @@ class CartStorage
             // Insertion des articles de la commande
             $stmtItem = $db->prepare("
                 INSERT INTO order_item (order_reference, product_route, title, price, quantity,
-                    unit_ht_cents, unit_ttc_cents, tax_code, tax_bp, product_type, line_id, options)
-                VALUES (:ref, :route, :title, :price, :qty, :ht, :ttc, :code, :bp, :type, :lid, :options)
+                    unit_ht_cents, unit_ttc_cents, tax_code, tax_bp, product_type, line_id, options, taxes)
+                VALUES (:ref, :route, :title, :price, :qty, :ht, :ttc, :code, :bp, :type, :lid, :options, :taxes)
             ");
             foreach ($amounts['lines'] as $line) {
                 if ($line['kind'] !== 'item') {
@@ -484,6 +490,7 @@ class CartStorage
                     ':type'  => $cartItems[$line['line_id']]['product_type'] ?? null,
                     ':lid'   => $line['line_id'],
                     ':options' => self::optionsJson((array) ($cartItems[$line['line_id']]['options'] ?? [])),
+                    ':taxes' => json_encode($line['taxes'], JSON_UNESCAPED_UNICODE),
                 ]);
             }
 

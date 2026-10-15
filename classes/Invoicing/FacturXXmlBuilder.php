@@ -174,8 +174,10 @@ class FacturXXmlBuilder
             $xml .= '<ram:ApplicableTradeTax>'
                 . '<ram:CalculatedAmount>' . self::amount($tax['tax_cents']) . '</ram:CalculatedAmount>'
                 . '<ram:TypeCode>VAT</ram:TypeCode>'
+                // Exonération (catégorie E) : motif obligatoire (BT-120, règle BR-E-10).
+                . (($tax['category'] ?? '') === 'E' ? '<ram:ExemptionReason>' . $this->esc((string) ($tax['mention'] ?: 'Exonération de TVA')) . '</ram:ExemptionReason>' : '')
                 . '<ram:BasisAmount>' . self::amount($tax['base_cents']) . '</ram:BasisAmount>'
-                . '<ram:CategoryCode>' . self::category($tax['bp']) . '</ram:CategoryCode>'
+                . '<ram:CategoryCode>' . $this->esc((string) ($tax['category'] ?? self::category($tax['bp']))) . '</ram:CategoryCode>'
                 . '<ram:RateApplicablePercent>' . self::percent($tax['bp']) . '</ram:RateApplicablePercent>'
                 . '</ram:ApplicableTradeTax>';
         }
@@ -214,8 +216,8 @@ class FacturXXmlBuilder
             . '<ram:SpecifiedLineTradeSettlement>'
             . '<ram:ApplicableTradeTax>'
             . '<ram:TypeCode>VAT</ram:TypeCode>'
-            . '<ram:CategoryCode>' . self::category($line['tax_bp']) . '</ram:CategoryCode>'
-            . '<ram:RateApplicablePercent>' . self::percent($line['tax_bp']) . '</ram:RateApplicablePercent>'
+            . '<ram:CategoryCode>' . $this->esc((string) ($line['taxes'][0]['category'] ?? self::category($line['tax_bp']))) . '</ram:CategoryCode>'
+            . '<ram:RateApplicablePercent>' . self::percent((int) ($line['taxes'][0]['bp'] ?? $line['tax_bp'])) . '</ram:RateApplicablePercent>'
             . '</ram:ApplicableTradeTax>'
             . '<ram:SpecifiedTradeSettlementLineMonetarySummation>'
             . '<ram:LineTotalAmount>' . self::amount($line['line_ht_cents']) . '</ram:LineTotalAmount>'

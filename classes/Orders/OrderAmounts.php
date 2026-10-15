@@ -3,33 +3,38 @@
 namespace Grav\Plugin\SimpleShop\Orders;
 
 use Grav\Plugin\SimpleShop\Pricing\Money;
+use Grav\Plugin\SimpleShop\Pricing\TaxComponent;
 use Grav\Plugin\SimpleShop\Pricing\TaxRate;
+use Grav\Plugin\SimpleShop\Tax\TaxResolver;
 
 /**
  * Montants d'une commande, en centimes entiers : une seule source pour le panier, le paiement, la commande enregistrée
  * et la facture.
  *
- * Une **ligne** = produit (ou frais de livraison) avec ses prix unitaires HT et TTC, son code de taxe, son taux en
- * points de base et sa quantité. Le **total payé** est la somme des TTC des lignes : c'est le montant encaissé.
+ * Une **ligne** = produit (ou part des frais de livraison) avec ses prix unitaires HT et TTC, sa taxe (code de classe,
+ * taux effectif en points de base, composantes) et sa quantité. Le **total payé** est la somme des TTC des lignes.
  *
- * La **facture** (EN 16931) regroupe les lignes par taux : base HT = somme des HT, TVA = arrondi(base × taux),
- * total TTC = base + TVA. L'écart éventuel avec le montant encaissé (quelques centimes) est le montant d'arrondi BT-114.
+ * Livraison : une ligne par taxe. Selon le réglage `taxes.shipping_tax` (Tax\TaxResolver::shippingParts()), une seule
+ * (taux des articles, le plus élevé si le panier est mixte, ou classe fixe) ou plusieurs (prorata du HT des articles).
  *
- * Les commandes enregistrées avant les centimes (colonnes vides) sont relues depuis leurs anciens montants décimaux TTC
- * et le taux unique figé sur leur facture (ou le taux du site).
+ * Facture : les lignes sont regroupées par taxe élémentaire (catégorie + taux) : base HT = somme des HT,
+ * TVA = arrondi(base × taux) ; l'écart avec le montant encaissé est le montant d'arrondi BT-114.
+ *
+ * Les commandes enregistrées avant les centimes sont relues depuis leurs montants décimaux et le taux de leur facture.
  */
 final class OrderAmounts
 {
     /**
      * Montants du panier en cours.
      *
-     * @param array $cartItems Lignes de CartStorage::getCartItems() (clés `unit_ttc_cents`, `unit_ht_cents`, `tax_code`, `tax_bp`…).
-     * @param array $shipping  Livraison choisie (`price_cents`, sinon ancien `price` décimal TTC ; `name`).
-     * @param TaxRate $shippingTax Taxe des frais de livraison (taux du site).
+     * @param array $cartItems      Lignes de CartStorage::getCartItems() (`unit_ttc_cents`, `unit_ht_cents`, `tax_code`, `tax_bp`, `tax_components`…).
+     * @param array $shipping       Livraison choisie (`price_cents`, sinon ancien `price` décimal TTC ; `name`).
+     * @param array $shippingParts  Parts de taxe de la livraison (Tax\TaxResolver::shippingParts()).
      */
-    public static function fromCart(array $cartItems, array $shipping, TaxRate $shippingTax, string $currency): array
+    public static function fromCart(array $cartItems, array $shipping, array $shippingParts, string $currency): array
     {
         $lines = [];
+        $fallback = $shippingParts[0]['rate'] ?? null;
         foreach ($cartItems as $key => $item) {
             $route = (string) ($item['route'] ?? $key);
             $qty = (int) ($item['quantity'] ?? 0);
@@ -37,23 +42,38 @@ final class OrderAmounts
                 continue;
             }
             $ttc = isset($item['unit_ttc_cents']) ? (int) $item['unit_ttc_cents'] : self::cents($item['price'] ?? 0);
-            $bp = isset($item['tax_bp']) ? (int) $item['tax_bp'] : $shippingTax->basisPoints;
-            $ht = isset($item['unit_ht_cents']) ? (int) $item['unit_ht_cents'] : (new TaxRate('', $bp))->removeFrom(Money::of($ttc, $currency))->amount;
-            $lines[] = self::line('item', (string) ($item['title'] ?? $route), $qty, $ht, $ttc, (string) ($item['tax_code'] ?? $shippingTax->code), $bp, $route,
-                (string) ($item['line_id'] ?? $key), (array) ($item['options'] ?? []));
+            $bp = isset($item['tax_bp']) ? (int) $item['tax_bp'] : ($fallback?->basisPoints ?? 0);
+            $ht = isset($item['unit_ht_cents']) ? (int) $item['unit_ht_cents'] : (new TaxRate('x', $bp))->removeFrom(Money::of($ttc, $currency))->amount;
+            $components = (array) ($item['tax_components'] ?? []);
+            $lines[] = self::line('item', (string) ($item['title'] ?? $route), $qty, $ht, $ttc, (string) ($item['tax_code'] ?? $fallback?->code ?? ''), $bp,
+                $components ?: self::defaultComponents((string) ($item['tax_code'] ?? ''), $bp), $route, (string) ($item['line_id'] ?? $key), (array) ($item['options'] ?? []));
         }
-        $shipLine = self::shippingLine($shipping, $shippingTax, $currency);
-        if ($shipLine !== null) {
-            $lines[] = $shipLine;
+        $ttc = isset($shipping['price_cents']) ? (int) $shipping['price_cents'] : self::cents($shipping['price'] ?? 0);
+        $parts = TaxResolver::splitShippingTtc($ttc, $shippingParts, $currency);
+        foreach ($parts as $p) {
+            $lines[] = self::shippingLine($shipping, $p, count($parts) > 1);
         }
 
         return self::assemble($lines, $currency);
     }
 
-    /** Montants du panier avec la devise et la taxe de livraison du site. */
+    /** Montants du panier avec la devise du site et la taxe de livraison déduite des articles expédiés. */
     public static function forSite(array $cartItems, array $shipping): array
     {
-        return self::fromCart($cartItems, $shipping, \Grav\Plugin\SimpleShop\Product\Catalog::taxRate(), \Grav\Plugin\SimpleShop\Product\Catalog::currency());
+        return self::fromCart($cartItems, $shipping, TaxResolver::shippingParts(self::taxMix($cartItems)), \Grav\Plugin\SimpleShop\Product\Catalog::currency());
+    }
+
+    /** Classe de taxe → HT (centimes) des articles expédiés du panier. */
+    public static function taxMix(array $cartItems): array
+    {
+        $mix = [];
+        foreach ($cartItems as $item) {
+            if (($item['shippable'] ?? true) && !empty($item['tax_code'])) {
+                $mix[$item['tax_code']] = ($mix[$item['tax_code']] ?? 0) + (int) ($item['unit_ht_cents'] ?? 0) * (int) ($item['quantity'] ?? 0);
+            }
+        }
+
+        return $mix;
     }
 
     /** Montants d'une commande enregistrée, taxe du site et taux figé sur sa facture (anciennes commandes). */
@@ -86,21 +106,29 @@ final class OrderAmounts
                 $code = $legacyTax->code;
                 $bp = $legacyTax->basisPoints;
             }
+            $components = json_decode((string) ($item['taxes'] ?? ''), true);
             $options = json_decode((string) ($item['options'] ?? '{}'), true);
-            $lines[] = self::line('item', (string) ($item['title'] ?? ''), $qty, $ht, $ttc, $code, $bp, (string) ($item['product_route'] ?? ''),
-                (string) ($item['line_id'] ?? ''), is_array($options) ? $options : []);
+            $lines[] = self::line('item', (string) ($item['title'] ?? ''), $qty, $ht, $ttc, $code, $bp,
+                is_array($components) && $components !== [] ? $components : self::defaultComponents($code, $bp),
+                (string) ($item['product_route'] ?? ''), (string) ($item['line_id'] ?? ''), is_array($options) ? $options : []);
         }
 
         $shipping = json_decode((string) ($order['shipping_data'] ?? '{}'), true) ?: [];
-        if (isset($order['shipping_ttc_cents']) && $order['shipping_ttc_cents'] !== null && $order['shipping_ttc_cents'] !== '') {
+        $parts = json_decode((string) ($order['shipping_taxes'] ?? ''), true);
+        if (is_array($parts) && $parts !== []) {
+            foreach ($parts as $p) {
+                $lines[] = self::line('shipping', (string) ($p['title'] ?? self::shippingTitle($shipping)), 1, (int) $p['ht'], (int) $p['ttc'],
+                    (string) $p['code'], (int) $p['bp'], (array) ($p['taxes'] ?? []));
+            }
+        } elseif (isset($order['shipping_ttc_cents']) && $order['shipping_ttc_cents'] !== null && $order['shipping_ttc_cents'] !== '') {
             if ((int) $order['shipping_ttc_cents'] > 0) {
                 $lines[] = self::line('shipping', self::shippingTitle($shipping), 1, (int) $order['shipping_ht_cents'], (int) $order['shipping_ttc_cents'],
-                    (string) $order['shipping_tax_code'], (int) $order['shipping_tax_bp']);
+                    (string) $order['shipping_tax_code'], (int) $order['shipping_tax_bp'], self::defaultComponents((string) $order['shipping_tax_code'], (int) $order['shipping_tax_bp']));
             }
         } else {
-            $shipLine = self::shippingLine($shipping, $legacyTax, $currency);
-            if ($shipLine !== null) {
-                $lines[] = $shipLine;
+            $ttc = isset($shipping['price_cents']) ? (int) $shipping['price_cents'] : self::cents($shipping['price'] ?? 0);
+            if ($ttc > 0) {
+                $lines[] = self::shippingLine($shipping, ['rate' => $legacyTax, 'ht' => $legacyTax->removeFrom(Money::of($ttc, $currency))->amount, 'ttc' => $ttc], false);
             }
         }
 
@@ -108,25 +136,45 @@ final class OrderAmounts
     }
 
     /**
-     * Totaux de facture EN 16931 : par taux (base HT, TVA), totaux d'en-tête et montant d'arrondi.
+     * Totaux de facture : par taxe élémentaire (catégorie, taux, nom), totaux d'en-tête et montant d'arrondi.
+     * `en16931` faux si une ligne porte plusieurs taxes ou une taxe composée (non exprimable en facture électronique EN 16931).
      *
-     * @return array{taxes: list<array{code: string, bp: int, base_cents: int, tax_cents: int}>, line_total_ht_cents: int,
-     *               tax_total_cents: int, grand_total_cents: int, rounding_cents: int, due_cents: int}
+     * @return array{taxes: list<array{code: string, name: string, bp: int, category: string, mention: string, base_cents: int, tax_cents: int}>,
+     *               line_total_ht_cents: int, tax_total_cents: int, grand_total_cents: int, rounding_cents: int, due_cents: int,
+     *               en16931: bool, mentions: list<string>}
      */
     public static function invoiceTotals(array $amounts): array
     {
         $groups = [];
-        foreach ($amounts['lines'] as $line) {
-            $k = $line['tax_bp'] . '|' . $line['tax_code'];
-            $groups[$k] ??= ['code' => $line['tax_code'], 'bp' => $line['tax_bp'], 'base_cents' => 0, 'tax_cents' => 0];
-            $groups[$k]['base_cents'] += $line['line_ht_cents'];
-        }
+        $simple = true;
         $lineTotal = 0;
+        foreach ($amounts['lines'] as $line) {
+            $lineTotal += $line['line_ht_cents'];
+            $components = array_map([TaxComponent::class, 'fromArray'], $line['taxes']);
+            if (count($components) !== 1 || $components[0]->compound) {
+                $simple = false;
+                foreach ((new TaxRate($line['tax_code'] ?: 'x', min(9999, $line['tax_bp']), $components))->breakdown(Money::of($line['line_ht_cents'], $amounts['currency'])) as $b) {
+                    $g = &self::group($groups, $b['component']);
+                    $g['base_cents'] += $line['line_ht_cents'];
+                    $g['fixed_tax'] += $b['amount'];
+                    unset($g);
+                }
+                continue;
+            }
+            $g = &self::group($groups, $components[0]);
+            $g['base_cents'] += $line['line_ht_cents'];
+            $g['simple_base'] += $line['line_ht_cents'];
+            unset($g);
+        }
         $taxTotal = 0;
+        $mentions = [];
         foreach ($groups as &$g) {
-            $g['tax_cents'] = (new TaxRate($g['code'], $g['bp']))->taxOn(Money::of($g['base_cents'], $amounts['currency']))->amount;
-            $lineTotal += $g['base_cents'];
+            $g['tax_cents'] = (new TaxRate('x', $g['bp']))->taxOn(Money::of($g['simple_base'], $amounts['currency']))->amount + $g['fixed_tax'];
             $taxTotal += $g['tax_cents'];
+            if ($g['mention'] !== '') {
+                $mentions[] = $g['mention'];
+            }
+            unset($g['simple_base'], $g['fixed_tax']);
         }
         unset($g);
         $grand = $lineTotal + $taxTotal;
@@ -138,6 +186,8 @@ final class OrderAmounts
             'grand_total_cents'   => $grand,
             'rounding_cents'      => $amounts['total_ttc_cents'] - $grand,
             'due_cents'           => $amounts['total_ttc_cents'],
+            'en16931'             => $simple,
+            'mentions'            => array_values(array_unique($mentions)),
         ];
     }
 
@@ -147,14 +197,30 @@ final class OrderAmounts
         return $cents / 100;
     }
 
-    private static function shippingLine(array $shipping, TaxRate $tax, string $currency): ?array
+    private static function &group(array &$groups, TaxComponent $c): array
     {
-        $ttc = isset($shipping['price_cents']) ? (int) $shipping['price_cents'] : self::cents($shipping['price'] ?? 0);
-        if ($ttc <= 0) {
-            return null;
-        }
+        $k = $c->category . '|' . $c->basisPoints . '|' . $c->name;
+        $groups[$k] ??= ['code' => $c->name, 'name' => $c->name, 'bp' => $c->basisPoints, 'category' => $c->category, 'mention' => $c->mention,
+            'base_cents' => 0, 'tax_cents' => 0, 'simple_base' => 0, 'fixed_tax' => 0];
 
-        return self::line('shipping', self::shippingTitle($shipping), 1, $tax->removeFrom(Money::of($ttc, $currency))->amount, $ttc, $tax->code, $tax->basisPoints);
+        return $groups[$k];
+    }
+
+    /** Composante unique d'une ancienne ligne (code + taux, sans détail). */
+    private static function defaultComponents(string $code, int $bp): array
+    {
+        return [(new TaxComponent($code !== '' ? $code : 'TVA', $bp, false, true, $bp > 0 ? 'S' : 'Z'))->jsonSerialize()];
+    }
+
+    /** @param array{rate: ?TaxRate, ht: int, ttc: int} $part */
+    private static function shippingLine(array $shipping, array $part, bool $split): array
+    {
+        $rate = $part['rate'];
+        $title = self::shippingTitle($shipping) . ($split && $rate ? ' (part ' . $rate->components[0]->name . ')' : '');
+        $components = $rate ? array_map(static fn ($c) => $c->jsonSerialize(), $rate->components)
+            : [(new TaxComponent('Non taxé', 0, false, true, 'O'))->jsonSerialize()];
+
+        return self::line('shipping', $title, 1, $part['ht'], $part['ttc'], $rate?->code ?? 'non-taxe', $rate?->basisPoints ?? 0, $components);
     }
 
     private static function shippingTitle(array $shipping): string
@@ -164,7 +230,7 @@ final class OrderAmounts
         return $name !== '' ? 'Livraison : ' . $name : 'Frais de livraison';
     }
 
-    private static function line(string $kind, string $title, int $qty, int $unitHt, int $unitTtc, string $code, int $bp, string $route = '',
+    private static function line(string $kind, string $title, int $qty, int $unitHt, int $unitTtc, string $code, int $bp, array $taxes, string $route = '',
         string $lineId = '', array $options = []): array
     {
         return [
@@ -180,6 +246,7 @@ final class OrderAmounts
             'line_ttc_cents' => $unitTtc * $qty,
             'tax_code'       => $code,
             'tax_bp'         => $bp,
+            'taxes'          => array_values(array_map(static fn ($c) => $c instanceof TaxComponent ? $c->jsonSerialize() : (array) $c, $taxes)),
         ];
     }
 
@@ -187,7 +254,7 @@ final class OrderAmounts
     {
         $items = 0;
         $itemsHt = 0;
-        $shipping = null;
+        $shippingLines = [];
         $total = 0;
         foreach ($lines as $l) {
             $total += $l['line_ttc_cents'];
@@ -195,7 +262,7 @@ final class OrderAmounts
                 $items += $l['line_ttc_cents'];
                 $itemsHt += $l['line_ht_cents'];
             } else {
-                $shipping = $l;
+                $shippingLines[] = $l;
             }
         }
 
@@ -204,8 +271,10 @@ final class OrderAmounts
             'lines'              => $lines,
             'items_ttc_cents'    => $items,
             'items_ht_cents'     => $itemsHt,
-            'shipping'           => $shipping,
-            'shipping_ttc_cents' => $shipping['line_ttc_cents'] ?? 0,
+            'shipping'           => $shippingLines[0] ?? null,
+            'shipping_lines'     => $shippingLines,
+            'shipping_ttc_cents' => array_sum(array_column($shippingLines, 'line_ttc_cents')),
+            'shipping_ht_cents'  => array_sum(array_column($shippingLines, 'line_ht_cents')),
             'total_ttc_cents'    => $total,
         ];
     }

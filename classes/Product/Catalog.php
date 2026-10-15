@@ -22,23 +22,31 @@ final class Catalog
         return preg_match('/^[A-Z]{3}$/', $c) ? $c : 'EUR';
     }
 
-    /** Taux de taxe d'un code (défaut : taxe du site). */
+    /**
+     * Taxe d'une classe (ou d'un ancien code « TVA_5_5 ») à l'adresse qui décide du taux (voir Tax\TaxResolver) ;
+     * sans classe : la classe par défaut du site.
+     */
     public static function taxRate(?string $code = null, ?array $config = null): TaxRate
     {
-        $config ??= self::config();
-        $rates = TaxManager::rates($config);
-        $code = $code !== null && isset($rates[$code]) ? $code : TaxManager::defaultCode($config);
+        $class = $code ?? \Grav\Plugin\SimpleShop\Tax\TaxResolver::settings($config)['default_class'];
 
-        return TaxRate::fromDecimal($code, (float) $rates[$code]['rate']);
+        return \Grav\Plugin\SimpleShop\Tax\TaxResolver::forClass($class, null, $config);
     }
 
-    public static function context(ProductType $type, ?array $config = null, int $quantity = 1): PriceContext
+    /**
+     * Contexte de calcul du prix d'un produit. Taxe : classe de la fiche (`tax_class`), sinon celle choisie pour le type
+     * dans l'administration, sinon celle du blueprint (`shop.tax`), sinon la classe par défaut.
+     */
+    public static function context(ProductType $type, ?array $config = null, int $quantity = 1, $page = null): PriceContext
     {
+        $explicit = $config !== null;
         $config ??= self::config();
+        $header = $page ? (array) $page->header() : [];
+        $class = \Grav\Plugin\SimpleShop\Tax\TaxResolver::classFor($type->name, $type->taxCode, $header, $explicit ? $config : null);
 
         return new PriceContext(
             self::currency($config),
-            self::taxRate($type->taxCode, $config),
+            self::taxRate($class, $explicit ? $config : null),
             TaxManager::pricesEnteredHt($config) ? Price::HT : Price::TTC,
             new \DateTimeImmutable('today'),
             $quantity,
@@ -69,7 +77,7 @@ final class Catalog
         }
         [$page, $type] = $r;
         try {
-            return $type->price($page, $options, self::context($type));
+            return $type->price($page, $options, self::context($type, null, 1, $page));
         } catch (\Throwable $e) {
             Grav::instance()['log']->error("[SimpleShop] Prix de {$route} incalculable : " . $e->getMessage());
 

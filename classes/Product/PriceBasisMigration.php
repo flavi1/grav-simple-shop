@@ -63,7 +63,7 @@ final class PriceBasisMigration
                 if (in_array($header['price_entered_as'] ?? null, [Price::HT, Price::TTC], true)) {
                     continue;   // base explicite sur la fiche : rien à convertir
                 }
-                $ctx = Catalog::context($type, $config);
+                $ctx = Catalog::context($type, $config, 1, $page);
                 $ctx = new PriceContext($ctx->currency, $ctx->tax, $current, $ctx->date, 1, $config);
                 $changes = [];
                 foreach ($type->priceFields as $field) {

@@ -94,6 +94,12 @@ class Invoice
         $computed = $this->computeLines();
 
         $basePdf = $this->buildBasePdf($computed['amounts'], $computed['totals']);
+        if (!$computed['totals']['en16931']) {
+            // Plusieurs taxes sur une même ligne (taxes cumulées, hors TVA française) : non exprimable en EN 16931.
+            InvoiceLogger::warning('Facture ' . ($this->invoiceRow['invoice_number'] ?? '?') . ' : plusieurs taxes sur une ligne, PDF sans XML Factur-X.');
+
+            return $basePdf;
+        }
         $xml = (new FacturXXmlBuilder($this->order, $this->invoiceRow, $this->seller, $computed['amounts'], $computed['totals']))->build();
 
         $validator = new XsdValidator();
@@ -252,8 +258,7 @@ class Invoice
         $pdf->Cell(145, 6, $this->t('Total HT'), 0, 0, 'R');
         $pdf->Cell(35, 6, $fmt($totals['line_total_ht_cents']) . $cur, 0, 1, 'R');
         foreach ($totals['taxes'] as $tax) {
-            $percent = rtrim(rtrim(number_format($tax['bp'] / 100, 2, ',', ''), '0'), ',');
-            $pdf->Cell(145, 6, $this->t('TVA ' . $percent . ' % sur ' . $fmt($tax['base_cents']) . $cur), 0, 0, 'R');
+            $pdf->Cell(145, 6, $this->t(($tax['name'] ?? 'TVA') . ' sur ' . $fmt($tax['base_cents']) . $cur), 0, 0, 'R');
             $pdf->Cell(35, 6, $fmt($tax['tax_cents']) . $cur, 0, 1, 'R');
         }
         if ($totals['rounding_cents'] !== 0) {
@@ -268,6 +273,10 @@ class Invoice
         $pdf->Ln(10);
         $pdf->SetFont('LiberationSans', '', 8);
         $pdf->MultiCell(0, 4, $this->t('Facture électronique au format Factur-X (norme EN 16931). Client particulier (B2C). Facture payée le ' . date('d/m/Y', strtotime($createdAt) ?: time()) . ' (à la commande).'));
+        // Mentions d'exonération (ex. « TVA non applicable, art. 261-4-4°-a du CGI », franchise en base).
+        foreach ($totals['mentions'] ?? [] as $mention) {
+            $pdf->MultiCell(0, 4, $this->t((string) $mention));
+        }
         foreach ((array) ($this->seller['notes'] ?? []) as $note) {
             $pdf->MultiCell(0, 4, $this->t((string) $note));
         }

@@ -126,8 +126,22 @@ shop:
   une fois (`Product\PriceBasisMigration`, événement `onPagesInitialized`) : chaque champ de prix déclaré par le type (`shop.price_fields`,
   défaut `product_price`) est réécrit dans la nouvelle base — de HT vers TTC, le prix public est inchangé. Base déjà appliquée :
   `user://data/simple-shop/.prices-basis` (absente = `ht`). Les prix de livraison ont leur propre réglage (`delivery.prices_entered`).
-- **Configuration** : `taxes.prices_entered` (`ht`|`ttc`), `taxes.default` (code unique pour tout le site, livraison comprise),
-  `taxes.rates` (ex. `TVA_5_5`, `TVA_20`). L'ancienne clé `vat_rate` n'est plus lue.
+- **Taxes** (`classes/Tax/`, modèle de WooCommerce ; réglages : Plugins > Simple Shop > Taxes ; vue d'ensemble et CSV : Boutique > Taxes) :
+  - **classes** de taxe (`taxes.classes` : standard, intermediaire, reduit, particulier, zero, exonere par défaut) attachées aux types de
+    produits : `shop.tax` du blueprint (ex. book → reduit), surchargé par `taxes.types` (administration) puis par `tax_class` d'une fiche ;
+    classe par défaut : `taxes.default_class` ;
+  - **table des taux** (`taxes.rates`) : classe, pays, région, codes postaux (`20*`, `97100...97199`), taux %, nom, priorité, composée,
+    s'applique à la livraison, catégorie de facture (S, Z, E, O), mention (exonération). Pour une classe et une adresse : à chaque priorité
+    la ligne la plus précise ; plusieurs priorités = taxes cumulées. Valeurs par défaut : TVA française ;
+  - **adresse** qui décide du taux (`taxes.based_on`) : livraison (défaut), facturation ou boutique (`taxes.shop`) ; avant la saisie
+    de l'adresse, celle de la boutique ;
+  - **livraison** (`taxes.shipping_tax`) : `items` = selon les articles expédiés, panier mixte au taux le plus élevé (comme WooCommerce),
+    `items_prorata` = une part par taxe au prorata du HT, ou une classe fixe. Une livraison à plusieurs taux = une ligne par taux
+    (commande : `order.shipping_taxes`) ;
+  - exonération (catégorie E + mention, motif BT-120 de la facture électronique), franchise en base (`taxes.small_business`),
+    taxes désactivées (`taxes.enabled`). Une ligne à plusieurs taxes donne une facture PDF sans XML Factur-X (non exprimable en EN 16931) ;
+  - point d'extension : événement `onSimpleShopTaxRates` (`rates` modifiable) pour un service de taxes externe ;
+  - l'ancienne configuration (`taxes.default` + `taxes.rates` `CODE: {label, rate}`) et les anciens codes `TVA_5_5` restent compris.
 - **Contraintes globales** (`Delivery/ShippingConstraints`, bloc `constraints` de `carriers.yaml`, écran Boutique > Transporteurs) :
   lois et offres sur le prix de livraison, sans rien de propre à un type de produit. Une contrainte = nom, types d'articles concernés
   (`product_types` ; type d'un article = son type de produit, ex. `book`, ou `default` pour un produit générique), modes exclus (`except_modes`) et
