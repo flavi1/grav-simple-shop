@@ -50,7 +50,7 @@
 <h3>Rappel de votre commande</h3>
 <ul>
     {% for item in order_items %}
-        <li>{{ item.quantity }} × {{ item.title }}</li>
+        <li>{{ item.quantity }} × {{ item.title }} {% include 'partials/simple-shop/line-options.html.twig' with {'options': item.options} %}</li>
     {% endfor %}
 </ul>
 

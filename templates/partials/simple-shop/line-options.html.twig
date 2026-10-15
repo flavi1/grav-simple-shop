@@ -1,0 +1,6 @@
+{# Options d'une ligne de panier ou de commande (déclinaison, personnalisation…).
+   Variable : options = tableau, ou texte JSON (lignes de commande). Rien n'est affiché sans option. #}
+{% set opts = options is iterable ? options : (options ? options|json_decode(true) : {}) %}
+{% if opts is iterable and opts|length > 0 %}
+    <small class="cart-line-options">{% for key, value in opts %}{{ key }} : {{ value is iterable ? value|join(', ') : value }}{% if not loop.last %} · {% endif %}{% endfor %}</small>
+{% endif %}

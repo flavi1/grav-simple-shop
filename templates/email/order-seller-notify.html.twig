@@ -40,7 +40,7 @@
     <tbody>
         {% for item in order_items %}
             <tr>
-                <td style="padding: 4px;">{{ item.title }}</td>
+                <td style="padding: 4px;">{{ item.title }} {% include 'partials/simple-shop/line-options.html.twig' with {'options': item.options} %}</td>
                 <td style="text-align: right; padding: 4px;">{{ item.quantity }}</td>
                 <td style="text-align: right; padding: 4px;">{{ item.price|number_format(2, ',', ' ') }} €</td>
                 <td style="text-align: right; padding: 4px;">{{ (item.price * item.quantity)|number_format(2, ',', ' ') }} €</td>

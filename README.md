@@ -105,6 +105,17 @@ shop:
   `get_product_shop_data(route)` ajoute le stock disponible. La zone d'achat `partials/simple-shop/buy-zone.html.twig` est neutre ;
   un thème la surcharge au même chemin (bookstore : libellés de prévente).
 
+### Lignes de panier et options
+
+- Une ligne de panier = un produit **et ses options** (table `cart_line`, clé `line_id` = empreinte de la route et des options
+  normalisées). Deux ajouts avec les mêmes options s'additionnent ; d'autres options créent une autre ligne.
+- Formulaire d'ajout : `product_route` + champs `options[...]` facultatifs. Le type de produit les valide et les normalise
+  (`shop.options` → `fn($page, array $raw): array`, exception `InvalidArgumentException` = message au client) ; par défaut aucune option
+  n'est acceptée. Prix, stock, expédition et présentation reçoivent les options.
+- Modifier ou retirer une ligne : champ `line_id` (l'ancien `product_route` reste accepté pour une ligne sans options).
+- Le stock réservé se compte par produit, toutes options confondues. La commande garde `line_id` et `options` (JSON) par ligne ;
+  gabarits : `partials/simple-shop/line-options.html.twig`.
+
 ## Taxes et frais de livraison
 
 - **Prix.** Saisis HT ou TTC (`taxes.prices_entered`, surchargeable par fiche avec `price_entered_as`), au plus 2 décimales

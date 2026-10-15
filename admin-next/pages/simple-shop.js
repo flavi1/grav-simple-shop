@@ -477,7 +477,11 @@
 
                 h('h3', { style: 'margin-top:1rem' }, 'Articles'),
                 h('table', {}, h('tbody', {}, o.items.map(function (i) {
-                    return h('tr', {}, h('td', {}, i.title), h('td', { class: 'ss-num' }, i.quantity + ' × ' + money(i.price)),
+                    // Options de la ligne (JSON enregistré avec la commande), affichées en texte.
+                    var opts = {};
+                    try { opts = i.options ? JSON.parse(i.options) : {}; } catch (e) { opts = {}; }
+                    var optText = Object.keys(opts || {}).map(function (k) { return k + ' : ' + (Array.isArray(opts[k]) ? opts[k].join(', ') : opts[k]); }).join(' · ');
+                    return h('tr', {}, h('td', {}, i.title, optText ? h('div', { class: 'ss-muted' }, optText) : ''), h('td', { class: 'ss-num' }, i.quantity + ' × ' + money(i.price)),
                         h('td', { class: 'ss-num' }, money(i.quantity * i.price)));
                 }).concat([h('tr', {}, h('td', {}, h('strong', {}, 'Total TTC (livraison comprise)')), h('td'), h('td', { class: 'ss-num' }, h('strong', {}, money(o.total_amount))))]))),
 

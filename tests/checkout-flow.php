@@ -52,12 +52,13 @@ $redirect = fn (Response $r) => $r->isRedirect() ? $r->getRedirectUrl() : null;
 // --- 1. Panier : ajout (nonce invalide refusé, puis valide)
 $r = $call('step1Cart', '/cart', ['action' => 'add_item', 'product_route' => '/livres/un-livre', 'nonce' => 'faux']);
 assert($redirect($r) === 'https://shop.test/cart');
-assert(count(InventoryManager::getDatabase()->query('SELECT * FROM cart_item')->fetchAll()) === 0, 'nonce invalide : rien ajouté');
+assert(count(InventoryManager::getDatabase()->query('SELECT * FROM cart_line')->fetchAll()) === 0, 'nonce invalide : rien ajouté');
 $r = $call('step1Cart', '/cart', ['action' => 'add_item', 'product_route' => '/livres/un-livre', 'nonce' => 'nonce-shop-cart-action']);
 assert($redirect($r) === 'https://shop.test/cart');
 $r = $call('step1Cart', '/cart', ['action' => 'update_quantity', 'product_route' => '/livres/un-livre', 'quantity' => '2', 'nonce' => 'nonce-shop-cart-action']);
 $cart = \Grav\Plugin\SimpleShop\Inventory\CartStorage::getCart();
-assert($cart['/livres/un-livre']['quantity'] === 2 && abs($cart['/livres/un-livre']['price'] - 12.95) < 0.001, 'prix TTC 12,95 € (12,2749 HT × 1,055)');
+$line = $cart[\Grav\Plugin\SimpleShop\Inventory\CartStorage::lineId('/livres/un-livre', [])];
+assert($line['quantity'] === 2 && abs($line['price'] - 12.95) < 0.001 && $line['route'] === '/livres/un-livre', 'prix TTC 12,95 € (12,2749 HT × 1,055)');
 $r = $call('step1Cart', '/cart');
 assert(!$r->isRedirect() && $r->getTemplate() === 'simple-shop/step1cart');
 

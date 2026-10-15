@@ -208,7 +208,7 @@
                                 data-parent-reference="{{ order.order_reference }}"
                                 class="simple-shop-item-row">
                                 <td role="gridcell" colspan="6" data-label="Article">
-                                    {{ item.title }}
+                                    {{ item.title }} {% include 'partials/simple-shop/line-options.html.twig' with {'options': item.options} %}
                                     — {{ item.quantity }} × {{ item.price|number_format(2, ',', ' ') }} €
                                     = {{ (item.price * item.quantity)|number_format(2, ',', ' ') }} €
                                 </td>

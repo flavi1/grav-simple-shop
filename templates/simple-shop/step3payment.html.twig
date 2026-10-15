@@ -37,12 +37,12 @@
 				</thead>
 				<tbody>
 					{% set subtotal = 0 %}
-					{% for route, item in cart %}
+					{% for line_id, item in cart %}
 					{% set item_total = item.price * item.quantity %}
 					{% set subtotal = subtotal + item_total %}
 						<tr style="border-bottom: 1px solid #eee;">
 							<td style="padding: 0.5rem 0;">
-								<strong>{{ item.title }}</strong>
+								<strong>{{ item.title }}</strong> {% include 'partials/simple-shop/line-options.html.twig' with {'options': item.options} %}
 							</td>
 							<td style="text-align: center; padding: 0.5rem 0;">{{ item.quantity }}</td>
 							<td style="text-align: right; padding: 0.5rem 0;">{{ item_total|number_format(2, ',', ' ') }} € <small class="price-tax">TTC</small></td>

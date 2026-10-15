@@ -12,9 +12,10 @@ class InventoryManager
      * Calcule le stock virtuel et récupère le prix à partir du fichier .md du produit 
      * et des réservations en base SQLite.
      * @param string $productRoute
+     * @param array  $options Options de la ligne (déjà validées par le type de produit), pour le prix et le stock.
      * @return array|false
      */
-    public static function getProductData(string $productRoute)
+    public static function getProductData(string $productRoute, array $options = [])
     {
         $db = self::getDatabase();
 
@@ -30,8 +31,8 @@ class InventoryManager
         [$page, $type] = $resolved;
 
         try {
-            $price = $type->price($page, [], Catalog::context($type));
-            $stockPhysical = $type->stock($page, []);
+            $price = $type->price($page, $options, Catalog::context($type));
+            $stockPhysical = $type->stock($page, $options);
         } catch (\Throwable $e) {
             Grav::instance()['log']->error("[SimpleShop] Produit {$productRoute} : " . $e->getMessage());
 
@@ -55,10 +56,10 @@ class InventoryManager
 
         // 3. Calcul de la somme des paniers actifs pour ce produit
         $stmt = $db->prepare("
-            SELECT TOTAL(ci.quantity) 
-            FROM cart_item ci
-            JOIN cart c ON ci.cart_id = c.cart_id
-            WHERE ci.product_route = :route AND c.expires_at > datetime('now')
+            SELECT TOTAL(cl.quantity)
+            FROM cart_line cl
+            JOIN cart c ON cl.cart_id = c.cart_id
+            WHERE cl.product_route = :route AND c.expires_at > datetime('now')
         ");
         $stmt->execute([':route' => $productRoute]);
         $reserved = (int)$stmt->fetchColumn();
@@ -259,8 +260,25 @@ class InventoryManager
             'tax_code'       => 'TEXT',
             'tax_bp'         => 'INTEGER',
             'product_type'   => 'TEXT',
+            'line_id'        => 'TEXT',
+            'options'        => 'TEXT',
         ],
     ];
+
+    /** Reprise des lignes de l'ancienne table cart_item (sans options) dans cart_line, puis vidage de cart_item. */
+    private static function migrateCartLines(\PDO $db): void
+    {
+        $rows = $db->query('SELECT cart_id, product_route, quantity FROM cart_item')->fetchAll(\PDO::FETCH_ASSOC);
+        if ($rows === []) {
+            return;
+        }
+        $insert = $db->prepare('INSERT OR IGNORE INTO cart_line (cart_id, line_id, product_route, options, quantity) VALUES (:c, :l, :r, :o, :q)');
+        foreach ($rows as $row) {
+            $insert->execute([':c' => $row['cart_id'], ':l' => CartStorage::lineId((string) $row['product_route'], []),
+                ':r' => $row['product_route'], ':o' => '{}', ':q' => (int) $row['quantity']]);
+        }
+        $db->exec('DELETE FROM cart_item');
+    }
 
     private static function addMissingColumns(\PDO $db): void
     {
@@ -360,6 +378,7 @@ class InventoryManager
         // Colonnes ajoutées après coup (SQLite n'a pas de « ADD COLUMN IF NOT EXISTS ») : voir ADDED_COLUMNS.
         try {
             self::addMissingColumns($db);
+            self::migrateCartLines($db);
         } catch (\PDOException $e) {
             $grav['log']->error("SimpleShop: Erreur lors de l'ajout de colonnes : " . $e->getMessage());
 

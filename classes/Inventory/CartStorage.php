@@ -35,10 +35,40 @@ class CartStorage
         $stmt->execute([':id' => $cartId]);
     }
 
+    /**
+     * Identifiant d'une ligne de panier : empreinte de la route du produit et de ses options normalisées (clés triées).
+     * Deux ajouts du même produit avec les mêmes options tombent sur la même ligne ; d'autres options = une autre ligne.
+     */
+    public static function lineId(string $route, array $options): string
+    {
+        return substr(sha1($route . "\n" . self::optionsJson($options)), 0, 16);
+    }
+
+    /** Options sous forme canonique (clés triées récursivement), pour l'empreinte et le stockage. */
+    public static function optionsJson(array $options): string
+    {
+        $sort = static function ($v) use (&$sort) {
+            if (!is_array($v)) {
+                return $v;
+            }
+            if (array_keys($v) !== range(0, count($v) - 1)) {
+                ksort($v);
+            }
+
+            return array_map($sort, $v);
+        };
+        $canonical = $sort($options);
+
+        return $canonical === [] ? '{}' : (string) json_encode($canonical, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+    }
+
+    /**
+     * Lignes du panier, indexées par line_id : route, options, libellé, prix (centimes et décimal TTC), taxe, quantité, image.
+     */
     public static function getCartItems(string $cartId): array
     {
         $db = InventoryManager::getDatabase();
-        $stmt = $db->prepare("SELECT product_route, quantity FROM cart_item WHERE cart_id = :id");
+        $stmt = $db->prepare("SELECT line_id, product_route, options, quantity FROM cart_line WHERE cart_id = :id ORDER BY rowid");
         $stmt->execute([':id' => $cartId]);
         $items = $stmt->fetchAll(\PDO::FETCH_ASSOC);
 
@@ -47,16 +77,22 @@ class CartStorage
         $structuredCart = [];
 
         foreach ($items as $item) {
-            $page = $pages->dispatch($item['product_route']);
+            $route = (string) $item['product_route'];
+            $page = $pages->dispatch($route);
             if (!$page) continue;
+            $options = json_decode((string) $item['options'], true);
+            $options = is_array($options) ? $options : [];
 
             // Libellé et image : présentation du type de produit (blueprint `shop.presentation`).
             $type = \Grav\Plugin\SimpleShop\Product\ProductTypes::forPage($page);
-            $presentation = $type ? $type->presentation($page, []) : ['label' => $page->title(), 'image' => null];
+            $presentation = $type ? $type->presentation($page, $options) : ['label' => $page->title(), 'image' => null];
             // Prix calculé par le type (centimes, taxe, devise) ; `price` (décimal TTC) reste pour les gabarits.
-            $data = InventoryManager::getProductData($item['product_route']);
+            $data = InventoryManager::getProductData($route, $options);
             $price = $data !== false ? $data['price'] : null;
-            $structuredCart[$item['product_route']] = [
+            $structuredCart[(string) $item['line_id']] = [
+                'line_id' => (string) $item['line_id'],
+                'route' => $route,
+                'options' => $options,
                 'title' => $presentation['label'],
                 'price' => $price ? $price->unitTtc->toFloat() : 0.0,
                 'unit_ttc_cents' => $price ? $price->unitTtc->amount : 0,
@@ -72,7 +108,61 @@ class CartStorage
 
         return $structuredCart;
     }
-    
+
+    /** Quantité d'une ligne (0 si absente). */
+    public static function lineQuantity(string $cartId, string $lineId): int
+    {
+        $stmt = InventoryManager::getDatabase()->prepare("SELECT quantity FROM cart_line WHERE cart_id = :cid AND line_id = :lid");
+        $stmt->execute([':cid' => $cartId, ':lid' => $lineId]);
+        $q = (int) $stmt->fetchColumn();
+        $stmt->closeCursor();
+
+        return $q;
+    }
+
+    /** Route du produit d'une ligne (null si la ligne n'existe pas). */
+    public static function lineRoute(string $cartId, string $lineId): ?string
+    {
+        $stmt = InventoryManager::getDatabase()->prepare("SELECT product_route FROM cart_line WHERE cart_id = :cid AND line_id = :lid");
+        $stmt->execute([':cid' => $cartId, ':lid' => $lineId]);
+        $r = $stmt->fetchColumn();
+        $stmt->closeCursor();
+
+        return $r === false ? null : (string) $r;
+    }
+
+    /** Ajoute $quantity exemplaires (ligne créée si besoin). */
+    public static function addLine(string $cartId, string $route, array $options, int $quantity = 1): string
+    {
+        $lineId = self::lineId($route, $options);
+        $stmt = InventoryManager::getDatabase()->prepare("
+            INSERT INTO cart_line (cart_id, line_id, product_route, options, quantity)
+            VALUES (:cid, :lid, :route, :options, :qty)
+            ON CONFLICT(cart_id, line_id) DO UPDATE SET quantity = quantity + excluded.quantity
+        ");
+        $stmt->execute([':cid' => $cartId, ':lid' => $lineId, ':route' => $route, ':options' => self::optionsJson($options), ':qty' => $quantity]);
+
+        return $lineId;
+    }
+
+    /** Fixe la quantité d'une ligne (0 ou moins : la ligne est retirée). */
+    public static function setLineQuantity(string $cartId, string $lineId, int $quantity): void
+    {
+        if ($quantity <= 0) {
+            self::deleteLine($cartId, $lineId);
+
+            return;
+        }
+        $stmt = InventoryManager::getDatabase()->prepare("UPDATE cart_line SET quantity = :qty WHERE cart_id = :cid AND line_id = :lid");
+        $stmt->execute([':qty' => $quantity, ':cid' => $cartId, ':lid' => $lineId]);
+    }
+
+    public static function deleteLine(string $cartId, string $lineId): void
+    {
+        $stmt = InventoryManager::getDatabase()->prepare("DELETE FROM cart_line WHERE cart_id = :cid AND line_id = :lid");
+        $stmt->execute([':cid' => $cartId, ':lid' => $lineId]);
+    }
+
     public static function getCart() {
         $cartId = self::getOrCreateCartId();
         return self::getCartItems($cartId);
@@ -114,7 +204,7 @@ class CartStorage
     public static function revalidateStock(string $cartId): array
     {
         $db = InventoryManager::getDatabase();
-        $stmt = $db->prepare("SELECT product_route, quantity FROM cart_item WHERE cart_id = :cid");
+        $stmt = $db->prepare("SELECT line_id, product_route, options, quantity FROM cart_line WHERE cart_id = :cid");
         $stmt->execute([':cid' => $cartId]);
         $items = $stmt->fetchAll(\PDO::FETCH_ASSOC);
 
@@ -129,9 +219,11 @@ class CartStorage
 
         foreach ($items as $item) {
             $route = $item['product_route'];
+            $lineId = (string) $item['line_id'];
+            $options = json_decode((string) $item['options'], true);
             $currentQty = (int) $item['quantity'];
 
-            $productData = InventoryManager::getProductData($route);
+            $productData = InventoryManager::getProductData($route, is_array($options) ? $options : []);
 
             // Résolution du titre pour affichage (repli sur la route brute si
             // la page n'est plus dispatchable, ex. produit dépublié).
@@ -141,7 +233,7 @@ class CartStorage
             if ($productData === false) {
                 // Produit devenu totalement non vendable : la donnée de stock
                 // n'a plus aucun sens, la ligne est retirée dans son intégralité.
-                self::deleteCartItem($cartId, $route);
+                self::deleteLine($cartId, $lineId);
 
                 $adjustments[] = [
                     'product_route' => $route,
@@ -167,19 +259,7 @@ class CartStorage
             $maxAllowable = $virtualStock + $currentQty;
 
             if ($currentQty > $maxAllowable) {
-                if ($maxAllowable <= 0) {
-                    self::deleteCartItem($cartId, $route);
-                } else {
-                    $stmtUpdate = $db->prepare("
-                        UPDATE cart_item SET quantity = :qty
-                        WHERE cart_id = :cid AND product_route = :route
-                    ");
-                    $stmtUpdate->execute([
-                        ':qty'   => $maxAllowable,
-                        ':cid'   => $cartId,
-                        ':route' => $route,
-                    ]);
-                }
+                self::setLineQuantity($cartId, $lineId, max(0, $maxAllowable));
 
                 $adjustments[] = [
                     'product_route' => $route,
@@ -191,24 +271,6 @@ class CartStorage
         }
 
         return $adjustments;
-    }
-
-    /**
-     * Supprime une ligne de panier donnée.
-     *
-     * Factorisée pour {@see self::revalidateStock()} (suppression d'une
-     * ligne devenue non vendable ou totalement épuisée).
-     *
-     * @param string $cartId Identifiant du panier.
-     * @param string $route  Route du produit à retirer.
-     *
-     * @return void
-     */
-    private static function deleteCartItem(string $cartId, string $route): void
-    {
-        $db = InventoryManager::getDatabase();
-        $stmt = $db->prepare("DELETE FROM cart_item WHERE cart_id = :cid AND product_route = :route");
-        $stmt->execute([':cid' => $cartId, ':route' => $route]);
     }
 
     /**
@@ -242,7 +304,7 @@ class CartStorage
 
         $db = InventoryManager::getDatabase();
 
-        $stmtCount = $db->prepare("SELECT COUNT(*) FROM cart_item WHERE cart_id = :cid");
+        $stmtCount = $db->prepare("SELECT COUNT(*) FROM cart_line WHERE cart_id = :cid");
         $stmtCount->execute([':cid' => $targetCartId]);
         $count = (int) $stmtCount->fetchColumn();
         $stmtCount->closeCursor();
@@ -252,7 +314,7 @@ class CartStorage
             return false;
         }
 
-        $stmtSource = $db->prepare("SELECT product_route, quantity FROM cart_item WHERE cart_id = :cid");
+        $stmtSource = $db->prepare("SELECT line_id, product_route, options, quantity FROM cart_line WHERE cart_id = :cid");
         $stmtSource->execute([':cid' => $sourceCartId]);
         $sourceItems = $stmtSource->fetchAll(\PDO::FETCH_ASSOC);
 
@@ -265,21 +327,23 @@ class CartStorage
         $db->beginTransaction();
         try {
             $stmtInsert = $db->prepare("
-                INSERT INTO cart_item (cart_id, product_route, quantity)
-                VALUES (:cart_id, :route, :qty)
-                ON CONFLICT(cart_id, product_route) DO UPDATE SET quantity = excluded.quantity
+                INSERT INTO cart_line (cart_id, line_id, product_route, options, quantity)
+                VALUES (:cart_id, :lid, :route, :options, :qty)
+                ON CONFLICT(cart_id, line_id) DO UPDATE SET quantity = excluded.quantity
             ");
             foreach ($sourceItems as $item) {
                 $stmtInsert->execute([
                     ':cart_id' => $targetCartId,
+                    ':lid'     => $item['line_id'],
                     ':route'   => $item['product_route'],
+                    ':options' => $item['options'],
                     ':qty'     => $item['quantity'],
                 ]);
             }
 
             // Nettoyage de l'ancien panier fusionné, pour éviter toute
             // restauration en double lors d'une prochaine connexion.
-            $stmtDeleteItems = $db->prepare("DELETE FROM cart_item WHERE cart_id = :cid");
+            $stmtDeleteItems = $db->prepare("DELETE FROM cart_line WHERE cart_id = :cid");
             $stmtDeleteItems->execute([':cid' => $sourceCartId]);
 
             $stmtDeleteCart = $db->prepare("DELETE FROM cart WHERE cart_id = :cid");
@@ -400,8 +464,8 @@ class CartStorage
             // Insertion des articles de la commande
             $stmtItem = $db->prepare("
                 INSERT INTO order_item (order_reference, product_route, title, price, quantity,
-                    unit_ht_cents, unit_ttc_cents, tax_code, tax_bp, product_type)
-                VALUES (:ref, :route, :title, :price, :qty, :ht, :ttc, :code, :bp, :type)
+                    unit_ht_cents, unit_ttc_cents, tax_code, tax_bp, product_type, line_id, options)
+                VALUES (:ref, :route, :title, :price, :qty, :ht, :ttc, :code, :bp, :type, :lid, :options)
             ");
             foreach ($amounts['lines'] as $line) {
                 if ($line['kind'] !== 'item') {
@@ -417,7 +481,9 @@ class CartStorage
                     ':ttc'   => $line['unit_ttc_cents'],
                     ':code'  => $line['tax_code'],
                     ':bp'    => $line['tax_bp'],
-                    ':type'  => $cartItems[$line['route']]['product_type'] ?? null,
+                    ':type'  => $cartItems[$line['line_id']]['product_type'] ?? null,
+                    ':lid'   => $line['line_id'],
+                    ':options' => self::optionsJson((array) ($cartItems[$line['line_id']]['options'] ?? [])),
                 ]);
             }
 
@@ -447,8 +513,8 @@ class CartStorage
         // d'être supprimé, donc sa réservation disparaît ; le stock physique
         // (`product_quantity`) baisse au même instant. Un échec d'écriture est
         // journalisé mais ne remet pas en cause la commande déjà enregistrée.
-        foreach ($cartItems as $route => $item) {
-            InventoryManager::decrementPhysicalStock((string) $route, (int) ($item['quantity'] ?? 0));
+        foreach ($cartItems as $item) {
+            InventoryManager::decrementPhysicalStock((string) $item['route'], (int) ($item['quantity'] ?? 0));
         }
 
         // Déclenchement de l'événement `onSimpleShopOrderStatusChanged` dès la

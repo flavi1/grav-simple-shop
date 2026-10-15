@@ -14,6 +14,20 @@ CREATE TABLE IF NOT EXISTS cart_item (
     FOREIGN KEY(cart_id) REFERENCES cart(cart_id) ON DELETE CASCADE
 );
 
+-- 2bis. Lignes de panier « produit + options » (remplace cart_item, voir CartStorage). Une ligne = un produit avec des
+-- options données (déclinaison, personnalisation, participant…) ; line_id = empreinte de la route et des options
+-- normalisées. Les lignes de l'ancienne table cart_item sont reprises une fois (InventoryManager::migrateCartLines()).
+CREATE TABLE IF NOT EXISTS cart_line (
+    cart_id TEXT NOT NULL,
+    line_id TEXT NOT NULL,
+    product_route TEXT NOT NULL,
+    options TEXT NOT NULL DEFAULT '{}',
+    quantity INTEGER NOT NULL,
+    PRIMARY KEY (cart_id, line_id),
+    FOREIGN KEY(cart_id) REFERENCES cart(cart_id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_cart_line_route ON cart_line(product_route);
+
 -- 3. Commandes validées
 CREATE TABLE IF NOT EXISTS "order" (
     order_reference TEXT PRIMARY KEY,

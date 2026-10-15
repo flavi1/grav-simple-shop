@@ -30,7 +30,8 @@ final class OrderAmounts
     public static function fromCart(array $cartItems, array $shipping, TaxRate $shippingTax, string $currency): array
     {
         $lines = [];
-        foreach ($cartItems as $route => $item) {
+        foreach ($cartItems as $key => $item) {
+            $route = (string) ($item['route'] ?? $key);
             $qty = (int) ($item['quantity'] ?? 0);
             if ($qty <= 0) {
                 continue;
@@ -38,7 +39,8 @@ final class OrderAmounts
             $ttc = isset($item['unit_ttc_cents']) ? (int) $item['unit_ttc_cents'] : self::cents($item['price'] ?? 0);
             $bp = isset($item['tax_bp']) ? (int) $item['tax_bp'] : $shippingTax->basisPoints;
             $ht = isset($item['unit_ht_cents']) ? (int) $item['unit_ht_cents'] : (new TaxRate('', $bp))->removeFrom(Money::of($ttc, $currency))->amount;
-            $lines[] = self::line('item', (string) ($item['title'] ?? $route), $qty, $ht, $ttc, (string) ($item['tax_code'] ?? $shippingTax->code), $bp, (string) $route);
+            $lines[] = self::line('item', (string) ($item['title'] ?? $route), $qty, $ht, $ttc, (string) ($item['tax_code'] ?? $shippingTax->code), $bp, $route,
+                (string) ($item['line_id'] ?? $key), (array) ($item['options'] ?? []));
         }
         $shipLine = self::shippingLine($shipping, $shippingTax, $currency);
         if ($shipLine !== null) {
@@ -84,7 +86,9 @@ final class OrderAmounts
                 $code = $legacyTax->code;
                 $bp = $legacyTax->basisPoints;
             }
-            $lines[] = self::line('item', (string) ($item['title'] ?? ''), $qty, $ht, $ttc, $code, $bp, (string) ($item['product_route'] ?? ''));
+            $options = json_decode((string) ($item['options'] ?? '{}'), true);
+            $lines[] = self::line('item', (string) ($item['title'] ?? ''), $qty, $ht, $ttc, $code, $bp, (string) ($item['product_route'] ?? ''),
+                (string) ($item['line_id'] ?? ''), is_array($options) ? $options : []);
         }
 
         $shipping = json_decode((string) ($order['shipping_data'] ?? '{}'), true) ?: [];
@@ -160,11 +164,14 @@ final class OrderAmounts
         return $name !== '' ? 'Livraison : ' . $name : 'Frais de livraison';
     }
 
-    private static function line(string $kind, string $title, int $qty, int $unitHt, int $unitTtc, string $code, int $bp, string $route = ''): array
+    private static function line(string $kind, string $title, int $qty, int $unitHt, int $unitTtc, string $code, int $bp, string $route = '',
+        string $lineId = '', array $options = []): array
     {
         return [
             'kind'           => $kind,
             'route'          => $route,
+            'line_id'        => $lineId,
+            'options'        => $options,
             'title'          => $title,
             'quantity'       => $qty,
             'unit_ht_cents'  => $unitHt,

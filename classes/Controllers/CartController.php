@@ -130,6 +130,21 @@ class CartController extends AbstractController
         return $adjustments;
     }
 
+    /**
+     * Ligne visée par un formulaire du panier : champ `line_id` (ligne existante de CE panier), ou ancien champ
+     * `product_route` (ligne sans options) pour les formulaires d'avant les options.
+     */
+    private function cartLineId(string $cartId): ?string
+    {
+        $lineId = $this->postString('line_id');
+        if ($lineId === null || $lineId === '') {
+            $route = $this->postString('product_route');
+            $lineId = $route ? CartStorage::lineId($route, []) : null;
+        }
+
+        return $lineId !== null && CartStorage::lineRoute($cartId, $lineId) !== null ? $lineId : null;
+    }
+
     /** Empreinte du contenu du panier (produits et quantités) : un choix de livraison ne vaut que pour ce panier. */
     private function cartFingerprint(array $cartItems): string
     {
@@ -346,11 +361,23 @@ class CartController extends AbstractController
 						return $this->redirect($absoluteCartUrl);
 					}
 
+					// Options de la ligne (déclinaison, personnalisation…) : champs `options[...]` du formulaire, validées et
+					// normalisées par le type de produit (blueprint `shop.options` ; par défaut, aucune option acceptée).
+					$rawOptions = $this->request()->getParsedBody()['options'] ?? [];
+					$type = \Grav\Plugin\SimpleShop\Product\ProductTypes::forPage($page);
+					try {
+						$options = $type ? $type->options($page, is_array($rawOptions) ? $rawOptions : []) : [];
+					} catch (\InvalidArgumentException $e) {
+						$this->addMessage($e->getMessage(), 'error');
+						return $this->redirect($this->grav['base_url_absolute'] . $productRoute);
+					}
+					if (InventoryManager::getProductData($productRoute, $options) === false) {
+						$this->addMessage("Ce produit n'est pas en vente pour le moment.", 'error');
+						return $this->redirect($this->grav['base_url_absolute'] . $productRoute);
+					}
+
 					$virtualStock = InventoryManager::getVirtualStock($productRoute);
-					
-					$stmtCurrent = $db->prepare("SELECT quantity FROM cart_item WHERE cart_id = :cid AND product_route = :route");
-					$stmtCurrent->execute([':cid' => $cartId, ':route' => $productRoute]);
-					$currentQty = (int)$stmtCurrent->fetchColumn();
+					$currentQty = CartStorage::lineQuantity($cartId, CartStorage::lineId($productRoute, $options));
 
 					if ($virtualStock === 0 && $currentQty === 0) {
 						$this->addMessage("Désolé, l'article est en rupture de stock.", 'error');
@@ -363,53 +390,36 @@ class CartController extends AbstractController
 						return $this->redirect($absoluteCartUrl);
 					}
 
-					$db->beginTransaction();
 					try {
-						$stmt = $db->prepare("
-							INSERT INTO cart_item (cart_id, product_route, quantity)
-							VALUES (:cart_id, :route, 1)
-							ON CONFLICT(cart_id, product_route) DO UPDATE SET quantity = quantity + 1
-						");
-						$stmt->execute([':cart_id' => $cartId, ':route' => $productRoute]);
-						$db->commit();
+						CartStorage::addLine($cartId, $productRoute, $options, 1);
 						$this->addMessage("L'article a été ajouté à votre panier.", 'success');
 					} catch (\Exception $e) {
-						$db->rollBack();
 						$this->addMessage("Une erreur technique est survenue.", 'error');
 					}
 
 					return $this->redirect($absoluteCartUrl);
 
 				case 'update_quantity':
-					$productRoute = $this->post('product_route', FILTER_SANITIZE_URL);
+					$lineId = $this->cartLineId($cartId);
 					$quantity = $this->post('quantity', FILTER_VALIDATE_INT, false);
-					
-					if ($productRoute && $quantity !== false) {
-						if ($quantity <= 0) {
-							$stmt = $db->prepare("DELETE FROM cart_item WHERE cart_id = :cid AND product_route = :route");
-							$stmt->execute([':cid' => $cartId, ':route' => $productRoute]);
-						} else {
-							$virtualStock = InventoryManager::getVirtualStock($productRoute);
-							$stmtCurrent = $db->prepare("SELECT quantity FROM cart_item WHERE cart_id = :cid AND product_route = :route");
-							$stmtCurrent->execute([':cid' => $cartId, ':route' => $productRoute]);
-							$currentQty = (int)$stmtCurrent->fetchColumn();
 
+					if ($lineId !== null && $quantity !== false) {
+						if ($quantity > 0) {
+							$virtualStock = InventoryManager::getVirtualStock((string) CartStorage::lineRoute($cartId, $lineId));
+							$currentQty = CartStorage::lineQuantity($cartId, $lineId);
 							$maxAllowable = $virtualStock + $currentQty;
 							if ($virtualStock !== -1 && $quantity > $maxAllowable) {
 								$quantity = $maxAllowable;
 							}
-
-							$stmt = $db->prepare("UPDATE cart_item SET quantity = :qty WHERE cart_id = :cid AND product_route = :route");
-							$stmt->execute([':qty' => $quantity, ':cid' => $cartId, ':route' => $productRoute]);
 						}
+						CartStorage::setLineQuantity($cartId, $lineId, (int) $quantity);
 					}
 					return $this->redirect($absoluteCartUrl);
 
 				case 'remove_item':
-					$productRoute = $this->post('product_route', FILTER_SANITIZE_URL);
-					if ($productRoute) {
-						$stmt = $db->prepare("DELETE FROM cart_item WHERE cart_id = :cid AND product_route = :route");
-						$stmt->execute([':cid' => $cartId, ':route' => $productRoute]);
+					$lineId = $this->cartLineId($cartId);
+					if ($lineId !== null) {
+						CartStorage::deleteLine($cartId, $lineId);
 						$this->addMessage("L'article a été retiré de votre panier.", 'notice');
 					}
 					return $this->redirect($absoluteCartUrl);

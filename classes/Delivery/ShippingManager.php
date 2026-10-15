@@ -85,7 +85,8 @@ class ShippingManager
         $packaging = self::packaging((array) $grav['config']->get('plugins.simple-shop', []));
 
         $shippable = 0;
-        foreach ($cartItems as $route => $item) {
+        foreach ($cartItems as $key => $item) {
+            $route = (string) ($item['route'] ?? $key);
             // Montant de la ligne en centimes (prix calculé par le type), ramené en euros pour les règles de livraison.
             $line = isset($item['unit_ttc_cents'])
                 ? ((int) $item['unit_ttc_cents'] * (int) $item['quantity']) / 100

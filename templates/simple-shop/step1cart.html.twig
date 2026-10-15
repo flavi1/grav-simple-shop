@@ -16,7 +16,7 @@
         {# Liste des articles du panier #}
         <div class="cart-items">
             {% set total = 0 %}
-            {% for route, item in cart %}
+            {% for line_id, item in cart %}
                 {% set item_total = item.price * item.quantity %}
                 {% set total = total + item_total %}
                 
@@ -27,15 +27,16 @@
                     
                     <div class="cart-item-details">
                         <h3 class="cart-item-title">
-                            <a href="{{ base_url_absolute ~ route }}" target="_blank" rel="noopener">{{ item.title }}</a>
+                            <a href="{{ base_url_absolute ~ item.route }}" target="_blank" rel="noopener">{{ item.title }}</a>
                         </h3>
+                        {% include 'partials/simple-shop/line-options.html.twig' with {'options': item.options} %}
                         <span class="cart-item-price">{{ item.price|number_format(2, ',', ' ') }} € <small class="price-tax">TTC</small></span>
                     </div>
 
                     {# Formulaire de mise à jour des quantités (Reste sur /cart via le contrôleur) #}
                     <form action="{{ base_url_absolute }}{{ shop_routes.cart }}" method="POST" class="cart-form-quantity">
                         {{ nonce_field('shop-cart-action')|raw }}
-                        <input type="hidden" name="product_route" value="{{ route }}">
+                        <input type="hidden" name="line_id" value="{{ line_id }}">
                         <input type="hidden" name="action" value="update_quantity">
                         <input type="number" name="quantity" value="{{ item.quantity }}" min="0" class="cart-input-quantity">
                         <button type="submit" class="btn btn-update">Modifier</button>
@@ -48,7 +49,7 @@
                     {# Formulaire de suppression rapide #}
                     <form action="{{ base_url_absolute }}{{ shop_routes.cart }}" method="POST" class="cart-form-remove">
                         {{ nonce_field('shop-cart-action')|raw }}
-                        <input type="hidden" name="product_route" value="{{ route }}">
+                        <input type="hidden" name="line_id" value="{{ line_id }}">
                         <input type="hidden" name="action" value="remove_item">
                         <button type="submit" class="btn-remove-link" title="Supprimer">×</button>
                     </form>
