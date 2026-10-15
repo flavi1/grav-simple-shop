@@ -152,8 +152,8 @@ simple-shop).
   dans le thème du site).
 - Les listes `data-options@` des blueprints doivent être inscrites (`Blueprint::addAllowedDynamicCallable`), sinon Grav 2 les ignore ;
   garder des `options:` statiques de repli.
-- Tant que le site d'origine recopie sa configuration à chaque déploiement (mécanisme temporaire), une modification faite dans Admin2
-  est écrasée au déploiement suivant du site : la reporter dans le dépôt du site.
+- La configuration d'un site (clés, réglages, types de taxe, transporteurs) vit sur son serveur et se modifie dans Admin2 : ne jamais
+  la versionner ni la pousser par un déploiement (décision du propriétaire, 15/10/2026).
 
 ## Décisions du propriétaire (à respecter)
 - **Sans JavaScript** côté client public (hors option Stripe « formulaire intégré »).

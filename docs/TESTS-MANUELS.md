@@ -230,14 +230,12 @@ Aucun produit du site n'a d'options : le panier doit se comporter **exactement c
 Pour ce site (livres seulement), **aucun prix ne doit changer** : livres et livraison à 5,5 %.
 1. Plugins > Simple Shop > Taxes : réglages, « Type de taxe par défaut », « Types de taxe et leurs taux » (6 types, un taux FR chacun),
    « Type de taxe de chaque type de produit » ; les listes déroulantes sont remplies. Enregistrer sans rien changer : pas d'erreur, et les
-   6 types sont toujours là (Admin2 sait-il afficher une liste dans une liste ? sinon, le noter). Enregistrer sans rien changer : pas d'erreur. ⚠ Comme toute la configuration, une modification faite ici est
-   écrasée au déploiement suivant tant que le workflow temporaire copie `private/prompts/config/` : me la transmettre.
+   6 types sont toujours là (Admin2 sait-il afficher une liste dans une liste ? sinon, le noter). Enregistrer sans rien changer : pas d'erreur. Une modification faite ici est conservée : le déploiement du site n'écrase pas la configuration.
 2. Boutique > Taxes : résumé, « book → Taux réduit », puis 6 blocs de types **ouverts**, chacun avec son taux dans un bloc **fermé**
    (résumé « FR · 5,5 % · TVA 5,5 % »). Ouvrir un taux, changer le libellé : le résumé suit. « Ajouter un taux (autre pays…) » sur
    « Taux réduit » : BE, 6 → « Enregistrer les types de taxe » : message « 6 types de taxe, 7 taux enregistrés », et le bloc reste à jour
    après rechargement. Supprimer ce taux et réenregistrer. Essayer de supprimer « Taux réduit » (utilisé par book) : refus expliqué.
    « Exporter en CSV » : fichier lisible dans un tableur (une ligne par taux) ; le réimporter tel quel : même résultat.
-   ⚠ Tant que le site recopie sa configuration au déploiement, ces modifications sont écrasées au déploiement suivant du site.
 3. Fiche livre (Admin2) : champ « Type de taxe » (vide = type du type de produit). Le mettre sur « Taux normal » : le prix affiché passe au taux de 20 %
    (prix saisi TTC : le TTC reste, le HT change) ; remettre vide.
 4. Commande complète : montants, facture (« TVA 5,5 % sur … ») et testeur FNFE identiques à avant.
