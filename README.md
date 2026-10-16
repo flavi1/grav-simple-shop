@@ -34,7 +34,9 @@ Seul le paiement Stripe en mode « Elements » en utilise (option, voir plus bas
 | Compte | `/mon-compte` | données personnelles, newsletter |
 | Déconnexion | `/mon-compte/deconnexion` | POST + nonce |
 
-Toutes les routes se changent dans `plugins.simple-shop.routes`.
+Toutes les routes se changent dans `plugins.simple-shop.routes`. Titres et descriptions de ces pages (onglet du navigateur,
+moteurs de recherche) : `Config/PageMeta.php`, remplaçables par `plugins.simple-shop.pages.<clé>.title` / `.description` ;
+ces pages portent `robots: noindex, nofollow` (plugin `mvc` 0.2.0 ou plus récent).
 
 ### Anti-abus des codes OTP (serveur uniquement)
 

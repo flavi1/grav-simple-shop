@@ -100,7 +100,7 @@ for t in tests/*.php; do YAML=$YAML php -d zend.assertions=1 -d assert.exception
 
 Chaque script affiche `OK`. `tests/checkout-flow.php` (tunnel complet avec doublures de Grav, `tests/support/bootstrap.php`) **doit
 rester vert**. Les autres : `pricing`, `product-types`, `price-basis`, `invoice` (XSD Factur-X officiel), `cart-options`, `taxes`,
-`constraints`, `carriers-pricing`, `local-pickup`, `mode-editor`, `security`. Le plugin Colissimo a ses propres tests (variable `SS` = dossier de
+`constraints`, `carriers-pricing`, `local-pickup`, `mode-editor`, `security`, `page-meta`. Le plugin Colissimo a ses propres tests (variable `SS` = dossier de
 simple-shop).
 
 ## Conventions (reprises du site d'origine)

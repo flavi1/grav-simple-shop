@@ -85,7 +85,7 @@ class CartController extends AbstractController
             'shop_cart_count'    => $twig->twig_vars['shop_cart_count'] ?? 0,
         ], $additionalVars);
 
-        return $this->view("simple-shop/{$stepName}", $context);
+        return \Grav\Plugin\SimpleShop\Config\PageMeta::apply($this->view("simple-shop/{$stepName}", $context), $stepName, (array) $config);
     }
 
     /**

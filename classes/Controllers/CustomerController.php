@@ -608,14 +608,14 @@ class CustomerController extends AbstractController
         $customerData = $manager->getCustomerData();
         $shopCartData = CartStorage::getCartItems(CartStorage::getOrCreateCartId());
 
-        return $this->view('simple-shop/identify', [
+        return \Grav\Plugin\SimpleShop\Config\PageMeta::apply($this->view('simple-shop/identify', [
             'customer'           => $customerData,
             'simple_shop_config' => $this->shopConfig(),
             'shop_cart'          => $shopCartData,
             'is_verified'        => $manager->isEmailVerified(),
             'action'             => $currentAction,
             'back_url'           => $backUrl,
-        ]);
+        ]), 'identify', (array) $this->grav['config']->get('plugins.simple-shop', []));
     }
 
 
@@ -758,14 +758,14 @@ class CustomerController extends AbstractController
         // faux à ce stade (redirection immédiate ci-dessus sinon) : la
         // branche "déjà validé" du template devient un filet de sécurité
         // défensif, jamais atteint en pratique.
-        return $this->view('simple-shop/email-validation', [
+        return \Grav\Plugin\SimpleShop\Config\PageMeta::apply($this->view('simple-shop/email-validation', [
             'customer_email'     => $email,
             'email_verified'     => $manager->isEmailVerified(),
             'next_step_url'      => $backUrl,
             'back_url'           => $backUrl,
             'customer'           => $manager->getCustomerData(),
             'simple_shop_config' => $this->shopConfig(),
-        ]);
+        ]), 'email-validation', (array) $this->grav['config']->get('plugins.simple-shop', []));
     }
 
     /**
@@ -969,12 +969,12 @@ class CustomerController extends AbstractController
         $customerData = $manager->getCustomerData();
 
         // GET : formulaire pré-rempli.
-        return $this->view('simple-shop/account', [
+        return \Grav\Plugin\SimpleShop\Config\PageMeta::apply($this->view('simple-shop/account', [
             'customer'           => $customerData,
             'is_verified'        => $manager->isEmailVerified(),
             'simple_shop_config' => $this->shopConfig(),
             'unsubscribe_url'    => $this->buildUnsubscribeUrl((string) ($customerData['email'] ?? '')),
-        ]);
+        ]), 'account', (array) $this->grav['config']->get('plugins.simple-shop', []));
     }
 
     /**
@@ -1120,10 +1120,10 @@ class CustomerController extends AbstractController
 
         $success = $isValidRequest && $this->customerManager()->unsubscribeNewsletter($email);
 
-        return $this->view('simple-shop/newsletter-unsubscribe', [
+        return \Grav\Plugin\SimpleShop\Config\PageMeta::apply($this->view('simple-shop/newsletter-unsubscribe', [
             'success'            => $success,
             'email'              => $email,
             'simple_shop_config' => $this->shopConfig(),
-        ]);
+        ]), 'newsletter-unsubscribe', (array) $this->grav['config']->get('plugins.simple-shop', []));
     }
 }

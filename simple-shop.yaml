@@ -18,6 +18,12 @@ routes:
   logout: '/mon-compte/deconnexion'
   newsletter_unsubscribe: '/newsletter/unsubscribe'
 
+# Titres et descriptions des pages de la boutique (onglet du navigateur, <meta name="description">). Valeurs par défaut :
+# classes/Config/PageMeta.php ; à remplacer page par page si besoin. Ces pages ne sont jamais indexées (noindex).
+# pages:
+#   cart: { title: 'Votre panier', description: '…' }   # clés : cart, validation, delivery, payment, confirmation,
+#                                                        # identify, account, newsletter_unsubscribe
+
 # Livraison : zones desservies par CE site (le plugin sait résoudre FR-METRO,
 # FR-CORSE, FR-OM, EU-ZONE-1 et INTERNATIONAL ; chaque zone ouverte doit avoir
 # des règles dans carriers.yaml). Message personnalisable si la zone est refusée.
