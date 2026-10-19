@@ -19,10 +19,10 @@ use RocketTheme\Toolbox\Event\Event;
  *    qui déclenche systématiquement l'événement `onSimpleShopOrderStatusChanged`
  *    (voir {@see self::fireStatusChangedEvent()}), CONSOMMÉ ÉGALEMENT par
  *    {@see \Grav\Plugin\SimpleShop\Inventory\CartStorage::toOrder()} au moment
- *    de la création d'une commande (statut initial 'paid').
+ *    de la création d'une commande (statut initial 'processing').
  *
  * ⚠️ Les statuts définis dans {@see self::STATUSES} sont un choix par défaut
- * (paid, processing, shipped, delivered, cancelled, refunded) : ils n'étaient
+ * (draft, pending, processing, shipped, delivered, completed, cancelled, refunded) : ils n'étaient
  * imposés par aucune donnée métier existante et méritent d'être confirmés ou
  * ajustés.
  *
@@ -37,12 +37,22 @@ class OrderManager
      * @var array<string, string>
      */
     public const STATUSES = [
-        'paid'       => 'Payée',
+        'draft'      => 'Brouillon',
+        'pending'    => 'En attente',
         'processing' => 'En préparation',
         'shipped'    => 'Expédiée',
         'delivered'  => 'Livrée',
+        'completed'  => 'Terminée',
         'cancelled'  => 'Annulée',
         'refunded'   => 'Remboursée',
+    ];
+
+    /**
+     * Anciens statuts (historique uniquement). « Payée » n'est plus un statut depuis le 19/10/2026 : l'état de règlement
+     * se calcule à partir des paiements (Payments\PaymentLedger) ; les commandes « paid » sont passées à « processing ».
+     */
+    public const LEGACY_STATUSES = [
+        'paid' => 'Payée',
     ];
 
     /**
@@ -55,7 +65,7 @@ class OrderManager
      */
     public static function statusLabel(string $status): string
     {
-        return self::STATUSES[$status] ?? $status;
+        return self::STATUSES[$status] ?? self::LEGACY_STATUSES[$status] ?? $status;
     }
 
     /**
@@ -377,6 +387,7 @@ class OrderManager
 
             $stmtItems->execute([':ref' => $order['order_reference']]);
             $order['items'] = $stmtItems->fetchAll(\PDO::FETCH_ASSOC);
+            $order['settlement'] = \Grav\Plugin\SimpleShop\Payments\PaymentLedger::orderSettlement($order);
         }
         unset($order);
 
@@ -403,11 +414,13 @@ class OrderManager
             'Référence', 'Date', 'Statut', 'Nom', 'Prénom', 'E-mail', 'Téléphone',
             'Adresse', 'Complément', 'Code postal', 'Ville',
             'Livraison', 'Frais de livraison (€ TTC)', 'Total TTC (€)', 'Articles',
-            'Facture', 'E-reporting',
+            'Facture', 'E-reporting', 'Règlement', 'Réglé (€)',
         ];
 
         $db = InventoryManager::getDatabase();
-        $stmtInv = $db->prepare('SELECT invoice_number, ereporting_status FROM invoice WHERE order_reference = :ref');
+        // Plusieurs documents par commande (acomptes, avoirs…) : tous les numéros, séparés par « | ».
+        $stmtInv = $db->prepare("SELECT group_concat(invoice_number, ' | ') AS invoice_number, min(ereporting_status) AS ereporting_status
+            FROM invoice WHERE order_reference = :ref AND COALESCE(kind, 'invoice') <> 'payment_request'");
 
         $handle = fopen('php://temp', 'r+');
         fwrite($handle, "\xEF\xBB\xBF");
@@ -423,7 +436,8 @@ class OrderManager
             }
 
             $stmtInv->execute([':ref' => $order['order_reference']]);
-            $inv = $stmtInv->fetch(\PDO::FETCH_ASSOC) ?: [];
+            $inv = array_filter($stmtInv->fetch(\PDO::FETCH_ASSOC) ?: [], static fn ($v) => $v !== null);
+            $stmtInv->closeCursor();
 
             self::csvLine($handle, [
                 $order['order_reference'],
@@ -437,6 +451,8 @@ class OrderManager
                 implode(' | ', $items),
                 $inv['invoice_number'] ?? '',
                 isset($inv['ereporting_status']) ? InvoiceManager::statusLabel((string) $inv['ereporting_status']) : '',
+                $order['settlement']['label'] ?? '',
+                number_format(($order['settlement']['paid_cents'] ?? 0) / 100, 2, ',', ''),
             ]);
         }
 
@@ -484,7 +500,7 @@ class OrderManager
      *
      * Appelé par :
      *  - {@see \Grav\Plugin\SimpleShop\Inventory\CartStorage::toOrder()}, à la
-     *    création de la commande (`old_status = null`, `new_status = 'paid'`) ;
+     *    création de la commande (`old_status = null`, `new_status = 'processing'`) ;
      *  - {@see self::updateStatus()}, à chaque changement de statut ultérieur
      *    (ex. depuis l'espace admin).
      *

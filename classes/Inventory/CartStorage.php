@@ -428,7 +428,7 @@ class CartStorage
             $stmtOrder = $db->prepare("
                 INSERT INTO \"order\" (order_reference, customer_data, shipping_data, billing_data, total_amount, status,
                     currency, total_cents, shipping_ht_cents, shipping_ttc_cents, shipping_tax_code, shipping_tax_bp, shipping_taxes)
-                VALUES (:ref, :customer, :shipping, :billing, :total, 'paid',
+                VALUES (:ref, :customer, :shipping, :billing, :total, 'processing',
                     :currency, :total_cents, :ship_ht, :ship_ttc, :ship_code, :ship_bp, :ship_taxes)
             ");
             $siteTax = \Grav\Plugin\SimpleShop\Product\Catalog::taxRate();
@@ -460,12 +460,23 @@ class CartStorage
                 $stmtPay->execute([':pay' => $paymentReference, ':ref' => $orderReference]);
             }
 
-            // Première ligne de l'historique des statuts (création -> 'paid').
+            // Première ligne de l'historique des statuts (création -> 'processing' : payée, à préparer). « Payée » n'est
+            // plus un statut : c'est le paiement ci-dessous qui le dit (Payments\PaymentLedger).
             $stmtHist = $db->prepare("
                 INSERT INTO order_status_history (order_reference, old_status, new_status, changed_by)
-                VALUES (:ref, NULL, 'paid', NULL)
+                VALUES (:ref, NULL, 'processing', NULL)
             ");
             $stmtHist->execute([':ref' => $orderReference]);
+
+            // Le paiement qui a déclenché la commande (montant total, passerelle choisie, référence de paiement).
+            $recorded = \Grav\Plugin\SimpleShop\Payments\PaymentLedger::record([
+                'order_reference' => $orderReference,
+                'amount_cents'    => $amounts['total_ttc_cents'],
+                'currency'        => $amounts['currency'],
+                'method'          => preg_match('/^[a-z0-9_]{1,40}$/', (string) ($order->selected_gateway ?? '')) ? (string) $order->selected_gateway : 'other',
+                'recorded_by'     => 'boutique',
+                'external_ref'    => $paymentReference !== null && $paymentReference !== '' ? $paymentReference : null,
+            ], $db);
 
             // Insertion des articles de la commande
             $stmtItem = $db->prepare("
@@ -525,11 +536,10 @@ class CartStorage
         }
 
         // Déclenchement de l'événement `onSimpleShopOrderStatusChanged` dès la
-        // création de la commande (statut initial 'paid', voir
-        // OrderManager::fireStatusChangedEvent()). Tout écouteur tiers
-        // enregistré sur cet événement sera notifié, indépendamment de
-        // CartController::sendOrderEmails() (appel séparé, non lié).
-        OrderManager::fireStatusChangedEvent(Grav::instance(), $orderReference, null, 'paid');
+        // création de la commande (statut initial 'processing', voir
+        // OrderManager::fireStatusChangedEvent()), puis `onSimpleShopPaymentRecorded`.
+        OrderManager::fireStatusChangedEvent(Grav::instance(), $orderReference, null, 'processing');
+        \Grav\Plugin\SimpleShop\Payments\PaymentLedger::fireRecorded($recorded['payment']);
 
         // Nettoyage de la session commande en cours (jamais depuis un webhook :
         // la session courante n'est pas celle du client).

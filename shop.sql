@@ -64,7 +64,7 @@ CREATE TABLE IF NOT EXISTS order_item (
 -- rendue sûre par l'usage de IF NOT EXISTS partout.
 CREATE TABLE IF NOT EXISTS invoice (
     id INTEGER PRIMARY KEY,
-    order_reference TEXT NOT NULL UNIQUE,
+    order_reference TEXT NOT NULL,
     invoice_number TEXT NOT NULL UNIQUE,
     customer_type TEXT NOT NULL DEFAULT 'b2c',
     ereporting_status TEXT NOT NULL DEFAULT 'not_submitted',
@@ -123,3 +123,25 @@ CREATE TABLE IF NOT EXISTS order_tracking (
     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY(order_reference) REFERENCES "order"(order_reference) ON DELETE CASCADE
 );
+
+-- 9. Paiements (« transactions ») : argent reçu (montant positif) ou rendu (négatif : remboursement), rattaché à une
+-- commande et, s'il y a lieu, au document payé (facture, acompte, demande de paiement : table `invoice`). L'état de
+-- règlement (à régler, partiellement réglée, réglée…) se calcule toujours à partir de cette table (Payments\PaymentLedger) :
+-- « payée » n'est plus un statut de commande. `external_ref` (ex. identifiant de paiement Stripe) est unique : un même
+-- paiement n'est jamais enregistré deux fois (retour client + webhook, rejeu).
+CREATE TABLE IF NOT EXISTS payment (
+    id INTEGER PRIMARY KEY,
+    order_reference TEXT NOT NULL,
+    invoice_id INTEGER,
+    amount_cents INTEGER NOT NULL,
+    currency TEXT NOT NULL DEFAULT 'EUR',
+    method TEXT NOT NULL,
+    paid_at DATETIME NOT NULL,
+    recorded_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    recorded_by TEXT,
+    external_ref TEXT UNIQUE,
+    note TEXT,
+    FOREIGN KEY(order_reference) REFERENCES "order"(order_reference) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_payment_order ON payment(order_reference);
+CREATE INDEX IF NOT EXISTS idx_payment_invoice ON payment(invoice_id);

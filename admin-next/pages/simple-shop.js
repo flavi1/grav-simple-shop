@@ -60,6 +60,20 @@
         return el;
     }
 
+    /** Montant en centimes → « 12,50 € ». */
+    function cents(value, currency) {
+        return (Number(value || 0) / 100).toLocaleString('fr-FR', { style: 'currency', currency: currency || 'EUR' });
+    }
+
+    /** Pastille de l'état de règlement (à régler, partiellement réglée, réglée…), avec le reste dû s'il y en a un. */
+    function settlementBadge(st) {
+        if (!st) {
+            return '';
+        }
+        return h('span', {}, h('span', { class: 'ss-pay ' + st.state }, st.label),
+            st.remaining_cents > 0 && st.state !== 'unpaid' ? h('div', { class: 'ss-muted' }, 'reste ' + cents(st.remaining_cents, st.currency)) : null);
+    }
+
     function money(value) {
         return Number(value || 0).toLocaleString('fr-FR', { style: 'currency', currency: 'EUR' });
     }
@@ -150,7 +164,12 @@
         '.ss-badge.paid{background:var(--ss-blue-bg);color:var(--ss-blue-fg)}.ss-badge.processing{background:var(--ss-warn-bg);color:var(--ss-warn-fg)}',
         '.ss-badge.shipped,.ss-badge.delivered{background:var(--ss-ok-bg);color:var(--ss-ok-fg)}',
         '.ss-badge.cancelled,.ss-badge.refunded{background:var(--ss-err-bg);color:var(--ss-err-fg)}',
-        '.ss-badge.pending{background:var(--ss-n-bg);color:var(--ss-n-fg)}',
+        '.ss-badge.pending,.ss-badge.draft{background:var(--ss-n-bg);color:var(--ss-n-fg)}.ss-badge.completed{background:var(--ss-ok-bg);color:var(--ss-ok-fg)}',
+        // État de règlement (calculé à partir des paiements)
+        '.ss-pay{display:inline-block;padding:.1rem .5rem;border-radius:.375rem;font-size:.75rem;background:var(--ss-n-bg);color:var(--ss-n-fg)}',
+        '.ss-pay.paid{background:var(--ss-ok-bg);color:var(--ss-ok-fg)}.ss-pay.partial{background:var(--ss-warn-bg);color:var(--ss-warn-fg)}',
+        '.ss-pay.unpaid{background:var(--ss-err-bg);color:var(--ss-err-fg)}.ss-pay.overpaid{background:var(--ss-info-bg);color:var(--ss-info-fg)}',
+        '.ss td.ss-neg{color:var(--ss-err-fg)}',
         '.ss-card{border:1px solid var(--border,#e5e7eb);border-radius:.5rem;padding:1rem;margin-top:1rem;background:var(--card,var(--background,#fff))}',
         '.ss-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(16rem,1fr));gap:1rem}',
         '.ss h3{margin:0 0 .5rem;font-size:.95rem}',
@@ -321,7 +340,8 @@
         showOrders() {
             var self = this;
             var f = this.filters;
-            var statuses = { paid: 'Payée', processing: 'En préparation', shipped: 'Expédiée', delivered: 'Livrée', cancelled: 'Annulée', refunded: 'Remboursée' };
+            var statuses = { draft: 'Brouillon', pending: 'En attente', processing: 'En préparation', shipped: 'Expédiée', delivered: 'Livrée',
+                completed: 'Terminée', cancelled: 'Annulée', refunded: 'Remboursée' };
 
             var statusSelect = h('select', { id: 'ss-f-status' }, h('option', { value: '' }, 'Tous les statuts'),
                 Object.keys(statuses).map(function (k) { return h('option', { value: k, selected: f.status === k }, statuses[k]); }));
@@ -378,7 +398,7 @@
                 }
 
                 self.list.appendChild(h('table', {},
-                    h('thead', {}, h('tr', {}, ['Référence', 'Date', 'Client', 'Total', 'Statut'].map(function (c, i) {
+                    h('thead', {}, h('tr', {}, ['Référence', 'Date', 'Client', 'Total', 'Statut', 'Règlement'].map(function (c, i) {
                         return h('th', { class: i === 3 ? 'ss-num' : '' }, c);
                     }))),
                     h('tbody', {}, rows.map(function (o) {
@@ -388,7 +408,8 @@
                             h('td', {}, dateTime(o.created_at)),
                             h('td', {}, o.customer_name, h('div', { class: 'ss-muted' }, o.customer_email)),
                             h('td', { class: 'ss-num' }, money(o.total_amount)),
-                            h('td', {}, h('span', { class: 'ss-badge ' + o.status }, o.status_label)));
+                            h('td', {}, h('span', { class: 'ss-badge ' + o.status }, o.status_label)),
+                            h('td', {}, settlementBadge(o.settlement)));
                     }))));
 
                 self.list.appendChild(h('div', { class: 'ss-bar', style: 'margin-top:.8rem;align-items:center' },
@@ -468,6 +489,7 @@
             this.detail.innerHTML = '';
             this.detail.appendChild(h('div', { class: 'ss-card' },
                 h('h3', {}, 'Commande ' + o.order_reference + ' — ' + dateTime(o.created_at)),
+                this.paymentsSection(o),
                 h('div', { class: 'ss-grid' },
                     h('div', {}, h('h3', {}, 'Client'),
                         h('div', {}, ((c.firstname || '') + ' ' + (c.lastname || '')).trim()),
@@ -502,6 +524,65 @@
                         h('p', {}, 'E-reporting : ', h('strong', {}, inv.ereporting_label || '—')),
                         h('div', { class: 'ss-bar' }, h('label', { class: 'ss-field', for: 'ss-inv-status' }, 'Statut e-reporting', invSelect), invBtn),
                         pdfBtn))));
+        }
+
+        /**
+         * Paiements d'une commande : état de règlement, liste (remboursements en négatif), saisie d'un paiement reçu hors du
+         * site (virement, chèque…) ou d'un remboursement.
+         */
+        paymentsSection(o) {
+            var self = this;
+            var st = o.settlement || {};
+            var methods = o.payment_methods || {};
+            var today = new Date().toISOString().slice(0, 10);
+            var amount = h('input', { type: 'text', id: 'ss-pay-amount', inputmode: 'decimal', size: '10', placeholder: '0.00',
+                value: st.remaining_cents > 0 ? (st.remaining_cents / 100).toFixed(2) : '' });
+            var method = h('select', { id: 'ss-pay-method' }, Object.keys(methods).map(function (k) { return h('option', { value: k }, methods[k]); }));
+            var date = h('input', { type: 'date', id: 'ss-pay-date', value: today, max: today });
+            var ref = h('input', { type: 'text', id: 'ss-pay-ref', maxlength: '120', placeholder: 'ex. référence du virement' });
+            var note = h('input', { type: 'text', id: 'ss-pay-note', maxlength: '500' });
+            var refund = h('input', { type: 'checkbox', id: 'ss-pay-refund' });
+            var btn = h('button', { class: 'ss-btn ss-primary', type: 'submit' }, 'Enregistrer le paiement');
+            refund.addEventListener('change', function () { btn.textContent = refund.checked ? 'Enregistrer le remboursement' : 'Enregistrer le paiement'; });
+
+            var form = h('form', { class: 'ss-bar', onsubmit: function (e) {
+                e.preventDefault();
+                btn.disabled = true;
+                api('POST', '/orders/' + encodeURIComponent(o.order_reference) + '/payments', {
+                    amount: amount.value, method: method.value, paid_at: date.value, external_ref: ref.value, note: note.value, refund: refund.checked
+                }).then(function (res) {
+                    self.notify((refund.checked ? 'Remboursement' : 'Paiement') + ' enregistré : ' + res.data.settlement.label + '.', false);
+                    self.loadOrders();
+                    self.openOrder(o.order_reference);
+                }).catch(function (e) { self.fail(e); }).then(function () { btn.disabled = false; });
+            } },
+                h('label', { class: 'ss-field', for: 'ss-pay-amount' }, 'Montant', amount),
+                h('label', { class: 'ss-field', for: 'ss-pay-method' }, 'Moyen', method),
+                h('label', { class: 'ss-field', for: 'ss-pay-date' }, 'Date', date),
+                h('label', { class: 'ss-field', for: 'ss-pay-ref' }, 'Référence', ref),
+                h('label', { class: 'ss-field', for: 'ss-pay-note' }, 'Note', note),
+                h('label', { class: 'ss-field', for: 'ss-pay-refund', style: 'flex-direction:row;align-items:center;gap:.3rem' }, refund, 'Remboursement'),
+                btn);
+
+            var rows = (o.payments || []).map(function (p) {
+                return h('tr', {},
+                    h('td', {}, dateTime(p.paid_at)),
+                    h('td', {}, p.method_label),
+                    h('td', { class: 'ss-num' + (p.amount_cents < 0 ? ' ss-neg' : '') }, cents(p.amount_cents, p.currency)),
+                    h('td', {}, p.external_ref || ''),
+                    h('td', {}, p.note || '', p.recorded_by ? h('div', { class: 'ss-muted' }, 'par ' + p.recorded_by) : null));
+            });
+
+            return h('section', { class: 'ss-section', 'aria-labelledby': 'ss-pay-title' },
+                h('h3', { id: 'ss-pay-title' }, 'Règlement'),
+                h('p', {}, settlementBadge(st), ' ', h('span', { class: 'ss-muted' },
+                    'Réglé ' + cents(st.paid_cents, st.currency) + ' sur ' + cents(st.due_cents, st.currency)
+                    + (st.refunded_cents ? ' (dont ' + cents(st.refunded_cents, st.currency) + ' remboursés)' : ''))),
+                rows.length ? h('table', {}, h('thead', {}, h('tr', {}, ['Date', 'Moyen', 'Montant', 'Référence', 'Note'].map(function (c, i) {
+                    return h('th', { class: i === 2 ? 'ss-num' : '' }, c);
+                }))), h('tbody', {}, rows)) : h('p', { class: 'ss-muted' }, 'Aucun paiement enregistré.'),
+                h('details', { style: 'margin-top:.6rem' }, h('summary', {}, 'Enregistrer un paiement reçu hors du site ou un remboursement'),
+                    h('div', { style: 'padding:.6rem 0' }, form)));
         }
 
         // ---------------- Transporteurs ----------------

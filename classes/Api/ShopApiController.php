@@ -17,6 +17,7 @@ use Grav\Plugin\SimpleShop\Delivery\ShippingManager;
 use Grav\Plugin\SimpleShop\Delivery\ZoneResolver;
 use Grav\Plugin\SimpleShop\Invoicing\InvoiceManager;
 use Grav\Plugin\SimpleShop\Orders\OrderManager;
+use Grav\Plugin\SimpleShop\Payments\PaymentLedger;
 use Grav\Plugin\SimpleShop\Services\CustomerManager;
 use Psr\Http\Message\ResponseInterface;
 use Psr\Http\Message\ServerRequestInterface;
@@ -96,6 +97,8 @@ class ShopApiController extends AbstractApiController
                 'new_status_label' => OrderManager::statusLabel((string) $h['new_status']),
             ], OrderManager::getStatusHistory($reference)),
             'statuses'        => OrderManager::STATUSES,
+            'payments'        => PaymentLedger::forOrder($reference),
+            'payment_methods' => array_combine(PaymentLedger::MANUAL_METHODS, array_map([PaymentLedger::class, 'methodLabel'], PaymentLedger::MANUAL_METHODS)),
             'invoice'         => [
                 'number'                => $invoice['invoice_number'] ?? null,
                 'ereporting_status'     => $invoice['ereporting_status'] ?? null,
@@ -127,6 +130,62 @@ class ShopApiController extends AbstractApiController
             'status'          => $status,
             'status_label'    => OrderManager::statusLabel($status),
         ]);
+    }
+
+    /**
+     * POST /simple-shop/orders/{reference}/payments — paiement reçu hors du site (virement, chèque…) ou remboursement.
+     * Corps : {"amount": "120.00", "method": "bank_transfer", "paid_at": "2026-10-19", "refund": false, "external_ref": "", "note": ""}.
+     */
+    public function addOrderPayment(ServerRequestInterface $request): ResponseInterface
+    {
+        $this->requirePermission($request, self::PERM_WRITE);
+
+        $reference = $this->orderReference($request);
+        $order = OrderManager::getOrder($reference);
+        if ($order === null) {
+            throw new NotFoundException("Commande introuvable : {$reference}.");
+        }
+        $body = $this->getRequestBody($request);
+        $errors = [];
+        $amount = trim(str_replace([' ', "\u{00A0}", "\u{202F}", ','], ['', '', '', '.'], (string) ($body['amount'] ?? '')));
+        if (!preg_match('/^\d{1,9}(\.\d{1,2})?$/', $amount) || (float) $amount <= 0) {
+            $errors['amount'] = 'Montant positif, deux décimales au plus (ex. 120.50).';
+        }
+        $method = (string) ($body['method'] ?? '');
+        if (!in_array($method, PaymentLedger::MANUAL_METHODS, true)) {
+            $errors['method'] = 'Moyens admis : ' . implode(', ', PaymentLedger::MANUAL_METHODS) . '.';
+        }
+        $paidAt = (string) ($body['paid_at'] ?? '');
+        if ($paidAt !== '' && (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $paidAt) || strtotime($paidAt) === false || $paidAt > gmdate('Y-m-d', time() + 86400))) {
+            $errors['paid_at'] = 'Date au format AAAA-MM-JJ, pas dans le futur.';
+        }
+        $invoiceId = isset($body['invoice_id']) && $body['invoice_id'] !== '' && $body['invoice_id'] !== null ? (int) $body['invoice_id'] : null;
+        if ($invoiceId !== null && !InvoiceManager::belongsToOrder($invoiceId, $reference)) {
+            $errors['invoice_id'] = 'Document inconnu pour cette commande.';
+        }
+        if ($errors) {
+            throw new ValidationException('Paiement invalide.', $errors);
+        }
+        [$units, $dec] = array_pad(explode('.', $amount), 2, '0');
+        $cents = (int) $units * 100 + (int) str_pad(substr($dec, 0, 2), 2, '0');
+
+        $result = PaymentLedger::record([
+            'order_reference' => $reference,
+            'invoice_id'      => $invoiceId,
+            'amount_cents'    => !empty($body['refund']) ? -$cents : $cents,
+            'currency'        => (string) (($order['currency'] ?? '') ?: 'EUR'),
+            'method'          => $method,
+            'paid_at'         => $paidAt !== '' ? $paidAt : null,
+            'recorded_by'     => (string) $this->getUser($request)->username,
+            'external_ref'    => (string) ($body['external_ref'] ?? ''),
+            'note'            => (string) ($body['note'] ?? ''),
+        ]);
+
+        return ApiResponse::create([
+            'payment'    => $result['payment'],
+            'created'    => $result['created'],
+            'settlement' => PaymentLedger::orderSettlement($order),
+        ], $result['created'] ? 201 : 200);
     }
 
     /** PATCH /simple-shop/orders/{reference}/tracking — corps : {"tracking_number": "6A12345678901"} ("" = effacer). */
@@ -719,6 +778,8 @@ class ShopApiController extends AbstractApiController
             'status'          => $order['status'],
             'status_label'    => OrderManager::statusLabel((string) $order['status']),
             'total_amount'    => (float) $order['total_amount'],
+            'source'          => (string) (($order['source'] ?? '') ?: 'shop'),
+            'settlement'      => $order['settlement'] ?? PaymentLedger::orderSettlement($order),
             'customer_name'   => trim(($customer['firstname'] ?? '') . ' ' . ($customer['lastname'] ?? '')),
             'customer_email'  => $customer['email'] ?? '',
         ];

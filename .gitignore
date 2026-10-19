@@ -7,3 +7,5 @@
 .ftp-deploy-sync-state.json
 # Configuration réelle d'un site : jamais dans ce dépôt public
 *-private.php
+/cache/
+/logs/

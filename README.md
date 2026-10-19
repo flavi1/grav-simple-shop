@@ -185,9 +185,15 @@ Numéro saisi dans Admin2 (`PATCH /orders/{reference}/tracking`, table `order_tr
 
 ## Commandes, factures, événements
 
-- `Orders\OrderManager` : statuts (`paid`, `processing`, `shipped`,
-  `delivered`, `cancelled`, `refunded`), historique (`order_status_history`),
-  recherche filtrée, export CSV comptable (`;`, UTF-8 BOM, virgule décimale).
+- `Orders\OrderManager` : statuts de **déroulement** (`draft`, `pending`, `processing`, `shipped`, `delivered`, `completed`,
+  `cancelled`, `refunded`), historique (`order_status_history`), recherche filtrée, export CSV comptable (`;`, UTF-8 BOM,
+  virgule décimale, état de règlement). Une commande de la boutique, payée à sa création, commence à `processing`.
+- `Payments\PaymentLedger` (table `payment`) : **paiements** reçus (positifs) ou rendus (négatifs), rattachés à une commande
+  et éventuellement à un document ; `external_ref` unique (idempotence). L'**état de règlement** (`unpaid`, `partial`, `paid`,
+  `overpaid`, `refunded`, `none`) se calcule toujours à partir des paiements : « payée » n'est plus un statut de commande
+  (depuis le 19/10/2026 ; anciennes commandes `paid` reprises en `processing` + un paiement). Saisie à la main dans Admin2
+  (virement, chèque, espèces, carte, autre ; remboursement) : `POST /simple-shop/orders/{reference}/payments`.
+  Conception : `docs/CONCEPTION-FACTURATION.md`.
 - `Orders\OrderAmounts` : **montants en centimes**, seule source pour le panier, le paiement (montant envoyé à Stripe),
   la commande et la facture. Une ligne = prix unitaires HT et TTC, code et taux de taxe (points de base), quantité ;
   livraison = une ligne au taux du site. Total payé = somme des TTC.
@@ -208,6 +214,11 @@ Numéro saisi dans Admin2 (`PATCH /orders/{reference}/tracking`, table `order_tr
 - `Services\OrderMailer` : e-mails de confirmation, de notification vendeur et
   de changement de statut (`status_emails`, par défaut expédiée / annulée /
   remboursée).
+
+### Événement `onSimpleShopPaymentRecorded`
+
+Déclenché après chaque nouveau paiement (boutique, webhook, saisie dans Admin2) ; `$event['payment']` = la ligne de la table
+`payment` (`order_reference`, `invoice_id`, `amount_cents` signé, `currency`, `method`, `paid_at`, `external_ref`…).
 
 ### Événement `onSimpleShopOrderStatusChanged`
 

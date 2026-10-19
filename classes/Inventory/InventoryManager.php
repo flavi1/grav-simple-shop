@@ -247,6 +247,7 @@ class InventoryManager
      */
     private const ADDED_COLUMNS = [
         'order' => [
+            'source'             => "TEXT DEFAULT 'shop'",   // shop (boutique) | manual (saisie dans l'administration)
             'currency'           => 'TEXT',
             'total_cents'        => 'INTEGER',
             'shipping_ht_cents'  => 'INTEGER',
@@ -265,6 +266,18 @@ class InventoryManager
             'options'        => 'TEXT',
             'taxes'          => 'TEXT',
         ],
+        // Documents (facture, acompte, avoir, demande de paiement…) : voir docs/CONCEPTION-FACTURATION.md, § 12.
+        'invoice' => [
+            'kind'               => "TEXT DEFAULT 'invoice'",
+            'total_cents'        => 'INTEGER',
+            'due_cents'          => 'INTEGER',
+            'issued_at'          => 'DATETIME',
+            'due_date'           => 'TEXT',
+            'access_token'       => 'TEXT',
+            'source_invoice_id'  => 'INTEGER',
+            'related_invoice_id' => 'INTEGER',
+            'payload'            => 'TEXT',
+        ],
     ];
 
     /** Reprise des lignes de l'ancienne table cart_item (sans options) dans cart_line, puis vidage de cart_item. */
@@ -280,6 +293,65 @@ class InventoryManager
                 ':r' => $row['product_route'], ':o' => '{}', ':q' => (int) $row['quantity']]);
         }
         $db->exec('DELETE FROM cart_item');
+    }
+
+    /**
+     * La table `invoice` imposait une seule facture par commande (`order_reference UNIQUE`) ; une commande peut désormais
+     * avoir plusieurs documents (acomptes, facture finale, avoirs, demande de paiement). SQLite ne sait pas retirer une
+     * contrainte : la table est reconstruite à l'identique, sans elle, une seule fois (données et identifiants conservés).
+     */
+    private static function allowSeveralDocumentsPerOrder(\PDO $db): void
+    {
+        $unique = false;
+        foreach ($db->query("PRAGMA index_list('invoice')")->fetchAll(\PDO::FETCH_ASSOC) as $index) {
+            if ((int) $index['unique'] !== 1) {
+                continue;
+            }
+            $cols = array_column($db->query("PRAGMA index_info('" . str_replace("'", "''", (string) $index['name']) . "')")->fetchAll(\PDO::FETCH_ASSOC), 'name');
+            if ($cols === ['order_reference']) {
+                $unique = true;
+            }
+        }
+        if (!$unique) {
+            return;
+        }
+        $columns = array_column($db->query("PRAGMA table_info('invoice')")->fetchAll(\PDO::FETCH_ASSOC), 'name');
+        $list = implode(', ', array_map(static fn ($c) => '"' . $c . '"', $columns));
+        $db->exec('PRAGMA foreign_keys = OFF');
+        $db->beginTransaction();
+        try {
+            $db->exec("CREATE TABLE invoice_new (
+                id INTEGER PRIMARY KEY,
+                order_reference TEXT NOT NULL,
+                invoice_number TEXT NOT NULL UNIQUE,
+                customer_type TEXT NOT NULL DEFAULT 'b2c',
+                ereporting_status TEXT NOT NULL DEFAULT 'not_submitted',
+                vat_rate REAL NOT NULL DEFAULT 0,
+                pdf_path TEXT,
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                kind TEXT DEFAULT 'invoice',
+                total_cents INTEGER,
+                due_cents INTEGER,
+                issued_at DATETIME,
+                due_date TEXT,
+                access_token TEXT,
+                source_invoice_id INTEGER,
+                related_invoice_id INTEGER,
+                payload TEXT,
+                FOREIGN KEY(order_reference) REFERENCES \"order\"(order_reference) ON DELETE CASCADE
+            )");
+            $db->exec("INSERT INTO invoice_new ({$list}) SELECT {$list} FROM invoice");
+            $db->exec('DROP TABLE invoice');
+            $db->exec('ALTER TABLE invoice_new RENAME TO invoice');
+            $db->exec('CREATE INDEX IF NOT EXISTS idx_invoice_order ON invoice(order_reference)');
+            $db->commit();
+        } catch (\Throwable $e) {
+            $db->rollBack();
+            throw $e;
+        } finally {
+            $db->exec('PRAGMA foreign_keys = ON');
+        }
     }
 
     private static function addMissingColumns(\PDO $db): void
@@ -381,6 +453,8 @@ class InventoryManager
         try {
             self::addMissingColumns($db);
             self::migrateCartLines($db);
+            self::allowSeveralDocumentsPerOrder($db);
+            \Grav\Plugin\SimpleShop\Payments\PaymentLedger::migrateLegacyPaidOrders($db);
         } catch (\PDOException $e) {
             $grav['log']->error("SimpleShop: Erreur lors de l'ajout de colonnes : " . $e->getMessage());
 

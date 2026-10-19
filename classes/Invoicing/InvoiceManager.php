@@ -183,6 +183,17 @@ class InvoiceManager
         ];
     }
 
+    /** Vrai si le document (table `invoice`) appartient à la commande. */
+    public static function belongsToOrder(int $invoiceId, string $orderReference): bool
+    {
+        $stmt = InventoryManager::getDatabase()->prepare('SELECT 1 FROM invoice WHERE id = :id AND order_reference = :ref');
+        $stmt->execute([':id' => $invoiceId, ':ref' => $orderReference]);
+        $ok = $stmt->fetchColumn() !== false;
+        $stmt->closeCursor();
+
+        return $ok;
+    }
+
     /**
      * Retourne les options de statut e-reporting proposées par le select
      * manuel de l'admin (itération 1 du CDC, voir documentation de classe) :

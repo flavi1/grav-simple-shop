@@ -125,6 +125,12 @@ assert(json_decode($order['shipping_data'], true)['key'] === 'colis');
 assert(strpos(file_get_contents($book->file), "product_quantity: '8'") !== false || strpos(file_get_contents($book->file), 'product_quantity: 8') !== false, 'stock 10 → 8 : ' . file_get_contents($book->file));
 $invoice = $db->query('SELECT * FROM invoice')->fetch(PDO::FETCH_ASSOC);
 assert($invoice !== false, 'facture créée avec la commande');
+// Paiement enregistré avec la commande (« payée » n'est plus un statut) : passerelle de test, montant total.
+assert($order['status'] === 'processing' && ($order['source'] ?? 'shop') === 'shop', 'commande payée = en préparation');
+$pay = $db->query('SELECT * FROM payment')->fetchAll(PDO::FETCH_ASSOC);
+assert(count($pay) === 1 && (int) $pay[0]['amount_cents'] === 3389 && $pay[0]['method'] === 'test_gateway' && $pay[0]['order_reference'] === $order['order_reference'], 'paiement enregistré');
+$st = \Grav\Plugin\SimpleShop\Payments\PaymentLedger::orderSettlement($order);
+assert($st['state'] === 'paid' && $st['remaining_cents'] === 0, 'commande réglée');
 $r = $call('step4ConfirmationOrder', '/checkout/confirmation');
 assert(!$r->isRedirect() && $grav['twig']->twig_vars['order_reference'] === $order['order_reference']);
 $r = $call('step4ConfirmationOrder', '/checkout/confirmation', [], ['order_id' => 'CMD-AUTRE']);
