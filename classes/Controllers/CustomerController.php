@@ -813,7 +813,8 @@ class CustomerController extends AbstractController
         $code = $manager->getOrGenerateEmailVerificationCode($email);
 
         if (!$this->sendOtpEmail($email, $code)) {
-            $this->addMessage("Erreur technique lors de l'envoi du code.", 'error');
+            $this->addMessage("Le code n'a pas pu vous être envoyé par e-mail (erreur technique). "
+                . "Merci de prévenir l'administrateur du site.", 'error');
 
             return false;
         }
