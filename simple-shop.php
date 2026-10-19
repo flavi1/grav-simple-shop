@@ -39,7 +39,8 @@ class SimpleShopPlugin extends Plugin
             'onApiPluginPageInfo'      => [['onApiPluginPageInfo', 0]],
             'onTwigInitialized'        => [['onTwigInitialized', 0]],
             'onTwigTemplatePaths'      => [['onTwigTemplatePaths', 0]],
-            'onTwigSiteVariables'      => [['onTwigSiteVariables', 0]]
+            'onTwigSiteVariables'      => [['onTwigSiteVariables', 0], ['traceMessages', -1000]],
+            'onOutputGenerated'        => [['traceOutput', -1000]],   // DIAGNOSTIC TEMPORAIRE (19/10/2026)
         ];
     }
 
@@ -232,6 +233,35 @@ class SimpleShopPlugin extends Plugin
     public function addMessage(string $message, string $scope = 'info'): void
     {
         NoJs::addMessage($message, $scope);
+    }
+
+    /**
+     * DIAGNOSTIC TEMPORAIRE (19/10/2026, messages perdus sur /identify) : trace dans grav.log, pour /identify seulement,
+     * les messages publics transmis à Twig puis leur présence dans la page produite. À retirer avec traceSession().
+     */
+    private function traceIdentify(string $what): void
+    {
+        $path = (string) parse_url((string) ($_SERVER['REQUEST_URI'] ?? ''), PHP_URL_PATH);
+        if ($this->isAdmin() || !str_ends_with(rtrim($path, '/'), '/identify')) {
+            return;
+        }
+        $this->grav['log']->info('[SimpleShop][TRACE] ' . $what . ' | ' . ($_SERVER['REQUEST_METHOD'] ?? '?') . ' ' . ($_SERVER['REQUEST_URI'] ?? '')
+            . ' | session ' . (session_id() !== '' ? substr(hash('sha256', session_id()), 0, 8) : 'aucune')
+            . ' | thème ' . $this->grav['config']->get('system.pages.theme') . ' (' . (isset($this->grav['theme']) && is_object($this->grav['theme']) ? get_class($this->grav['theme']) : '?') . ')');
+    }
+
+    public function traceMessages(): void
+    {
+        $vars = $this->grav['twig']->twig_vars;
+        $this->traceIdentify('Twig : public_messages ' . (array_key_exists('public_messages', $vars) ? count((array) $vars['public_messages']) : 'ABSENT')
+            . ' ; en session : ' . count((array) ($this->grav['session']->public_messages ?? [])));
+    }
+
+    public function traceOutput(): void
+    {
+        $out = (string) $this->grav->output;
+        $this->traceIdentify('page produite : ' . strlen($out) . ' octets ; bloc public-messages : ' . (str_contains($out, 'public-messages') ? 'OUI' : 'non')
+            . ' ; lien S\'identifier : ' . (str_contains($out, 'identifier') ? 'oui' : 'non'));
     }
 
     public function onTwigSiteVariables(): void
