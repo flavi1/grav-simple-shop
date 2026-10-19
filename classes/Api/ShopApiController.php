@@ -15,7 +15,10 @@ use Grav\Plugin\SimpleShop\Delivery\Geocoder;
 use Grav\Plugin\SimpleShop\Delivery\ShippingConstraints;
 use Grav\Plugin\SimpleShop\Delivery\ShippingManager;
 use Grav\Plugin\SimpleShop\Delivery\ZoneResolver;
+use Grav\Plugin\SimpleShop\Invoicing\DocumentManager;
 use Grav\Plugin\SimpleShop\Invoicing\InvoiceManager;
+use Grav\Plugin\SimpleShop\Gateways\GatewayRegistry;
+use Grav\Plugin\SimpleShop\Services\DocumentMailer;
 use Grav\Plugin\SimpleShop\Orders\OrderManager;
 use Grav\Plugin\SimpleShop\Payments\PaymentLedger;
 use Grav\Plugin\SimpleShop\Services\CustomerManager;
@@ -101,6 +104,8 @@ class ShopApiController extends AbstractApiController
             ], OrderManager::getStatusHistory($reference)),
             'statuses'        => OrderManager::STATUSES,
             'payments'        => PaymentLedger::forOrder($reference),
+            'documents'       => array_map(fn (array $d) => $this->documentView($d), DocumentManager::documentsForOrder($reference)),
+            'draft'           => $manual ? DocumentManager::draftInput($order, $order['items']) : null,
             'payment_methods' => array_combine(PaymentLedger::MANUAL_METHODS, array_map([PaymentLedger::class, 'methodLabel'], PaymentLedger::MANUAL_METHODS)),
             'invoice'         => [
                 'number'                => $invoice['invoice_number'] ?? null,
@@ -172,6 +177,9 @@ class ShopApiController extends AbstractApiController
         [$units, $dec] = array_pad(explode('.', $amount), 2, '0');
         $cents = (int) $units * 100 + (int) str_pad(substr($dec, 0, 2), 2, '0');
 
+        // Case « ne pas prévenir le client » : pas de reçu par e-mail pour ce paiement.
+        DocumentMailer::$mute = isset($body['notify']) && !$body['notify'];
+        try {
         $result = PaymentLedger::record([
             'order_reference' => $reference,
             'invoice_id'      => $invoiceId,
@@ -183,6 +191,9 @@ class ShopApiController extends AbstractApiController
             'external_ref'    => (string) ($body['external_ref'] ?? ''),
             'note'            => (string) ($body['note'] ?? ''),
         ]);
+        } finally {
+            DocumentMailer::$mute = false;
+        }
 
         return ApiResponse::create([
             'payment'    => $result['payment'],
@@ -265,6 +276,222 @@ class ShopApiController extends AbstractApiController
             'Content-Disposition' => 'attachment; filename="' . basename($pdfPath) . '"',
             'Cache-Control'       => 'no-store',
         ], (string) file_get_contents($pdfPath));
+    }
+
+    // ------------------------------------------------------------------
+    // Ventes : documents saisis dans l'administration (invoicing.manual)
+    // ------------------------------------------------------------------
+
+    /** GET /simple-shop/invoicing — réglages utiles au formulaire (types de taxe, moyens de paiement, valeurs par défaut). */
+    public function invoicingSettings(ServerRequestInterface $request): ResponseInterface
+    {
+        $this->requirePermission($request, self::PERM_READ);
+        $config = (array) $this->grav['config']->get('plugins.simple-shop', []);
+        $taxTypes = [];
+        foreach (\Grav\Plugin\SimpleShop\Tax\TaxSettings::rateOptions() as $name) {
+            $taxTypes[\Grav\Plugin\SimpleShop\Tax\TaxSettings::key($name)] = $name;
+        }
+
+        return ApiResponse::create([
+            'enabled'          => DocumentManager::enabled(),
+            'shop_public'      => (bool) ($config['shop']['public'] ?? true),
+            // Types de taxe : clé (tax_code des lignes) => nom affiché.
+            'tax_types'        => $taxTypes,
+            'default_tax_type' => \Grav\Plugin\SimpleShop\Tax\TaxSettings::key((string) ($config['taxes']['default_type'] ?? '')),
+            'small_business'   => (bool) ($config['taxes']['small_business']['enabled'] ?? false),
+            'methods'          => GatewayRegistry::documentChoices(),
+            'due_days'         => (int) ($config['invoicing']['payment_terms_days'] ?? 30),
+            'operation_nature' => (string) ($config['invoicing']['operation_nature'] ?? 'services'),
+            'natures'          => DocumentManager::NATURE_LABELS,
+            'kinds'            => DocumentManager::KINDS,
+            'states'           => PaymentLedger::STATES,
+        ]);
+    }
+
+    /** GET /simple-shop/customers/lookup?email=… — coordonnées connues pour pré-remplir le formulaire. */
+    public function customerLookup(ServerRequestInterface $request): ResponseInterface
+    {
+        $this->requirePermission($request, self::PERM_READ);
+        $email = (string) ($request->getQueryParams()['email'] ?? '');
+
+        return ApiResponse::create(['customer' => DocumentManager::lookupCustomer($email)]);
+    }
+
+    /** POST /simple-shop/manual-orders — nouvelle commande manuelle (brouillon). */
+    public function createManualOrder(ServerRequestInterface $request): ResponseInterface
+    {
+        $this->requirePermission($request, self::PERM_WRITE);
+        $this->requireManualInvoicing();
+        $r = DocumentManager::saveDraft($this->getRequestBody($request), (string) $this->getUser($request)->username);
+        if ($r['errors']) {
+            throw new ValidationException('Commande invalide.', $r['errors']);
+        }
+
+        return ApiResponse::create(['order_reference' => $r['reference']], 201);
+    }
+
+    /** PUT /simple-shop/manual-orders/{reference} — modifie le brouillon (tant qu'aucun document n'est émis). */
+    public function updateManualOrder(ServerRequestInterface $request): ResponseInterface
+    {
+        $this->requirePermission($request, self::PERM_WRITE);
+        $this->requireManualInvoicing();
+        $reference = $this->orderReference($request);
+        $r = DocumentManager::saveDraft($this->getRequestBody($request), (string) $this->getUser($request)->username, $reference);
+        if ($r['errors']) {
+            throw new ValidationException('Commande invalide.', $r['errors']);
+        }
+
+        return ApiResponse::create(['order_reference' => $r['reference']]);
+    }
+
+    /** GET /simple-shop/manual-orders/{reference}/preview?kind=invoice — aperçu PDF (sans valeur, rien n'est enregistré). */
+    public function previewManualOrder(ServerRequestInterface $request): ResponseInterface
+    {
+        $this->requirePermission($request, self::PERM_READ);
+        $reference = $this->orderReference($request);
+        $kind = (string) ($request->getQueryParams()['kind'] ?? 'invoice');
+        $pdf = DocumentManager::preview($reference, $kind);
+        if ($pdf === null) {
+            throw new NotFoundException("Commande introuvable : {$reference}.");
+        }
+
+        return new Response(200, ['Content-Type' => 'application/pdf', 'Content-Disposition' => 'inline; filename="apercu-' . $reference . '.pdf"',
+            'Cache-Control' => 'no-store'], $pdf);
+    }
+
+    /**
+     * POST /simple-shop/orders/{reference}/documents — émet un document. Corps : {"kind": "invoice"|"deposit"|"payment_request",
+     * "deposit": {"mode": "percent"|"amount", "value": "30"}, "send": true, "comment": "…"}.
+     */
+    public function issueDocument(ServerRequestInterface $request): ResponseInterface
+    {
+        $this->requirePermission($request, self::PERM_WRITE);
+        $this->requireManualInvoicing();
+        $reference = $this->orderReference($request);
+        $body = $this->getRequestBody($request);
+        $r = DocumentManager::issue($reference, (string) ($body['kind'] ?? ''), [
+            'deposit'   => (array) ($body['deposit'] ?? []),
+            'issued_by' => (string) $this->getUser($request)->username,
+        ]);
+        if ($r['errors']) {
+            throw new ValidationException('Document non émis.', $r['errors']);
+        }
+        $doc = $r['document'];
+        $sent = null;
+        if (!empty($body['send'])) {
+            $comment = isset($body['comment']) ? mb_substr(trim((string) $body['comment']), 0, 4000) : null;
+            $sent = (new DocumentMailer($this->grav))->sendDocument($doc, $comment);
+        }
+
+        return ApiResponse::create(['document' => $this->documentView($doc), 'sent' => $sent], 201);
+    }
+
+    /** GET /simple-shop/documents — liste (filtres : kind, state = unpaid|partial|paid|overdue…, q). */
+    public function documents(ServerRequestInterface $request): ResponseInterface
+    {
+        $this->requirePermission($request, self::PERM_READ);
+        $pagination = $this->getPagination($request, 25);
+        $q = $request->getQueryParams();
+        $result = DocumentManager::search(['kind' => (string) ($q['kind'] ?? ''), 'state' => (string) ($q['state'] ?? ''), 'q' => (string) ($q['q'] ?? '')],
+            $pagination['limit'], $pagination['offset']);
+
+        return ApiResponse::create(array_map(fn (array $d) => $this->documentView($d), $result['items']), 200, [], [
+            'page' => $pagination['page'], 'per_page' => $pagination['per_page'], 'total' => $result['total'],
+        ]);
+    }
+
+    /** GET /simple-shop/documents/{id}/pdf?copy=original|paid */
+    public function documentPdf(ServerRequestInterface $request): ResponseInterface
+    {
+        $this->requirePermission($request, self::PERM_READ);
+        $doc = $this->document($request);
+        $copy = ($request->getQueryParams()['copy'] ?? '') === 'paid' ? 'paid' : 'original';
+        $path = DocumentManager::pdfPath($doc, $copy);
+        if ($path === null || !is_file($path)) {
+            throw new NotFoundException($copy === 'paid' ? 'Copie acquittée disponible une fois le document réglé.' : 'PDF introuvable.');
+        }
+
+        return new Response(200, ['Content-Type' => 'application/pdf', 'Content-Disposition' => 'attachment; filename="' . basename($path) . '"',
+            'Cache-Control' => 'no-store'], (string) file_get_contents($path));
+    }
+
+    /** PATCH /simple-shop/documents/{id}/ereporting — corps : {"status": "submitted"}. */
+    public function updateDocumentStatus(ServerRequestInterface $request): ResponseInterface
+    {
+        $this->requirePermission($request, self::PERM_WRITE);
+        $doc = $this->document($request);
+        $status = (string) ($this->getRequestBody($request)['status'] ?? '');
+        $options = $doc['kind'] === 'payment_request' ? [] : InvoiceManager::getManualStatusOptions();
+        if (!array_key_exists($status, $options)) {
+            throw new ValidationException('Statut e-reporting invalide.', ['status' => 'Valeurs admises : ' . implode(', ', array_keys($options))]);
+        }
+        $db = \Grav\Plugin\SimpleShop\Inventory\InventoryManager::getDatabase();
+        $db->prepare('UPDATE invoice SET ereporting_status = :s, updated_at = CURRENT_TIMESTAMP WHERE id = :id')->execute([':s' => $status, ':id' => $doc['id']]);
+        if ($doc['ereporting_status'] !== $status) {
+            InvoiceManager::fireInvoiceStatusChangedEvent($this->grav, (string) $doc['order_reference'], (string) $doc['ereporting_status'], $status);
+        }
+
+        return ApiResponse::create($this->documentView(DocumentManager::find((int) $doc['id'])));
+    }
+
+    /** POST /simple-shop/documents/{id}/send — (r)envoie le document au client ; corps facultatif : {"comment": "…"}. */
+    public function sendDocument(ServerRequestInterface $request): ResponseInterface
+    {
+        $this->requirePermission($request, self::PERM_WRITE);
+        $doc = $this->document($request);
+        $comment = $this->getRequestBody($request)['comment'] ?? null;
+        $sent = (new DocumentMailer($this->grav))->sendDocument($doc, $comment !== null ? mb_substr(trim((string) $comment), 0, 4000) : null);
+        if (!$sent) {
+            throw new ValidationException('E-mail non envoyé.', ['email' => 'Vérifiez l’adresse du client et la configuration du plugin Email (journal grav.log).']);
+        }
+
+        return ApiResponse::create(['sent' => true]);
+    }
+
+    private function requireManualInvoicing(): void
+    {
+        if (!DocumentManager::enabled()) {
+            throw new ValidationException('Factures manuelles désactivées.', ['invoicing.manual' => 'Activez « Factures et demandes de paiement manuelles » dans la configuration du plugin.']);
+        }
+    }
+
+    private function document(ServerRequestInterface $request): array
+    {
+        $id = (string) $this->getRouteParam($request, 'id');
+        $doc = preg_match('/^\d{1,10}$/', $id) ? DocumentManager::find((int) $id) : null;
+        if ($doc === null) {
+            throw new NotFoundException('Document introuvable.');
+        }
+
+        return $doc;
+    }
+
+    /** Vue d'un document pour l'administration. */
+    private function documentView(array $d): array
+    {
+        $st = $d['settlement'] ?? DocumentManager::settlement($d);
+        $c = (array) ($d['payload']['customer'] ?? []);
+
+        return [
+            'id'                => $d['id'],
+            'number'            => $d['invoice_number'],
+            'kind'              => $d['kind'],
+            'kind_label'        => $d['kind_label'],
+            'order_reference'   => $d['order_reference'],
+            'issued_at'         => $d['issued_at'] ?? $d['created_at'],
+            'due_date'          => $d['due_date'],
+            'total_cents'       => $d['total_cents'],
+            'due_cents'         => $d['due_cents'],
+            'customer_name'     => ($c['type'] ?? '') === 'b2b' ? (string) ($c['company'] ?? '') : trim(((string) ($c['firstname'] ?? '')) . ' ' . ((string) ($c['lastname'] ?? ''))),
+            'customer_email'    => (string) ($c['email'] ?? ''),
+            'settlement'        => $st,
+            'overdue'           => $d['overdue'] ?? (in_array($st['state'], ['unpaid', 'partial'], true) && $d['due_date'] && $d['due_date'] < gmdate('Y-m-d')),
+            'ereporting_status' => $d['ereporting_status'],
+            'ereporting_label'  => InvoiceManager::statusLabel((string) $d['ereporting_status']),
+            'ereporting_options'=> $d['kind'] === 'payment_request' ? [] : InvoiceManager::getManualStatusOptions(),
+            'public_url'        => $d['access_token'] ? DocumentMailer::documentUrl($d) : null,
+            'source_number'     => $d['payload']['source_number'] ?? null,
+        ];
     }
 
     // ------------------------------------------------------------------
@@ -783,7 +1010,8 @@ class ShopApiController extends AbstractApiController
             'total_amount'    => (float) $order['total_amount'],
             'source'          => (string) (($order['source'] ?? '') ?: 'shop'),
             'settlement'      => $order['settlement'] ?? PaymentLedger::orderSettlement($order),
-            'customer_name'   => trim(($customer['firstname'] ?? '') . ' ' . ($customer['lastname'] ?? '')),
+            'customer_name'   => implode(' — ', array_filter([trim((string) ($customer['company'] ?? '')),
+                trim(($customer['firstname'] ?? '') . ' ' . ($customer['lastname'] ?? ''))], 'strlen')),
             'customer_email'  => $customer['email'] ?? '',
         ];
     }

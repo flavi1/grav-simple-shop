@@ -215,6 +215,40 @@ Numéro saisi dans Admin2 (`PATCH /orders/{reference}/tracking`, table `order_tr
   de changement de statut (`status_emails`, par défaut expédiée / annulée /
   remboursée).
 
+## Ventes manuelles : factures, acomptes, demandes de paiement
+
+Activées par `invoicing.manual: true` (désactivé par défaut). Pour un site sans boutique publique (prestations facturées à la
+main), `shop.public: false` retire le catalogue, le panier et le tunnel : seule reste la page de paiement des documents.
+
+- **Saisie** (Admin2 > Ventes) : bouton « Nouvelle commande manuelle » sous les tableaux. Client (pré-rempli d'après l'e-mail :
+  dernière commande ou compte client ; organisation → prix **HT**, particulier → prix **TTC**), lignes libres (intitulé,
+  quantité, prix, type de taxe), nature de l'opération, échéance, moyens de paiement proposés, commentaire joint à l'e-mail.
+  La commande reste un **brouillon** modifiable (aperçu PDF filigrané « sans valeur ») jusqu'au premier document émis.
+- **Documents** (numérotation unique `FACT-` ; `DP-` pour les demandes de paiement, qui ne sont pas des factures) :
+  - **facture à régler** (TypeCode 380, échéance BT-9, conditions BT-20, moyens de paiement BG-16 avec IBAN, reste dû BT-115) ;
+  - **facture d'acompte** (TypeCode 386, en % ou en montant, ventilée par taux) ; la facture finale **déduit** les acomptes
+    (montant net à payer, références BG-3) ;
+  - **demande de paiement** : pas de numéro de facture ; une fois réglée, la **facture est émise automatiquement**, déjà payée.
+  Émission : PDF Factur-X + XML dans `user://data/simple-shop/invoices/`, envoi facultatif au client (PDF joint, commentaire,
+  lien de paiement). Réglé : **copie « acquittée »** (tampon, même XML), jointe au reçu.
+- **Paiements** : chaque document se règle en une ou plusieurs fois (table `payment`) ; état calculé (à régler, partiel, réglé,
+  trop-perçu, remboursé ; « en retard » après l'échéance). Saisie à la main d'un virement, chèque… (choix du document, reçu
+  au client facultatif) ou paiement en ligne.
+- **Page de paiement du client** : `routes.document` (`/document?t=<jeton>`, jeton aléatoire de 32 caractères, sans compte) :
+  montant, état, PDF, choix du moyen de paiement quand il y en a plusieurs. Passerelles proposées : `payments.methods.manual`
+  (liste vide = toutes) ; `bank_transfer` (cœur, hors ligne : IBAN de `payments.bank_transfer`, paiement enregistré à
+  réception), Stripe (page hébergée, plugin `simple-shop-payment-stripe`), test (plugin `simple-shop-payment-test`).
+  Une passerelle de documents implémente `Gateways\DocumentPaymentGatewayInterface` (ou sa variante à redirection
+  `RedirectDocumentPaymentGatewayInterface`) et reçoit un `Gateways\PaymentContext` ; le paiement est enregistré par
+  `Payments\DocumentPayments::recordGatewayPayment()` (idempotent par référence ; un montant supérieur au reste dû, déjà
+  encaissé, est enregistré et signalé « trop-perçu »).
+- **Mentions** (`invoicing.*`, valeurs par défaut pour un auto-entrepreneur, à faire valider) : délai de paiement
+  (`payment_terms_days`, 30 j), pénalités de retard, indemnité forfaitaire de 40 € (clients professionnels), escompte, option
+  TVA sur les débits, mention légale sous le nom du vendeur (ex. « Entrepreneur individuel (EI) ») ; franchise en base :
+  `taxes.small_business.enabled`.
+
+Conception et décisions : `docs/CONCEPTION-FACTURATION.md`.
+
 ### Événement `onSimpleShopPaymentRecorded`
 
 Déclenché après chaque nouveau paiement (boutique, webhook, saisie dans Admin2) ; `$event['payment']` = la ligne de la table
@@ -249,10 +283,10 @@ public function onOrderStatusChanged(Event $event): void
 ## Administration (Admin2)
 
 Le plugin s'appuie sur le plugin `api` et `admin2` (l'ancienne administration
-n'est plus supportée). Entrée de menu « Boutique » ; page composant web
+n'est plus supportée). Entrée de menu « Ventes » ; page composant web
 `admin-next/pages/simple-shop.js` : commandes (filtres, détail, changement de
-statut, historique, facture, export CSV), transporteurs (édition YAML
-validée), adresses bannies.
+statut, historique, règlement, facture, export CSV), factures (si `invoicing.manual` :
+documents filtrés par type et état de règlement, saisie des ventes manuelles), transporteurs, taxes, adresses bannies.
 
 API (préfixe `/api/v1/simple-shop`), permissions `api.simple-shop.read` /
 `api.simple-shop.write` (modèle de groupe « gestionnaire boutique » : `config/groups.dist.yaml`) :
@@ -261,7 +295,11 @@ API (préfixe `/api/v1/simple-shop`), permissions `api.simple-shop.read` /
 `PATCH /orders/{reference}/status`, `PATCH /orders/{reference}/invoice-status`,
 `GET /orders/{reference}/invoice`, `GET|PUT /carriers`, `PUT|DELETE /carriers/{key}`, `POST /carriers/simulate`,
 `PUT /carrier-constraints` (`{constraints: [...]}`), `POST /carriers/providers/{id}/test`, `GET|POST /bans`,
-`DELETE /bans/{email}`.
+`DELETE /bans/{email}`, `POST /orders/{reference}/payments`.
+Ventes manuelles (`invoicing.manual`) : `GET /invoicing` (réglages de l'écran), `GET /customers/lookup?email=`,
+`POST /manual-orders`, `PUT /manual-orders/{reference}`, `GET /manual-orders/{reference}/preview?kind=`,
+`POST /orders/{reference}/documents` (`kind`, `deposit`, `send`), `GET /documents` (`kind`, `state`, `q`, pagination),
+`GET /documents/{id}/pdf?copy=original|paid`, `PATCH /documents/{id}/ereporting`, `POST /documents/{id}/send`.
 
 ## Installation
 

@@ -239,3 +239,26 @@ Pour ce site (livres seulement), **aucun prix ne doit changer** : livres et livr
 3. Fiche livre (Admin2) : champ « Type de taxe » (vide = type du type de produit). Le mettre sur « Taux normal » : le prix affiché passe au taux de 20 %
    (prix saisi TTC : le TTC reste, le HT change) ; remettre vide.
 4. Commande complète : montants, facture (« TVA 5,5 % sur … ») et testeur FNFE identiques à avant.
+
+## 25. Ventes manuelles : factures, acomptes, demandes de paiement (lot du 2026-10-19)
+
+Préalable (configuration du site) : `invoicing.manual: true`, vendeur (`seller.*`), `payments.bank_transfer` (titulaire, IBAN,
+BIC, `enabled: true`), `payments.methods.manual` (ex. `[bank_transfer, stripe]`) ; site sans boutique : `shop.public: false`.
+
+1. Admin2 > **Ventes** (ancien menu « Boutique ») : onglet **Factures** présent ; bouton « Nouvelle commande manuelle » sous les
+   tableaux.
+2. Saisir un client connu par son e-mail → « Rechercher le client » pré-remplit ses coordonnées. Organisation : prix **HT** ;
+   particulier : **TTC**. Deux lignes, commentaire → « Créer le brouillon ». Le brouillon s'ouvre ; « Aperçu (PDF) » : filigrane
+   « APERÇU — sans valeur ». « Modifier le brouillon » rouvre la saisie.
+3. Émettre une **facture d'acompte** (30 %) avec envoi : e-mail reçu avec le PDF, le commentaire et le lien « Voir et régler en
+   ligne ». Le lien ouvre la page du document (sans compte) : montant, échéance, choix virement / carte.
+4. Virement : l'IBAN et la référence à indiquer s'affichent. Dans Admin2, « Enregistrer un paiement reçu » : choisir le document,
+   moyen « Virement », « Envoyer un reçu » → l'acompte passe « Réglée », le client reçoit la **facture acquittée**.
+5. Émettre la **facture** finale : l'acompte y est déduit (« Net à payer »). La payer en ligne par **Stripe** (mode test) :
+   retour sur la page « Merci, votre paiement est enregistré », reçu par e-mail, onglet Factures « Réglée ».
+6. **Demande de paiement** réglée par carte → la facture (FACT-…) est émise automatiquement, déjà réglée, et envoyée acquittée.
+7. Stripe : fermer l'onglet juste après le paiement (sans revenir sur le site) → le webhook enregistre le paiement (vérifier le
+   document « Réglée » quelques secondes plus tard ; aucun doublon si le client revient ensuite).
+8. Onglet Factures : filtres Type / Règlement (« En retard » après l'échéance) / Recherche ; « Transmission » modifiable
+   (e-reporting) ; « PDF », « Acquittée », « Renvoyer », « Copier le lien ».
+9. Testeur FNFE : déposer une facture à régler et une facture d'acompte (vrais SIRET, mention de franchise).

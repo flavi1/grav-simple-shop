@@ -15,7 +15,8 @@
 Boutique en ligne pour Grav 2.0 (Grav 2.0.24, Admin2 2.1.9, plugin `api`) : panier « produit + options », identification du client
 par code à usage unique (OTP) envoyé par e-mail, tunnel d'achat **sans JavaScript**, livraison (zones, modes manuels et transporteurs
 en plugins, contraintes globales, retrait sur place), taxes (table de taux nommés), paiement par passerelles en plugins, commandes,
-factures Factur-X (EN 16931), administration dans Admin2 (page « Boutique » + API `/api/v1/simple-shop/*`).
+factures Factur-X (EN 16931), ventes manuelles (factures à régler, acomptes, demandes de paiement, paiements multiples ;
+`invoicing.manual`), administration dans Admin2 (page « Ventes » + API `/api/v1/simple-shop/*`).
 
 Référence fonctionnelle détaillée : `README.md` (parcours, routes, événements, API, configuration). Ce fichier-ci donne le contexte de
 travail : décisions, historique, travail restant.
@@ -136,9 +137,15 @@ simple-shop).
 - `classes/Orders/` : `OrderManager` (statuts, historique, recherche sans accents, export CSV, événement `onSimpleShopOrderStatusChanged`),
   `OrderAmounts` (source unique des montants : panier, paiement, commande, facture), `PendingPayment`.
 - `classes/Invoicing/` : Factur-X (`FacturXXmlBuilder`, `Invoice` — PDF/A-3 avec polices Liberation Sans embarquées dans `fonts/`).
-- `classes/Gateways/` : interfaces de paiement (`PaymentGatewayInterface`, `RedirectPaymentGatewayInterface`).
-- `classes/Api/ShopApiController.php` + `admin-next/pages/simple-shop.js` : administration (onglets Commandes, Transporteurs, Taxes,
-  Adresses bannies).
+- `classes/Gateways/` : interfaces de paiement de la boutique (`PaymentGatewayInterface`, `RedirectPaymentGatewayInterface`) et des
+  documents (`DocumentPaymentGatewayInterface`, `RedirectDocumentPaymentGatewayInterface`, `PaymentContext`), `GatewayRegistry`
+  (passerelles par usage : `payments.methods.shop|manual`), `BankTransferGateway` (virement, hors ligne).
+- `classes/Payments/` : `PaymentLedger` (table `payment`, état de règlement calculé), `DocumentPayments` (paiement d'une passerelle
+  sur un document). `classes/Invoicing/DocumentManager.php` : ventes manuelles (brouillon, émission, acomptes, demande de
+  paiement → facture, recherche, PDF/XML, copie acquittée). `Controllers/DocumentController.php` : page publique `/document?t=`.
+  `Services/DocumentMailer.php` : e-mails du document et du reçu.
+- `classes/Api/ShopApiController.php` + `admin-next/pages/simple-shop.js` : administration (onglets Commandes, Factures, Transporteurs,
+  Taxes, Adresses bannies).
 - `shop.sql` : schéma ; colonnes ajoutées par `InventoryManager::ADDED_COLUMNS` (migration additive, repère = mtime + empreinte).
 - Événements publiés : `onSimpleShopRegisterGateways`, `onSimpleShopRegisterCarriers`, `onSimpleShopOrderStatusChanged`,
   `onSimpleShopInvoiceStatusChanged`, `onSimpleShopTaxRates`.
@@ -191,6 +198,8 @@ simple-shop).
 - **Indépendance** : plugins `simple-shop-*` indépendants du thème du site (objectif de la conception produits/prix).
 
 ## À faire
+- [ ] **Ventes manuelles** (lot du 19/10/2026, `docs/CONCEPTION-FACTURATION.md`) : à tester sur le serveur (`docs/TESTS-MANUELS.md`
+  §25, dont Stripe réel en mode test et webhook) ; plus tard : devis, avoirs, échéancier, montant libre, relances.
 - [ ] **Tests autonomes** (étape 8 de `docs/CONCEPTION-PRODUITS-PRIX.md`) : les tests chargent encore le thème `bookstore` du site
   (type `book`) ; leur donner un type de produit d'exemple dans `tests/fixtures/` et déplacer les tests propres aux livres
   (`tests/product-types.php`, partie « book ») vers le thème.

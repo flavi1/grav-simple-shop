@@ -1,0 +1,48 @@
+{# templates/simple-shop/document.html.twig — page publique d'un document (DocumentController::show()), sans JavaScript. #}
+{% extends 'partials/base.html.twig' %}
+
+{% block content %}
+<div class="shop-container document-page">
+{% if not_found %}
+    <h2>Document introuvable</h2>
+    <p>Ce lien n'est pas (ou plus) valide. Si vous pensez qu'il s'agit d'une erreur, répondez à l'e-mail qui vous l'a apporté.</p>
+{% else %}
+    {% set money = (settlement.due_cents / 100)|number_format(2, ',', ' ') ~ ' ' ~ currency %}
+    <h2>{{ document.kind_label }} {{ document.invoice_number }}</h2>
+
+    <p>
+        Montant : <strong>{{ (document.total_cents / 100)|number_format(2, ',', ' ') }} {{ currency }}</strong>
+        {% if document.due_cents != document.total_cents %} — à régler sur ce document : <strong>{{ money }}</strong>{% endif %}
+        <br>État : <strong>{{ settlement.label }}</strong>
+        {% if settlement.paid_cents > 0 and settlement.remaining_cents > 0 %}
+            ({{ (settlement.paid_cents / 100)|number_format(2, ',', ' ') }} {{ currency }} réglés, reste <strong>{{ (settlement.remaining_cents / 100)|number_format(2, ',', ' ') }} {{ currency }}</strong>)
+        {% endif %}
+        {% if payable and due_date %}<br>Échéance : <strong>{{ due_date }}</strong>{% endif %}
+    </p>
+
+    <p>
+        <a href="{{ pdf_url }}">Télécharger le document (PDF)</a>
+        {% if paid_url %} · <a href="{{ paid_url }}">Télécharger la facture acquittée (PDF)</a>{% endif %}
+    </p>
+
+    {% if payable %}
+        <h3>Régler {{ (settlement.remaining_cents / 100)|number_format(2, ',', ' ') }} {{ currency }}</h3>
+        {% if gateways is empty %}
+            <p>Aucun moyen de paiement en ligne n'est proposé pour ce document : répondez à l'e-mail qui vous l'a apporté.</p>
+        {% else %}
+            {% if gateways|length > 1 %}
+            <p>Choisissez votre moyen de paiement :</p>
+            <ul class="document-methods">
+                {% for id, label in gateways %}
+                <li>{% if id == selected %}<strong>{{ label }}</strong>{% else %}<a href="{{ page_url }}&amp;moyen={{ id|url_encode }}">{{ label }}</a>{% endif %}</li>
+                {% endfor %}
+            </ul>
+            {% endif %}
+            {% if gateway_html %}<div class="document-gateway">{{ gateway_html|raw }}</div>{% endif %}
+        {% endif %}
+    {% elseif settlement.state == 'paid' %}
+        <p>Ce document est entièrement réglé. Merci !</p>
+    {% endif %}
+{% endif %}
+</div>
+{% endblock %}

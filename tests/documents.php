@@ -154,4 +154,54 @@ assert($xp->evaluate('string(//ram:ApplicableHeaderTradeSettlement/ram:Applicabl
 $preview = D::preview($r3['reference']);
 assert(strncmp((string) $preview, '%PDF', 4) === 0 && !str_contains($preview, 'factur-x.xml'), 'aperçu : PDF sans Factur-X');
 
+// --- 7. Page publique /document?t=… : jeton, choix du moyen, paiement de test, reçu
+use Grav\Plugin\Mvc\Request;
+use Grav\Plugin\SimpleShop\Controllers\DocumentController;
+$grav['config']->set('plugins.simple-shop.taxes.small_business.enabled', false);
+\Grav\Plugin\SimpleShop\Tax\TaxResolver::reset();
+$page = function (array $get, array $post = []) use ($grav) {
+    $grav['uri']->current = '/document';
+    $req = new Request($post === [] ? 'GET' : 'POST', $get, $post, ['REQUEST_METHOD' => $post === [] ? 'GET' : 'POST']);
+    return (new DocumentController($grav, $req))->show();
+};
+$r = $page(['t' => str_repeat('0', 32)]);
+assert($r->getHttpCode() === 404 && $r->getTwigVars()['not_found'] === true, 'jeton inconnu : 404');
+$f2 = D::find($f2['id']);
+$r = $page(['t' => $f2['access_token']]);
+$v = $r->getTwigVars();
+assert($r->getHttpCode() === 200 && $v['payable'] && $v['settlement']['remaining_cents'] === 7000 && array_keys($v['gateways']) === ['test_gateway']
+    && $v['selected'] === 'test_gateway' && str_contains($v['gateway_html'], 'execute_document_payment'), 'un seul moyen : formulaire affiché');
+$r = $page(['t' => $f2['access_token']], ['action' => 'execute_document_payment', 'method' => 'test_gateway', 'nonce' => 'faux', 'test_payment_status' => 'success']);
+assert($r->isRedirect() && D::settlement($f2)['state'] === 'unpaid', 'nonce invalide : rien encaissé');
+$r = $page(['t' => $f2['access_token']], ['action' => 'execute_document_payment', 'method' => 'bank_transfer', 'nonce' => 'nonce-shop-document-payment']);
+assert(D::settlement($f2)['state'] === 'unpaid', 'moyen non retenu pour ce document : refusé');
+$r = $page(['t' => $f2['access_token']], ['action' => 'execute_document_payment', 'method' => 'test_gateway', 'nonce' => 'nonce-shop-document-payment', 'test_payment_status' => 'failure']);
+assert(str_contains((string) $r->getRedirectUrl(), 'moyen=test_gateway') && D::settlement($f2)['state'] === 'unpaid', 'échec : rien encaissé');
+$r = $page(['t' => $f2['access_token']], ['action' => 'execute_document_payment', 'method' => 'test_gateway', 'nonce' => 'nonce-shop-document-payment', 'test_payment_status' => 'success']);
+assert($r->getRedirectUrl() === 'https://shop.test/document?t=' . $f2['access_token'] && D::settlement($f2)['state'] === 'paid', 'paiement de test : réglée');
+$pays = L::forInvoice($f2['id']);
+assert(count($pays) === 1 && $pays[0]['amount_cents'] === 7000 && $pays[0]['recorded_by'] === 'client' && str_starts_with((string) $pays[0]['external_ref'], 'test-'));
+$r = $page(['t' => $f2['access_token']]);
+$v = $r->getTwigVars();
+assert(!$v['payable'] && $v['paid_url'] !== null && $v['gateway_html'] === '', 'réglée : plus de paiement, copie acquittée proposée');
+$r = $page(['t' => $f2['access_token'], 'pdf' => 'paid']);
+assert($r->getContentType() === 'application/pdf' && str_starts_with($r->getBody(), '%PDF') && str_contains($r->getHeaders()['Content-Disposition'], '-acquittee.pdf'));
+// Plusieurs moyens : liste, sans formulaire tant que rien n'est choisi
+$r = $page(['t' => $dep['access_token']]);
+// (acompte réglé) → pas de paiement
+assert(!$r->getTwigVars()['payable']);
+$r4 = D::saveDraft(['customer' => $input['customer'], 'lines' => [['title' => 'X', 'quantity' => 1, 'unit_price' => '10', 'tax_type' => 'Taux normal']]], 'f');
+$i4 = D::issue($r4['reference'], 'invoice')['document'];
+$r = $page(['t' => $i4['access_token']]);
+$v = $r->getTwigVars();
+assert(count($v['gateways']) === 2 && $v['selected'] === null && $v['gateway_html'] === '', 'deux moyens : le client choisit');
+$r = $page(['t' => $i4['access_token'], 'moyen' => 'bank_transfer']);
+$v = $r->getTwigVars();
+assert($v['selected'] === 'bank_transfer' && str_contains($v['gateway_html'], 'FR76 3000 6000 0112 3456 7890 189') && str_contains($v['gateway_html'], $i4['invoice_number']), 'virement : IBAN et référence');
+
+// --- 8. Coordonnées connues (pré-remplissage)
+$known = D::lookupCustomer('CLIENT@exemple.fr');
+assert($known['company'] === 'ACME SAS' && $known['siren'] === '732829320' && $known['type'] === 'b2b');
+assert(D::lookupCustomer('inconnu@exemple.fr') === null && D::lookupCustomer('pas un e-mail') === null);
+
 echo "OK\n";

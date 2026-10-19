@@ -41,6 +41,7 @@ class SimpleShopPlugin extends Plugin
             'onTwigTemplatePaths'      => [['onTwigTemplatePaths', 0]],
             'onTwigSiteVariables'      => [['onTwigSiteVariables', 0]],
             'onSimpleShopRegisterGateways' => [['registerCoreGateways', 100]],
+            'onSimpleShopPaymentRecorded'  => [['onPaymentRecorded', 0]],
         ];
     }
 
@@ -107,7 +108,10 @@ class SimpleShopPlugin extends Plugin
             $router = $this->grav['mvc_router'];
             $routes = Routes::all($config);
 
-            $routesMap = [
+            // Boutique publique désactivée (shop.public: false) : ni catalogue, ni panier, ni tunnel, ni compte client ;
+            // seule reste la page des documents envoyés depuis l'administration.
+            $public = (bool) ($config['shop']['public'] ?? true);
+            $routesMap = !$public ? [] : [
                 $routes['cart']                   => [CartController::class, 'step1Cart'],
                 $routes['validation']             => [CustomerController::class, 'verifyEmail'],
                 $routes['delivery']                => [CartController::class, 'step2Delivery'],
@@ -119,6 +123,10 @@ class SimpleShopPlugin extends Plugin
                 $routes['logout']                   => [CustomerController::class, 'logout'],
                 $routes['newsletter_unsubscribe']   => [CustomerController::class, 'unsubscribeNewsletter'],
             ];
+
+            if (!empty($config['invoicing']['manual'])) {
+                $routesMap[$routes['document']] = [\Grav\Plugin\SimpleShop\Controllers\DocumentController::class, 'show'];
+            }
 
             $router->addMany($routesMap);
         }
@@ -176,6 +184,16 @@ class SimpleShopPlugin extends Plugin
             $group->patch('/orders/{reference}/status', [$c, 'updateOrderStatus']);
             $group->patch('/orders/{reference}/tracking', [$c, 'updateOrderTracking']);
             $group->post('/orders/{reference}/payments', [$c, 'addOrderPayment']);
+            $group->post('/orders/{reference}/documents', [$c, 'issueDocument']);
+            $group->get('/invoicing', [$c, 'invoicingSettings']);
+            $group->get('/customers/lookup', [$c, 'customerLookup']);
+            $group->post('/manual-orders', [$c, 'createManualOrder']);
+            $group->put('/manual-orders/{reference}', [$c, 'updateManualOrder']);
+            $group->get('/manual-orders/{reference}/preview', [$c, 'previewManualOrder']);
+            $group->get('/documents', [$c, 'documents']);
+            $group->get('/documents/{id}/pdf', [$c, 'documentPdf']);
+            $group->patch('/documents/{id}/ereporting', [$c, 'updateDocumentStatus']);
+            $group->post('/documents/{id}/send', [$c, 'sendDocument']);
             $group->patch('/orders/{reference}/invoice-status', [$c, 'updateInvoiceStatus']);
             $group->get('/orders/{reference}/invoice', [$c, 'invoicePdf']);
 
@@ -204,7 +222,7 @@ class SimpleShopPlugin extends Plugin
         $items[] = [
             'id'        => 'simple-shop',
             'plugin'    => 'simple-shop',
-            'label'     => 'Boutique',
+            'label'     => 'Ventes',
             'icon'      => 'fa-shopping-cart',
             'route'     => '/plugin/simple-shop',
             'priority'  => 20,
@@ -224,7 +242,7 @@ class SimpleShopPlugin extends Plugin
         $event['definition'] = [
             'id'        => 'simple-shop',
             'plugin'    => 'simple-shop',
-            'title'     => 'Boutique',
+            'title'     => 'Ventes',
             'icon'      => 'fa-shopping-cart',
             'page_type' => 'component',
             'actions'   => [],
@@ -234,6 +252,30 @@ class SimpleShopPlugin extends Plugin
     public function addMessage(string $message, string $scope = 'info'): void
     {
         NoJs::addMessage($message, $scope);
+    }
+
+    /**
+     * Après chaque paiement rattaché à un document : une demande de paiement réglée donne sa facture, puis le client reçoit
+     * un reçu (avec la facture acquittée quand tout est réglé). Jamais bloquant.
+     */
+    public function onPaymentRecorded(Event $event): void
+    {
+        $payment = (array) ($event['payment'] ?? []);
+        if (empty($payment['invoice_id'])) {
+            return;
+        }
+        try {
+            $doc = \Grav\Plugin\SimpleShop\Invoicing\DocumentManager::find((int) $payment['invoice_id']);
+            if ($doc === null) {
+                return;
+            }
+            $issued = \Grav\Plugin\SimpleShop\Invoicing\DocumentManager::afterPayment((int) $doc['id']);
+            if (!\Grav\Plugin\SimpleShop\Services\DocumentMailer::$mute) {
+                (new \Grav\Plugin\SimpleShop\Services\DocumentMailer($this->grav))->sendReceipt($issued ?? $doc, $payment);
+            }
+        } catch (\Throwable $e) {
+            $this->grav['log']->error('[SimpleShop] Suites du paiement ' . ($payment['id'] ?? '?') . ' : ' . $e->getMessage());
+        }
     }
 
     /** Passerelles fournies par simple-shop lui-même : virement bancaire (hors ligne), si activé. */
@@ -267,6 +309,7 @@ class SimpleShopPlugin extends Plugin
         $twig->twig_vars['shop_cart'] = $shopCartData;
         $twig->twig_vars['shop_cart_count'] = $totalItemsCount;
         $twig->twig_vars['shop_routes'] = Routes::all($config);
+        $twig->twig_vars['shop_public'] = (bool) ($config['shop']['public'] ?? true);
 
         if (isset($this->grav['simple_shop_customer'])) {
             /** @var CustomerManager $customerManager */

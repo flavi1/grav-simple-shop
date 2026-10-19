@@ -22,6 +22,7 @@ class Routes
         'account'                 => '/mon-compte',
         'logout'                  => '/mon-compte/deconnexion',
         'newsletter_unsubscribe'  => '/newsletter/unsubscribe',
+        'document'                => '/document',   // page d'un document envoyé depuis l'administration : /document?t=<jeton>
     ];
 
     public static function all(array $config): array

@@ -1,5 +1,5 @@
 /*
- * Page « Boutique » d'Admin2 (Grav 2.0) — plugin simple-shop.
+ * Page « Ventes » d'Admin2 (Grav 2.0) — plugin simple-shop.
  *
  * Composant web chargé par Admin2 (GET /gpm/plugins/simple-shop/page-script) ;
  * Admin2 définit window.__GRAV_PAGE_TAG (nom de la balise), ainsi que
@@ -232,7 +232,16 @@
             this.appendChild(h('style', {}, STYLE));
             this.appendChild(this.root);
             this.watchTheme();
+            this.invoicing = null;
+            this.docFilters = { kind: '', state: '', q: '' };
+            this.docPage = 1;
             this.draw();
+            // Ventes manuelles (factures, acomptes, demandes de paiement) : onglet affiché si l'option est activée.
+            var self = this;
+            api('GET', '/invoicing').then(function (res) {
+                self.invoicing = res.data || null;
+                if (self.invoicing && self.invoicing.enabled) { self.draw(); }
+            }).catch(function () { self.invoicing = null; });
         }
 
         disconnectedCallback() {
@@ -291,12 +300,15 @@
         draw() {
             var self = this;
             var tabs = [['orders', 'Commandes'], ['carriers', 'Transporteurs'], ['taxes', 'Taxes'], ['bans', 'Adresses bannies']];
+            if (this.invoicing && this.invoicing.enabled) {
+                tabs.splice(1, 0, ['invoices', 'Factures']);
+            }
 
             this.root.innerHTML = '';
             this.messageBox = h('div');
             this.body = h('div', { id: 'ss-panel', role: 'tabpanel' });
 
-            this.root.appendChild(h('div', { class: 'ss-tabs', role: 'tablist', 'aria-label': 'Sections de la boutique' }, tabs.map(function (t, i) {
+            this.root.appendChild(h('div', { class: 'ss-tabs', role: 'tablist', 'aria-label': 'Sections des ventes' }, tabs.map(function (t, i) {
                 var selected = self.tab === t[0];
                 return h('button', {
                     class: 'ss-tab', role: 'tab', type: 'button', id: 'ss-tab-' + t[0], 'aria-controls': 'ss-panel',
@@ -319,6 +331,7 @@
             this.drawMessage();
 
             if (this.tab === 'orders') { this.showOrders(); }
+            if (this.tab === 'invoices') { this.showInvoices(); }
             if (this.tab === 'carriers') { this.showCarriers(); }
             if (this.tab === 'taxes') { this.showTaxes(); }
             if (this.tab === 'bans') { this.showBans(); }
@@ -394,6 +407,7 @@
                 self.list.innerHTML = '';
                 if (!rows.length) {
                     self.list.appendChild(h('p', { class: 'ss-muted' }, 'Aucune commande ne correspond.'));
+                    self.list.appendChild(self.newManualButton());
                     return;
                 }
 
@@ -416,7 +430,19 @@
                     h('button', { class: 'ss-btn', type: 'button', disabled: self.page <= 1, onclick: function () { self.page--; self.loadOrders(); } }, 'Précédent'),
                     h('span', { class: 'ss-muted' }, 'Page ' + meta.page + ' / ' + pages + ' — ' + meta.total + ' commande(s)'),
                     h('button', { class: 'ss-btn', type: 'button', disabled: self.page >= pages, onclick: function () { self.page++; self.loadOrders(); } }, 'Suivant')));
+                self.list.appendChild(self.newManualButton());
             }).catch(function (e) { self.list.innerHTML = ''; self.fail(e); });
+        }
+
+        /** Bouton « Nouvelle commande manuelle » (factures manuelles activées). */
+        newManualButton() {
+            var self = this;
+            if (!this.invoicing || !this.invoicing.enabled) {
+                return null;
+            }
+            return h('div', { class: 'ss-bar', style: 'margin-top:.4rem' },
+                h('button', { class: 'ss-btn ss-primary', type: 'button', onclick: function () { self.openEditor(null, null); } },
+                    'Nouvelle commande manuelle (facture, acompte, demande de paiement)'));
         }
 
         openOrder(reference) {
@@ -486,9 +512,10 @@
                     .then(function () { trBtn.disabled = false; });
             } }, 'Enregistrer le suivi');
 
+            var manual = o.source === 'manual';
             this.detail.innerHTML = '';
             this.detail.appendChild(h('div', { class: 'ss-card' },
-                h('h3', {}, 'Commande ' + o.order_reference + ' — ' + dateTime(o.created_at)),
+                h('h3', {}, (manual ? 'Vente manuelle ' : 'Commande ') + o.order_reference + ' — ' + dateTime(o.created_at)),
                 this.paymentsSection(o),
                 h('div', { class: 'ss-grid' },
                     h('div', {}, h('h3', {}, 'Client'),
@@ -496,7 +523,7 @@
                         h('div', {}, c.email), h('div', {}, c.tel),
                         h('div', { style: 'margin-top:.5rem' }, address(c))),
                     h('div', {}, h('h3', {}, 'Facturation'), address(b).length ? address(b) : h('span', { class: 'ss-muted' }, 'Identique à la livraison')),
-                    h('div', {}, h('h3', {}, 'Livraison'), h('div', {}, ship.name || ship.key || ''), h('div', {}, money(ship.price)))),
+                    manual ? null : h('div', {}, h('h3', {}, 'Livraison'), h('div', {}, ship.name || ship.key || ''), h('div', {}, money(ship.price)))),
 
                 h('h3', { style: 'margin-top:1rem' }, 'Articles'),
                 h('table', {}, h('tbody', {}, o.items.map(function (i) {
@@ -506,24 +533,25 @@
                     var optText = Object.keys(opts || {}).map(function (k) { return k + ' : ' + (Array.isArray(opts[k]) ? opts[k].join(', ') : opts[k]); }).join(' · ');
                     return h('tr', {}, h('td', {}, i.title, optText ? h('div', { class: 'ss-muted' }, optText) : ''), h('td', { class: 'ss-num' }, i.quantity + ' × ' + money(i.price)),
                         h('td', { class: 'ss-num' }, money(i.quantity * i.price)));
-                }).concat([h('tr', {}, h('td', {}, h('strong', {}, 'Total TTC (livraison comprise)')), h('td'), h('td', { class: 'ss-num' }, h('strong', {}, money(o.total_amount))))]))),
+                }).concat([h('tr', {}, h('td', {}, h('strong', {}, manual ? 'Total TTC' : 'Total TTC (livraison comprise)')), h('td'), h('td', { class: 'ss-num' }, h('strong', {}, money(o.total_amount))))]))),
 
                 h('div', { class: 'ss-grid', style: 'margin-top:1rem' },
                     h('div', {}, h('h3', {}, 'Statut'),
                         h('div', { class: 'ss-bar' }, h('label', { class: 'ss-field', for: 'ss-new-status' }, 'Nouveau statut', statusSelect), statusBtn),
                         h('p', { class: 'ss-muted' }, 'Un e-mail est envoyé au client pour : expédiée, annulée, remboursée.'),
-                        h('h3', { style: 'margin-top:1rem' }, 'Suivi du colis'),
-                        h('div', { class: 'ss-bar' }, h('label', { class: 'ss-field', for: 'ss-tracking' }, 'Numéro de suivi', trInput), trBtn),
-                        tr.url ? h('p', {}, h('a', { href: tr.url, target: '_blank', rel: 'noopener noreferrer' }, 'Page de suivi')) : null,
-                        h('p', { class: 'ss-muted' }, 'Saisissez le numéro AVANT de passer la commande en « Expédiée » : il figure dans l’e-mail au client.')),
+                        manual ? null : h('h3', { style: 'margin-top:1rem' }, 'Suivi du colis'),
+                        manual ? null : h('div', { class: 'ss-bar' }, h('label', { class: 'ss-field', for: 'ss-tracking' }, 'Numéro de suivi', trInput), trBtn),
+                        !manual && tr.url ? h('p', {}, h('a', { href: tr.url, target: '_blank', rel: 'noopener noreferrer' }, 'Page de suivi')) : null,
+                        manual ? null : h('p', { class: 'ss-muted' }, 'Saisissez le numéro AVANT de passer la commande en « Expédiée » : il figure dans l’e-mail au client.')),
                     h('div', {}, h('h3', {}, 'Historique'),
                         h('ul', { class: 'ss-list' }, o.history.map(function (e) {
                             return h('li', {}, dateTime(e.changed_at) + ' — ' + e.new_status_label + (e.changed_by ? ' (par ' + e.changed_by + ')' : ' (automatique)'));
                         }))),
-                    h('div', {}, h('h3', {}, 'Facture ' + (inv.number || '')),
+                    o.source === 'manual' ? null : h('div', {}, h('h3', {}, 'Facture ' + (inv.number || '')),
                         h('p', {}, 'E-reporting : ', h('strong', {}, inv.ereporting_label || '—')),
                         h('div', { class: 'ss-bar' }, h('label', { class: 'ss-field', for: 'ss-inv-status' }, 'Statut e-reporting', invSelect), invBtn),
-                        pdfBtn))));
+                        pdfBtn)),
+                o.source === 'manual' ? this.documentsSection(o) : null));
         }
 
         /**
@@ -542,6 +570,22 @@
             var ref = h('input', { type: 'text', id: 'ss-pay-ref', maxlength: '120', placeholder: 'ex. référence du virement' });
             var note = h('input', { type: 'text', id: 'ss-pay-note', maxlength: '500' });
             var refund = h('input', { type: 'checkbox', id: 'ss-pay-refund' });
+            // Commande manuelle : paiement rattaché à un document (facture, acompte, demande de paiement) ; reçu au client.
+            var docs = (o.documents || []).filter(function (d) { return d.kind !== 'credit_note'; });
+            var firstDue = docs.filter(function (d) { return d.settlement.remaining_cents > 0; })[0];
+            var docSelect = docs.length ? h('select', { id: 'ss-pay-doc' }, docs.map(function (d) {
+                return h('option', { value: String(d.id), selected: d === firstDue }, d.kind_label + ' ' + d.number
+                    + (d.settlement.remaining_cents > 0 ? ' — reste ' + cents(d.settlement.remaining_cents, d.settlement.currency) : ''));
+            })) : null;
+            var notify = docs.length ? h('input', { type: 'checkbox', id: 'ss-pay-notify', checked: true }) : null;
+            if (docSelect) {
+                var syncAmount = function () {
+                    var d = docs.filter(function (x) { return String(x.id) === docSelect.value; })[0];
+                    if (d && d.settlement.remaining_cents > 0) { amount.value = (d.settlement.remaining_cents / 100).toFixed(2); }
+                };
+                docSelect.addEventListener('change', syncAmount);
+                syncAmount();
+            }
             var btn = h('button', { class: 'ss-btn ss-primary', type: 'submit' }, 'Enregistrer le paiement');
             refund.addEventListener('change', function () { btn.textContent = refund.checked ? 'Enregistrer le remboursement' : 'Enregistrer le paiement'; });
 
@@ -549,24 +593,29 @@
                 e.preventDefault();
                 btn.disabled = true;
                 api('POST', '/orders/' + encodeURIComponent(o.order_reference) + '/payments', {
-                    amount: amount.value, method: method.value, paid_at: date.value, external_ref: ref.value, note: note.value, refund: refund.checked
+                    amount: amount.value, method: method.value, paid_at: date.value, external_ref: ref.value, note: note.value, refund: refund.checked,
+                    invoice_id: docSelect ? docSelect.value : null, notify: notify ? notify.checked : false
                 }).then(function (res) {
                     self.notify((refund.checked ? 'Remboursement' : 'Paiement') + ' enregistré : ' + res.data.settlement.label + '.', false);
                     self.loadOrders();
                     self.openOrder(o.order_reference);
                 }).catch(function (e) { self.fail(e); }).then(function () { btn.disabled = false; });
             } },
+                docSelect ? h('label', { class: 'ss-field', for: 'ss-pay-doc' }, 'Document', docSelect) : null,
                 h('label', { class: 'ss-field', for: 'ss-pay-amount' }, 'Montant', amount),
                 h('label', { class: 'ss-field', for: 'ss-pay-method' }, 'Moyen', method),
                 h('label', { class: 'ss-field', for: 'ss-pay-date' }, 'Date', date),
                 h('label', { class: 'ss-field', for: 'ss-pay-ref' }, 'Référence', ref),
                 h('label', { class: 'ss-field', for: 'ss-pay-note' }, 'Note', note),
                 h('label', { class: 'ss-field', for: 'ss-pay-refund', style: 'flex-direction:row;align-items:center;gap:.3rem' }, refund, 'Remboursement'),
+                notify ? h('label', { class: 'ss-field', for: 'ss-pay-notify', style: 'flex-direction:row;align-items:center;gap:.3rem' }, notify, 'Envoyer un reçu au client') : null,
                 btn);
 
+            var numbers = {};
+            (o.documents || []).forEach(function (d) { numbers[d.id] = d.number; });
             var rows = (o.payments || []).map(function (p) {
                 return h('tr', {},
-                    h('td', {}, dateTime(p.paid_at)),
+                    h('td', {}, dateTime(p.paid_at), p.invoice_id && numbers[p.invoice_id] ? h('div', { class: 'ss-muted' }, numbers[p.invoice_id]) : null),
                     h('td', {}, p.method_label),
                     h('td', { class: 'ss-num' + (p.amount_cents < 0 ? ' ss-neg' : '') }, cents(p.amount_cents, p.currency)),
                     h('td', {}, p.external_ref || ''),
@@ -583,6 +632,309 @@
                 }))), h('tbody', {}, rows)) : h('p', { class: 'ss-muted' }, 'Aucun paiement enregistré.'),
                 h('details', { style: 'margin-top:.6rem' }, h('summary', {}, 'Enregistrer un paiement reçu hors du site ou un remboursement'),
                     h('div', { style: 'padding:.6rem 0' }, form)));
+        }
+
+        // ---------------- Factures (ventes manuelles) ----------------
+
+        showInvoices() {
+            var self = this;
+            var f = this.docFilters;
+            var inv = this.invoicing || {};
+            var kind = h('select', { id: 'ss-d-kind' }, h('option', { value: '' }, 'Tous les types'),
+                Object.keys(inv.kinds || {}).map(function (k) { return h('option', { value: k, selected: f.kind === k }, inv.kinds[k]); }));
+            var states = { unpaid: 'À régler', partial: 'Partiellement réglée', overdue: 'En retard', paid: 'Réglée', refunded: 'Remboursée' };
+            var state = h('select', { id: 'ss-d-state' }, h('option', { value: '' }, 'Tous les états'),
+                Object.keys(states).map(function (k) { return h('option', { value: k, selected: f.state === k }, states[k]); }));
+            var q = h('input', { type: 'search', id: 'ss-d-q', value: f.q, placeholder: 'Numéro, commande, client' });
+
+            this.body.appendChild(h('form', { class: 'ss-bar', onsubmit: function (e) {
+                e.preventDefault();
+                f.kind = kind.value; f.state = state.value; f.q = q.value.trim();
+                self.docPage = 1;
+                self.loadInvoices();
+            } },
+                h('label', { class: 'ss-field', for: 'ss-d-kind' }, 'Type', kind),
+                h('label', { class: 'ss-field', for: 'ss-d-state' }, 'Règlement', state),
+                h('label', { class: 'ss-field', for: 'ss-d-q' }, 'Recherche', q),
+                h('button', { class: 'ss-btn ss-primary', type: 'submit' }, 'Filtrer')));
+            this.list = h('div');
+            this.detail = h('div');
+            this.body.appendChild(this.list);
+            this.body.appendChild(this.detail);
+            this.loadInvoices();
+        }
+
+        loadInvoices() {
+            var self = this;
+            var f = this.docFilters;
+            var qs = '?page=' + this.docPage + '&per_page=' + PER_PAGE + Object.keys(f).map(function (k) { return f[k] ? '&' + k + '=' + encodeURIComponent(f[k]) : ''; }).join('');
+            this.list.innerHTML = '';
+            this.list.appendChild(h('p', { class: 'ss-muted' }, 'Chargement…'));
+            api('GET', '/documents' + qs).then(function (res) {
+                var rows = res.data || [];
+                var meta = res.meta || { total: rows.length, page: 1, per_page: PER_PAGE };
+                var pages = Math.max(1, Math.ceil(meta.total / meta.per_page));
+                self.list.innerHTML = '';
+                if (!rows.length) {
+                    self.list.appendChild(h('p', { class: 'ss-muted' }, 'Aucun document ne correspond.'));
+                } else {
+                    self.list.appendChild(h('table', {},
+                        h('thead', {}, h('tr', {}, ['Numéro', 'Type', 'Client', 'Émis le', 'Échéance', 'Montant', 'Règlement', 'Transmission'].map(function (c, i) {
+                            return h('th', { class: i === 5 ? 'ss-num' : '' }, c);
+                        }))),
+                        h('tbody', {}, rows.map(function (d) {
+                            var open = function () { self.openOrder(d.order_reference); };
+                            return h('tr', { class: 'ss-row', tabindex: 0, onclick: open, onkeydown: function (e) { if (e.key === 'Enter') { open(); } } },
+                                h('td', {}, d.number, h('div', { class: 'ss-muted' }, d.order_reference)),
+                                h('td', {}, d.kind_label),
+                                h('td', {}, d.customer_name, h('div', { class: 'ss-muted' }, d.customer_email)),
+                                h('td', {}, dateTime(d.issued_at)),
+                                h('td', { class: d.overdue ? 'ss-neg' : '' }, d.due_date ? new Date(d.due_date + 'T12:00:00Z').toLocaleDateString('fr-FR') : '', d.overdue ? ' (en retard)' : ''),
+                                h('td', { class: 'ss-num' }, cents(d.total_cents, d.settlement.currency)),
+                                h('td', {}, settlementBadge(d.settlement)),
+                                h('td', {}, d.ereporting_label));
+                        }))));
+                    self.list.appendChild(h('div', { class: 'ss-bar', style: 'margin-top:.8rem;align-items:center' },
+                        h('button', { class: 'ss-btn', type: 'button', disabled: self.docPage <= 1, onclick: function () { self.docPage--; self.loadInvoices(); } }, 'Précédent'),
+                        h('span', { class: 'ss-muted' }, 'Page ' + meta.page + ' / ' + pages + ' — ' + meta.total + ' document(s)'),
+                        h('button', { class: 'ss-btn', type: 'button', disabled: self.docPage >= pages, onclick: function () { self.docPage++; self.loadInvoices(); } }, 'Suivant')));
+                }
+                self.list.appendChild(self.newManualButton());
+            }).catch(function (e) { self.list.innerHTML = ''; self.fail(e); });
+        }
+
+        /** Recharge la liste de l'onglet courant (commandes ou documents). */
+        reloadList() {
+            if (this.tab === 'invoices') { this.loadInvoices(); } else { this.loadOrders(); }
+        }
+
+        /**
+         * Éditeur d'une commande manuelle (brouillon) : client (pré-rempli d'après l'e-mail), lignes libres, conditions.
+         * reference = null : nouvelle commande ; draft = saisie enregistrée (réouverture).
+         */
+        openEditor(reference, draft) {
+            var self = this;
+            var inv = this.invoicing || {};
+            var d = draft || {};
+            var c = d.customer || {};
+            var uid = 0;
+            function field(label, input, hint) {
+                var id = input.id || ('ss-ed-' + (++uid));
+                input.id = id;
+                return h('label', { class: 'ss-field', for: id }, label, input, hint ? h('span', { class: 'ss-muted' }, hint) : null);
+            }
+            function text(name, value, attrs) { return h('input', Object.assign({ type: 'text', value: value || '', 'data-k': name }, attrs || {})); }
+
+            // --- Client
+            var type = c.type === 'b2b' ? 'b2b' : (draft ? 'b2c' : 'b2b');
+            var typeB2b = h('input', { type: 'radio', name: 'ss-ed-type', value: 'b2b', checked: type === 'b2b', id: 'ss-ed-type-b2b' });
+            var typeB2c = h('input', { type: 'radio', name: 'ss-ed-type', value: 'b2c', checked: type === 'b2c', id: 'ss-ed-type-b2c' });
+            var email = text('email', c.email, { type: 'email', size: '30', required: true });
+            var cf = {
+                company: text('company', c.company, { size: '30' }), siren: text('siren', c.siren, { size: '14', inputmode: 'numeric' }),
+                vat: text('vat', c.vat, { size: '16' }), firstname: text('firstname', c.firstname), lastname: text('lastname', c.lastname),
+                tel: text('tel', c.tel, { type: 'tel' }), street: text('street', c.street, { size: '34' }),
+                'address-complement': text('address-complement', c['address-complement'], { size: '34' }),
+                'postal-code': text('postal-code', c['postal-code'], { size: '8' }), city: text('city', c.city), country: text('country', c.country || 'FR', { size: '4', maxlength: '2' })
+            };
+            var orgBox = h('div', { class: 'ss-bar' }, field('Raison sociale', cf.company), field('SIREN', cf.siren), field('N° de TVA', cf.vat));
+            var basis = h('select', { id: 'ss-ed-basis' }, h('option', { value: 'ht' }, 'HT'), h('option', { value: 'ttc' }, 'TTC'));
+            function syncType() {
+                var b2b = typeB2b.checked;
+                orgBox.hidden = !b2b;
+                if (!draft || !d.price_basis) { basis.value = b2b ? 'ht' : 'ttc'; }
+                priceLabels();
+            }
+            var lookupBtn = h('button', { class: 'ss-btn', type: 'button', onclick: function () {
+                if (!email.value) { return; }
+                lookupBtn.disabled = true;
+                api('GET', '/customers/lookup?email=' + encodeURIComponent(email.value)).then(function (res) {
+                    var k = res.data.customer;
+                    if (!k) { self.notify('Client inconnu : saisissez ses coordonnées.', false); return; }
+                    Object.keys(cf).forEach(function (key) { if (k[key] !== undefined && k[key] !== null) { cf[key].value = k[key]; } });
+                    (k.type === 'b2b' ? typeB2b : typeB2c).checked = true;
+                    syncType();
+                    self.notify('Coordonnées pré-remplies d’après ' + (k.company ? 'la dernière commande' : 'le compte client') + ' : vérifiez-les.', false);
+                }).catch(function (e) { self.fail(e); }).then(function () { lookupBtn.disabled = false; });
+            } }, 'Rechercher le client');
+
+            // --- Lignes
+            var taxTypes = inv.tax_types || {};
+            var linesBody = h('tbody');
+            function priceLabels() {
+                self.detail.querySelectorAll('[data-price-label]').forEach(function (el) { el.textContent = 'Prix unitaire ' + basis.value.toUpperCase(); });
+            }
+            function addLine(l) {
+                l = l || {};
+                var tax = h('select', { 'aria-label': 'Type de taxe' }, Object.keys(taxTypes).map(function (k) {
+                    return h('option', { value: k, selected: (l.tax_type || inv.default_tax_type) === k || l.tax_type === taxTypes[k] }, taxTypes[k]);
+                }));
+                var row = h('tr', {},
+                    h('td', {}, h('input', { type: 'text', value: l.title || '', 'aria-label': 'Intitulé', style: 'width:100%;min-width:18rem', 'data-l': 'title' })),
+                    h('td', {}, h('input', { type: 'number', min: '1', step: '1', value: l.quantity || 1, 'aria-label': 'Quantité', style: 'width:5rem', 'data-l': 'quantity' })),
+                    h('td', {}, h('input', { type: 'text', inputmode: 'decimal', value: l.unit_price || '', 'aria-label': 'Prix unitaire', size: '10', placeholder: '0.00', 'data-l': 'unit_price' })),
+                    h('td', {}, inv.small_business ? h('span', { class: 'ss-muted' }, 'Franchise en base (TVA non applicable)') : tax),
+                    h('td', {}, h('button', { class: 'ss-btn', type: 'button', 'aria-label': 'Retirer la ligne', onclick: function () { row.remove(); } }, '×')));
+                row._tax = tax;
+                linesBody.appendChild(row);
+            }
+            (d.lines && d.lines.length ? d.lines : [{}]).forEach(addLine);
+
+            // --- Conditions
+            var nature = h('select', { id: 'ss-ed-nature' }, Object.keys(inv.natures || {}).map(function (k) {
+                return h('option', { value: k, selected: (d.operation_nature || inv.operation_nature) === k }, inv.natures[k]);
+            }));
+            var dueDays = h('input', { type: 'number', id: 'ss-ed-due', min: '0', max: '365', value: d.due_days !== undefined ? d.due_days : inv.due_days, style: 'width:6rem' });
+            var dueDate = h('input', { type: 'date', id: 'ss-ed-due-date', value: d.due_date || '' });
+            var methods = inv.methods || {};
+            var chosen = d.methods || Object.keys(methods);
+            var methodBoxes = Object.keys(methods).map(function (k) {
+                return h('label', { class: 'ss-field', style: 'flex-direction:row;align-items:center;gap:.3rem' },
+                    h('input', { type: 'checkbox', value: k, checked: chosen.indexOf(k) >= 0, 'data-m': '1' }), methods[k]);
+            });
+            var comment = h('textarea', { id: 'ss-ed-comment', rows: '4', style: 'width:100%' });
+            comment.value = d.comment || '';
+
+            var saveBtn = h('button', { class: 'ss-btn ss-primary', type: 'submit' }, reference ? 'Enregistrer le brouillon' : 'Créer le brouillon');
+            var form = h('form', { onsubmit: function (e) {
+                e.preventDefault();
+                var customer = { type: typeB2b.checked ? 'b2b' : 'b2c', email: email.value };
+                Object.keys(cf).forEach(function (k) { customer[k] = cf[k].value; });
+                var lines = Array.prototype.map.call(linesBody.children, function (row) {
+                    var get = function (k) { return row.querySelector('[data-l="' + k + '"]').value; };
+                    return { title: get('title'), quantity: get('quantity'), unit_price: get('unit_price'), tax_type: row._tax.value };
+                });
+                var body = {
+                    customer: customer, price_basis: basis.value, lines: lines, operation_nature: nature.value,
+                    due_days: dueDays.value, due_date: dueDate.value, comment: comment.value,
+                    methods: Array.prototype.filter.call(form.querySelectorAll('[data-m]'), function (b) { return b.checked; }).map(function (b) { return b.value; })
+                };
+                saveBtn.disabled = true;
+                (reference ? api('PUT', '/manual-orders/' + encodeURIComponent(reference), body) : api('POST', '/manual-orders', body))
+                    .then(function (res) {
+                        self.notify('Brouillon ' + res.data.order_reference + ' enregistré. Vérifiez l’aperçu, puis émettez le document.', false);
+                        self.reloadList();
+                        self.openOrder(res.data.order_reference);
+                    })
+                    .catch(function (err) { self.fail(err); })
+                    .then(function () { saveBtn.disabled = false; });
+            } },
+                h('fieldset', { class: 'ss-constraint' }, h('legend', {}, 'Client'),
+                    h('div', { class: 'ss-bar' }, field('E-mail (envoi du document)', email), lookupBtn),
+                    h('div', { class: 'ss-bar', role: 'radiogroup', 'aria-label': 'Type de client' },
+                        h('label', { for: 'ss-ed-type-b2b', class: 'ss-field', style: 'flex-direction:row;align-items:center;gap:.3rem' }, typeB2b, 'Organisation (prix HT)'),
+                        h('label', { for: 'ss-ed-type-b2c', class: 'ss-field', style: 'flex-direction:row;align-items:center;gap:.3rem' }, typeB2c, 'Particulier (prix TTC)')),
+                    orgBox,
+                    h('div', { class: 'ss-bar' }, field('Prénom', cf.firstname), field('Nom', cf.lastname), field('Téléphone', cf.tel)),
+                    h('div', { class: 'ss-bar' }, field('Adresse de facturation', cf.street), field('Complément', cf['address-complement'])),
+                    h('div', { class: 'ss-bar' }, field('Code postal', cf['postal-code']), field('Ville', cf.city), field('Pays (ISO)', cf.country))),
+                h('fieldset', { class: 'ss-constraint' }, h('legend', {}, 'Lignes'),
+                    h('div', { class: 'ss-bar' }, field('Prix saisis', basis)),
+                    h('div', { class: 'ss-table-scroll' }, h('table', {},
+                        h('thead', {}, h('tr', {}, h('th', {}, 'Intitulé'), h('th', {}, 'Qté'), h('th', { 'data-price-label': '1' }, 'Prix unitaire'), h('th', {}, 'Type de taxe'), h('th', {}))),
+                        linesBody)),
+                    h('button', { class: 'ss-btn', type: 'button', onclick: function () { addLine({}); priceLabels(); } }, 'Ajouter une ligne')),
+                h('fieldset', { class: 'ss-constraint' }, h('legend', {}, 'Conditions'),
+                    h('div', { class: 'ss-bar' }, field('Nature de l’opération', nature), field('Échéance (jours)', dueDays), field('ou date d’échéance', dueDate)),
+                    h('div', { class: 'ss-bar', role: 'group', 'aria-label': 'Moyens de paiement proposés' }, h('span', { class: 'ss-muted' }, 'Moyens de paiement proposés :'), methodBoxes.length ? methodBoxes : h('span', { class: 'ss-muted' }, 'aucun (activez le virement ou une passerelle)')),
+                    field('Commentaire joint à l’e-mail du client', comment)),
+                h('div', { class: 'ss-bar' }, saveBtn,
+                    h('button', { class: 'ss-btn', type: 'button', onclick: function () { self.detail.innerHTML = ''; } }, 'Annuler')));
+
+            typeB2b.addEventListener('change', syncType);
+            typeB2c.addEventListener('change', syncType);
+            basis.addEventListener('change', priceLabels);
+            this.detail.innerHTML = '';
+            this.detail.appendChild(h('div', { class: 'ss-card' }, h('h3', {}, reference ? 'Brouillon ' + reference : 'Nouvelle commande manuelle'), form));
+            if (d.price_basis) { basis.value = d.price_basis; }
+            syncType();
+            if (d.price_basis) { basis.value = d.price_basis; priceLabels(); }
+            this.detail.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+        }
+
+        /** Documents d'une commande manuelle : liste, actions (PDF, copie acquittée, renvoi, transmission), émission. */
+        documentsSection(o) {
+            var self = this;
+            var docs = o.documents || [];
+            var ref = encodeURIComponent(o.order_reference);
+            function pdf(d, copy) {
+                return api('GET', '/documents/' + d.id + '/pdf?copy=' + copy, undefined, { blob: true })
+                    .then(function (blob) { download(blob, d.number + (copy === 'paid' ? '-acquittee' : '') + '.pdf'); })
+                    .catch(function (e) { self.fail(e); });
+            }
+            var rows = docs.map(function (d) {
+                var opts = d.ereporting_options || {};
+                var sel = Object.keys(opts).length ? h('select', { 'aria-label': 'Transmission de ' + d.number }, Object.keys(opts).map(function (k) {
+                    return h('option', { value: k, selected: k === d.ereporting_status }, opts[k]);
+                })) : null;
+                if (sel) {
+                    sel.addEventListener('change', function () {
+                        api('PATCH', '/documents/' + d.id + '/ereporting', { status: sel.value })
+                            .then(function (res) { self.notify(d.number + ' : ' + res.data.ereporting_label + '.', false); })
+                            .catch(function (e) { self.fail(e); });
+                    });
+                }
+                var link = d.public_url ? h('button', { class: 'ss-btn', type: 'button', title: d.public_url, onclick: function () {
+                    if (navigator.clipboard) { navigator.clipboard.writeText(d.public_url).then(function () { self.notify('Lien de paiement copié.', false); }); }
+                } }, 'Copier le lien') : null;
+                return h('tr', {},
+                    h('td', {}, h('strong', {}, d.number), h('div', { class: 'ss-muted' }, d.kind_label + (d.source_number ? ' (règlement de ' + d.source_number + ')' : ''))),
+                    h('td', {}, dateTime(d.issued_at), d.due_date ? h('div', { class: 'ss-muted' + (d.overdue ? ' ss-neg' : '') }, 'échéance ' + new Date(d.due_date + 'T12:00:00Z').toLocaleDateString('fr-FR')) : null),
+                    h('td', { class: 'ss-num' }, cents(d.total_cents, d.settlement.currency),
+                        d.due_cents !== null && d.due_cents !== d.total_cents ? h('div', { class: 'ss-muted' }, 'net à payer ' + cents(d.due_cents, d.settlement.currency)) : null),
+                    h('td', {}, settlementBadge(d.settlement)),
+                    h('td', {}, sel || h('span', { class: 'ss-muted' }, d.ereporting_label)),
+                    h('td', {}, h('div', { class: 'ss-bar', style: 'margin:0' },
+                        h('button', { class: 'ss-btn', type: 'button', onclick: function () { pdf(d, 'original'); } }, 'PDF'),
+                        d.settlement.state === 'paid' && d.kind !== 'payment_request' ? h('button', { class: 'ss-btn', type: 'button', onclick: function () { pdf(d, 'paid'); } }, 'Acquittée') : null,
+                        h('button', { class: 'ss-btn', type: 'button', onclick: function () {
+                            api('POST', '/documents/' + d.id + '/send', {}).then(function () { self.notify(d.number + ' envoyé au client.', false); }).catch(function (e) { self.fail(e); });
+                        } }, 'Renvoyer'),
+                        link)));
+            });
+
+            var hasInvoice = docs.some(function (d) { return d.kind === 'invoice'; });
+            var issueBox = null;
+            if (!hasInvoice) {
+                var kind = h('select', { id: 'ss-is-kind' },
+                    h('option', { value: 'invoice' }, 'Facture (à régler)'),
+                    h('option', { value: 'deposit' }, 'Facture d’acompte'),
+                    h('option', { value: 'payment_request' }, 'Demande de paiement (facture émise au règlement)'));
+                var depMode = h('select', { id: 'ss-is-dep-mode' }, h('option', { value: 'percent' }, '%'), h('option', { value: 'amount' }, 'montant'));
+                var depValue = h('input', { type: 'text', id: 'ss-is-dep', size: '8', value: '30', inputmode: 'decimal' });
+                var depBox = h('div', { class: 'ss-bar', hidden: true }, h('label', { class: 'ss-field', for: 'ss-is-dep' }, 'Acompte', depValue), h('label', { class: 'ss-field', for: 'ss-is-dep-mode' }, 'en', depMode));
+                kind.addEventListener('change', function () { depBox.hidden = kind.value !== 'deposit'; });
+                var send = h('input', { type: 'checkbox', id: 'ss-is-send', checked: true });
+                var issueBtn = h('button', { class: 'ss-btn ss-primary', type: 'button', onclick: function () {
+                    if (!window.confirm('Émettre le document ? Un document émis ne se modifie plus (numéro définitif).')) { return; }
+                    issueBtn.disabled = true;
+                    api('POST', '/orders/' + ref + '/documents', { kind: kind.value, deposit: { mode: depMode.value, value: depValue.value }, send: send.checked })
+                        .then(function (res) {
+                            self.notify(res.data.document.kind_label + ' ' + res.data.document.number + ' émise'
+                                + (res.data.sent === true ? ' et envoyée au client.' : (res.data.sent === false ? ' — e-mail NON envoyé (voir grav.log).' : '.')), res.data.sent === false);
+                            self.reloadList();
+                            self.openOrder(o.order_reference);
+                        })
+                        .catch(function (e) { self.fail(e); })
+                        .then(function () { issueBtn.disabled = false; });
+                } }, 'Émettre');
+                var previewBtn = h('button', { class: 'ss-btn', type: 'button', onclick: function () {
+                    api('GET', '/manual-orders/' + ref + '/preview?kind=' + kind.value, undefined, { blob: true })
+                        .then(function (blob) { download(blob, 'apercu-' + o.order_reference + '.pdf'); }).catch(function (e) { self.fail(e); });
+                } }, 'Aperçu (PDF)');
+                issueBox = h('div', { class: 'ss-section' }, h('h3', {}, 'Émettre un document'),
+                    h('div', { class: 'ss-bar' }, h('label', { class: 'ss-field', for: 'ss-is-kind' }, 'Type', kind), depBox,
+                        h('label', { class: 'ss-field', for: 'ss-is-send', style: 'flex-direction:row;align-items:center;gap:.3rem' }, send, 'Envoyer au client par e-mail (PDF, commentaire, lien de paiement)')),
+                    h('div', { class: 'ss-bar' }, previewBtn, issueBtn),
+                    docs.length === 0 ? h('button', { class: 'ss-btn', type: 'button', onclick: function () { self.openEditor(o.order_reference, o.draft); } }, 'Modifier le brouillon') : null);
+            }
+
+            return h('section', { class: 'ss-section', 'aria-labelledby': 'ss-docs-title' },
+                h('h3', { id: 'ss-docs-title' }, 'Documents'),
+                rows.length ? h('div', { class: 'ss-table-scroll' }, h('table', {}, h('thead', {}, h('tr', {}, ['Document', 'Émis le', 'Montant', 'Règlement', 'Transmission', ''].map(function (c, i) {
+                    return h('th', { class: i === 2 ? 'ss-num' : '' }, c);
+                }))), h('tbody', {}, rows))) : h('p', { class: 'ss-muted' }, 'Aucun document émis : brouillon.'),
+                issueBox);
         }
 
         // ---------------- Transporteurs ----------------

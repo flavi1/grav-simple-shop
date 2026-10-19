@@ -429,7 +429,7 @@ final class DocumentManager
     public static function afterPayment(int $documentId): ?array
     {
         $doc = self::find($documentId);
-        if ($doc === null || $doc['kind'] !== 'payment_request' || self::settlement($doc)['state'] !== 'paid') {
+        if ($doc === null || $doc['kind'] !== 'payment_request' || !in_array(self::settlement($doc)['state'], ['paid', 'overpaid'], true)) {
             return null;
         }
         $db = InventoryManager::getDatabase();
@@ -765,6 +765,37 @@ final class DocumentManager
             'amounts'       => $amounts,
             'no_xml'        => $kind === 'payment_request',
         ];
+    }
+
+    /**
+     * Coordonnées connues d'un client (pré-remplissage) : dernière commande manuelle à cette adresse (raison sociale,
+     * SIREN…), sinon son profil de la boutique, sinon sa dernière commande en ligne. Null si inconnu.
+     */
+    public static function lookupCustomer(string $email): ?array
+    {
+        $email = mb_strtolower(trim($email));
+        if (!filter_var($email, FILTER_VALIDATE_EMAIL)) {
+            return null;
+        }
+        $db = InventoryManager::getDatabase();
+        $stmt = $db->prepare("SELECT customer_data, source FROM \"order\" WHERE lower(json_extract(customer_data, '$.email')) = :e
+            ORDER BY (source = 'manual') DESC, created_at DESC LIMIT 1");
+        $stmt->execute([':e' => $email]);
+        $row = $stmt->fetch(\PDO::FETCH_ASSOC);
+        $stmt->closeCursor();
+        if ($row && ($row['source'] ?? '') === 'manual') {
+            return json_decode((string) $row['customer_data'], true) ?: null;
+        }
+        $file = Grav::instance()['locator']->findResource('user://data/simple-shop/users', true, true) . '/' . hash('sha256', $email) . '.json';
+        $profile = is_file($file) ? (json_decode((string) file_get_contents($file), true) ?: []) : [];
+        $base = $row ? (json_decode((string) $row['customer_data'], true) ?: []) : [];
+        $data = \Grav\Plugin\SimpleShop\Services\AddressFields::normalize(array_merge($base, $profile));
+        $out = array_intersect_key($data, array_flip(self::CUSTOMER_FIELDS));
+        if ($out === [] ) {
+            return null;
+        }
+
+        return $out + ['email' => $email, 'type' => 'b2c'];
     }
 
     // ------------------------------------------------------------------

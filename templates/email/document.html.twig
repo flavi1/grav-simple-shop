@@ -1,0 +1,37 @@
+{#
+    templates/email/document.html.twig — document envoyé depuis l'administration (facture, acompte, demande de paiement),
+    voir Services\DocumentMailer::sendDocument(). PDF en pièce jointe.
+
+    Variables : site_name, kind_label, number, customer_name, total (centimes), remaining (centimes), currency, due_date,
+    url (page de paiement), comment (commentaire du vendeur, texte brut).
+#}
+{% extends 'email/base.html.twig' %}
+
+{% block content %}
+<p>Bonjour{% if customer_name %} {{ customer_name }}{% endif %},</p>
+
+{% if comment %}
+<p>{{ comment|e|nl2br }}</p>
+{% endif %}
+
+<p>
+    Vous trouverez ci-joint {{ kind_label|lower == 'avoir' ? 'l’avoir' : (kind_label|lower starts with 'demande' ? 'la demande de paiement' : (kind_label|lower starts with 'facture d' ? 'la facture d’acompte' : 'la facture')) }}
+    <strong>{{ number }}</strong> d’un montant de <strong>{{ (total / 100)|number_format(2, ',', ' ') }} {{ currency }}</strong>.
+</p>
+
+{% if remaining > 0 %}
+<p>
+    Reste à régler : <strong>{{ (remaining / 100)|number_format(2, ',', ' ') }} {{ currency }}</strong>{% if due_date %}, avant le <strong>{{ due_date }}</strong>{% endif %}.
+</p>
+<p style="text-align: center; margin: 1.5em 0;">
+    <a href="{{ url }}" style="display: inline-block; padding: .7em 1.4em; background: #1d4ed8; color: #fff; text-decoration: none; border-radius: 4px;">Voir et régler en ligne</a>
+</p>
+<p style="font-size: .9em; color: #555;">Lien direct : <a href="{{ url }}">{{ url }}</a></p>
+{% endif %}
+
+<p>Cordialement,<br>{{ site_name }}</p>
+{% endblock %}
+
+{% block footer %}
+  <p style="text-align: center;">{{ site_name }}</p>
+{% endblock %}

@@ -36,7 +36,7 @@ routes:
   account: '/mon-compte'
   logout: '/mon-compte/deconnexion'
   newsletter_unsubscribe: '/newsletter/unsubscribe'
-  document: '/document'     # page de paiement d'un document : /document/<jeton> (jeton aléatoire, sans compte client)
+  document: '/document'     # page de paiement d'un document : /document?t=<jeton> (jeton aléatoire, sans compte client)
 
 # Titres et descriptions des pages de la boutique (onglet du navigateur, <meta name="description">). Valeurs par défaut :
 # classes/Config/PageMeta.php ; à remplacer page par page si besoin. Ces pages ne sont jamais indexées (noindex).

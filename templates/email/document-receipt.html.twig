@@ -1,0 +1,29 @@
+{#
+    templates/email/document-receipt.html.twig — reçu d'un paiement sur un document (Services\DocumentMailer::sendReceipt()).
+    Quand tout est réglé, la copie acquittée de la facture est jointe.
+
+    Variables : site_name, kind_label, number, customer_name, total, remaining, currency, url, payment_amount (centimes),
+    payment_method, payment_date, fully_paid.
+#}
+{% extends 'email/base.html.twig' %}
+
+{% block content %}
+<p>Bonjour{% if customer_name %} {{ customer_name }}{% endif %},</p>
+
+<p>
+    Nous avons bien reçu votre paiement de <strong>{{ (payment_amount / 100)|number_format(2, ',', ' ') }} {{ currency }}</strong>
+    ({{ payment_method }}, le {{ payment_date }}) pour <strong>{{ number }}</strong>.
+</p>
+
+{% if fully_paid %}
+<p>Le document est entièrement réglé. Merci !{% if kind_label|lower starts with 'facture' %} La facture acquittée est jointe à ce message.{% endif %}</p>
+{% else %}
+<p>Reste à régler : <strong>{{ (remaining / 100)|number_format(2, ',', ' ') }} {{ currency }}</strong> — <a href="{{ url }}">voir le document</a>.</p>
+{% endif %}
+
+<p>Cordialement,<br>{{ site_name }}</p>
+{% endblock %}
+
+{% block footer %}
+  <p style="text-align: center;">{{ site_name }}</p>
+{% endblock %}

@@ -197,7 +197,10 @@ Ces valeurs viennent de règles générales du Code de commerce et du CGI : à f
 - Une même passerelle peut implémenter les deux contrats (Stripe, test).
 - `Gateways\GatewayRegistry` : liste des passerelles (événement `onSimpleShopRegisterGateways`), filtrée par origine
   (`shop` / `manual`) et par contrat.
-- Webhook Stripe : métadonnée `shop_document` → paiement enregistré sur le document (idempotent par identifiant de paiement).
+- Webhook Stripe : métadonnée `shop_document_token` → paiement enregistré sur le document (idempotent par identifiant de
+  paiement). Stripe règle les documents par sa **page hébergée** (Checkout) uniquement : pas de JavaScript sur le site.
+- Adresse de retour : `…/document?t=<jeton>&moyen=<passerelle>&retour=1` ; la passerelle vérifie la session (jeton du
+  document, statut payé) et renvoie le montant encaissé.
 
 ### Données (SQLite)
 
@@ -209,3 +212,19 @@ Ces valeurs viennent de règles générales du Code de commerce et du CGI : à f
   `total_cents`, `due_cents`, `issued_at`, `due_date`, `access_token`, `source_invoice_id`, `related_invoice_id`, `payload`
   (JSON : client, lignes figées, conditions, commentaire, moyens de paiement, déductions d'acomptes, échéancier, options) ;
   plusieurs documents par commande (contrainte d'unicité de `order_reference` retirée par migration).
+
+### Réalisé (19/10/2026)
+
+- Étapes 1 à 4 du plan : paiements, documents (facture, acompte, demande de paiement, facture au règlement), page publique de
+  paiement, e-mails (document, reçu avec copie acquittée), écran Admin2 (onglet « Factures », éditeur de vente manuelle,
+  documents d'une commande, saisie d'un paiement rattaché à un document), Stripe et passerelle de test pour les documents.
+- Vérifié de bout en bout dans une copie locale de Grav 2.2.5 + Admin2 (brouillon, aperçu, acompte 30 %, facture finale avec
+  acompte déduit, demande de paiement réglée par la passerelle de test → facture acquittée envoyée, virement saisi) ; XML
+  validés contre le XSD EN 16931.
+- Montant d'une passerelle supérieur au reste dû : enregistré (« trop-perçu », à rembourser) plutôt que refusé, l'argent
+  étant déjà encaissé.
+
+### Reste à faire (hors périmètre actuel, conception compatible)
+
+- Devis (`quote`), avoirs (`credit_note`) depuis l'écran, échéancier, montant libre payé par carte, relances automatiques.
+- Validation au testeur FNFE d'une facture en franchise en base (catégorie E) avec les vrais identifiants du vendeur.

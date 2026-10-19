@@ -19,13 +19,14 @@ final class PageMeta
         'identify'     => ['Connexion', 'Connectez-vous avec un code à usage unique envoyé par e-mail.'],
         'account'      => ['Mon compte', 'Vos coordonnées et vos préférences.'],
         'newsletter_unsubscribe' => ['Désabonnement', 'Désabonnement de la lettre d\'information.'],
+        'document'     => ['Votre document', 'Consultation et règlement en ligne d\'une facture ou d\'une demande de paiement.'],
     ];
 
     /** Correspondance gabarit → clé (pour les gabarits du tunnel). */
     public const TEMPLATES = [
         'step1cart' => 'cart', 'email-validation' => 'validation', 'step2delivery' => 'delivery', 'step3payment' => 'payment',
         'step4confirmationorder' => 'confirmation', 'identify' => 'identify', 'account' => 'account',
-        'newsletter-unsubscribe' => 'newsletter_unsubscribe',
+        'newsletter-unsubscribe' => 'newsletter_unsubscribe', 'document' => 'document',
     ];
 
     /** Titre et description d'une page : configuration du site, sinon valeur par défaut. */
