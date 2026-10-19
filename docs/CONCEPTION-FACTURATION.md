@@ -1,6 +1,6 @@
 # Conception — Facturation manuelle, acomptes, paiements (19/10/2026)
 
-> Conception seulement : rien n'est développé. Les questions encore ouvertes sont en §11.
+> Conception validée le 19/10/2026 (16 h 21) ; développement en cours (§12). Décisions de 16 h 21 : §11.
 > Besoin : émettre depuis l'administration des factures Factur-X « à régler » (lignes libres), des demandes de paiement et
 > des factures d'acompte ; suivre ce qui est payé (rien, en partie, tout) ; préparer remboursements et avoirs. Premier
 > usage : flavieng.com (auto-entrepreneur, prestations B2B, site vitrine sans boutique publique). senonevero.flavieng.com
@@ -166,11 +166,46 @@ Ces valeurs viennent de règles générales du Code de commerce et du CGI : à f
 5. Demande de paiement, factures d'acompte et facture finale, échéancier.
 6. Plus tard : avoirs et remboursements (Stripe compris), dépôt automatique sur une plateforme agréée.
 
-## 11. Questions ouvertes
+## 11. Décisions du 19/10/2026 (16 h 21)
 
-1. Les factures manuelles et celles de la boutique partagent-elles la même suite de numéros `FACT-` ? (Proposé : oui, une
-   seule suite chronologique, la plus simple à justifier.)
-2. Faut-il des **devis** (proposition acceptée par le client, puis transformée en facture) ? Dolibarr, Odoo et Invoice
-   Ninja partent tous du devis ; il s'ajouterait naturellement avant la demande de paiement.
-3. Le client peut-il choisir de payer **une partie** par carte (montant libre), ou seulement le reste / l'échéance suivante ?
-4. Relances automatiques avant ou après l'échéance (e-mail à J-3, J+7…) ?
+1. **Numérotation** : une seule suite `FACT-` (boutique et factures manuelles, acomptes et avoirs compris).
+2. **Devis** : hors périmètre ; prévu plus tard (manuels, et émission automatique sur demande, ex. création de site sur
+   flavieng.com). Le modèle le permet : un document de type `quote` (suite `DEV-`) dans la même table que les demandes de
+   paiement, transformable en demande de paiement ou en facture.
+3. **Montant payé par carte** : choisi à la création de la commande manuelle — hors périmètre ; prévu par le champ
+   `options.amount_policy` du document (`remaining` aujourd'hui ; plus tard `next_installment`, `free`).
+4. **Relances** : hors périmètre ; prévues par la date d'échéance et l'état de règlement calculé (une tâche planifiée
+   pourra lister les documents « en retard » et écrire dans une table `reminder`).
+5. **Paiements par les plugins de passerelle** : une facture se paie avec les passerelles de simple-shop
+   (`simple-shop-payment-stripe`, `simple-shop-payment-test`, futur plugin de virement). Plusieurs moyens disponibles :
+   **le client choisit**.
+6. **Moyens de paiement par origine de commande** : `payments.methods.shop` (ex. carte + test) et
+   `payments.methods.manual` (ex. virement + carte + test) ; une passerelle n'apparaît que si son plugin est activé.
+7. **Paiements** : table SQLite (pas de JSON).
+
+## 12. Implémentation (état au fil du développement)
+
+### Passerelles
+
+- Contrat existant (`PaymentGatewayInterface`, `RedirectPaymentGatewayInterface`) : tunnel de la boutique (session, panier).
+- Nouveau contrat **`DocumentPaymentGatewayInterface`** : payer un document (facture, demande de paiement) sans panier ni
+  compte client, à partir d'un **`PaymentContext`** (document, commande, montant en centimes, devise, e-mail, URL de la page,
+  URL de retour). Méthodes : `renderDocumentPayment()`, `processDocumentPayment()` ; variante à redirection
+  (`RedirectDocumentPaymentGatewayInterface` : `startHostedDocumentPayment()`, `confirmDocumentReturn()`) ; passerelle
+  **hors ligne** (virement) : `isOffline()` → elle n'affiche que des instructions, le paiement est enregistré par le vendeur
+  à réception (ou, plus tard, par un rapprochement bancaire).
+- Une même passerelle peut implémenter les deux contrats (Stripe, test).
+- `Gateways\GatewayRegistry` : liste des passerelles (événement `onSimpleShopRegisterGateways`), filtrée par origine
+  (`shop` / `manual`) et par contrat.
+- Webhook Stripe : métadonnée `shop_document` → paiement enregistré sur le document (idempotent par identifiant de paiement).
+
+### Données (SQLite)
+
+- `payment` : `id, order_reference, invoice_id, amount_cents (signé), currency, method, paid_at, recorded_at,
+  recorded_by, external_ref UNIQUE, note`.
+- `order` : + `source` (`shop` | `manual`). Statuts : `draft`, `pending`, `processing`, `shipped`, `delivered`,
+  `completed`, `cancelled`, `refunded` ; **`paid` disparaît** (anciennes commandes : `processing` + un paiement repris).
+- `invoice` (tous les documents) : + `kind` (`invoice`, `deposit`, `credit_note`, `payment_request`, plus tard `quote`),
+  `total_cents`, `due_cents`, `issued_at`, `due_date`, `access_token`, `source_invoice_id`, `related_invoice_id`, `payload`
+  (JSON : client, lignes figées, conditions, commentaire, moyens de paiement, déductions d'acomptes, échéancier, options) ;
+  plusieurs documents par commande (contrainte d'unicité de `order_reference` retirée par migration).
