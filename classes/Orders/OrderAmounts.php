@@ -191,6 +191,29 @@ final class OrderAmounts
         ];
     }
 
+    /**
+     * Montants de lignes libres (document saisi dans l'administration, acompte) : chaque ligne porte déjà ses prix unitaires
+     * HT et TTC, sa taxe (code, points de base, composantes) et sa quantité.
+     *
+     * @param list<array{title: string, quantity: int, unit_ht_cents: int, unit_ttc_cents: int, tax_code: string, tax_bp: int, taxes: array}> $lines
+     * @param bool $htBasis Prix saisis HT (client professionnel) : le total est HT + TVA calculée par taux (pas d'écart
+     *                      d'arrondi BT-114) ; sinon somme des TTC (comme la boutique).
+     */
+    public static function fromLines(array $lines, string $currency, bool $htBasis = false): array
+    {
+        $built = [];
+        foreach ($lines as $l) {
+            $built[] = self::line('item', (string) $l['title'], (int) $l['quantity'], (int) $l['unit_ht_cents'], (int) $l['unit_ttc_cents'],
+                (string) $l['tax_code'], (int) $l['tax_bp'], (array) ($l['taxes'] ?? []) ?: self::defaultComponents((string) $l['tax_code'], (int) $l['tax_bp']));
+        }
+        $amounts = self::assemble($built, $currency);
+        if ($htBasis) {
+            $amounts['total_ttc_cents'] = self::invoiceTotals($amounts)['grand_total_cents'];
+        }
+
+        return $amounts;
+    }
+
     /** Montant décimal (affichage, anciennes colonnes REAL) d'un nombre de centimes. */
     public static function toDecimal(int $cents): float
     {

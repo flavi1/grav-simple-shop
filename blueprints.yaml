@@ -296,6 +296,11 @@ form:
           label: Numéro de TVA intracommunautaire
           help: "Ex. FR12345678901. Obligatoire sur une facture avec TVA (règle EN 16931 BR-S-02)."
 
+        invoicing.legal_mention:
+          type: text
+          label: Mention légale sous le nom du vendeur
+          help: "Ex. « Entrepreneur individuel (EI) » (obligatoire pour un entrepreneur individuel), RCS, capital social…"
+
         invoicing.billing_mode:
           type: select
           label: Cadre de facturation (facture électronique)
@@ -319,3 +324,80 @@ form:
           type: text
           label: Mention frais de recouvrement
           default: "Facture payée à la commande : pas d'indemnité forfaitaire pour frais de recouvrement."
+
+    sales_fieldset:
+      type: fieldset
+      title: Ventes — boutique publique, factures manuelles, moyens de paiement
+      help: "Voir docs/CONCEPTION-FACTURATION.md."
+      fields:
+        shop.public:
+          type: toggle
+          label: Boutique publique
+          help: "Désactivée : ni catalogue, ni panier, ni tunnel d'achat ; seules les pages de paiement des documents envoyés depuis l'administration restent accessibles."
+          default: 1
+          options: { 1: PLUGIN_ADMIN.ENABLED, 0: PLUGIN_ADMIN.DISABLED }
+          validate: { type: bool }
+        invoicing.manual:
+          type: toggle
+          label: Factures et demandes de paiement manuelles
+          help: "Saisie dans Admin2 > Ventes > Factures : lignes libres, client, conditions, envoi par e-mail avec lien de paiement."
+          default: 0
+          options: { 1: PLUGIN_ADMIN.ENABLED, 0: PLUGIN_ADMIN.DISABLED }
+          validate: { type: bool }
+        invoicing.operation_nature:
+          type: select
+          label: Nature des opérations facturées à la main
+          default: services
+          options: { services: Prestations de services, goods: Livraison de biens, mixed: Biens et services }
+        invoicing.payment_terms_days:
+          type: number
+          label: Échéance par défaut (jours après la date de la facture)
+          default: 30
+          validate: { min: 0, max: 60 }
+        invoicing.late_penalty:
+          type: text
+          label: Mention pénalités de retard (factures à régler)
+          default: "Pénalités de retard : trois fois le taux d'intérêt légal en vigueur."
+        invoicing.recovery_fee:
+          type: number
+          label: Indemnité forfaitaire pour frais de recouvrement (€, clients professionnels)
+          default: 40
+        invoicing.discount:
+          type: text
+          label: Mention escompte (factures à régler)
+          default: "Pas d'escompte pour paiement anticipé."
+        invoicing.vat_on_debits:
+          type: toggle
+          label: Option pour le paiement de la TVA d'après les débits
+          default: 0
+          options: { 1: PLUGIN_ADMIN.YES, 0: PLUGIN_ADMIN.NO }
+          validate: { type: bool }
+        payments.methods.shop:
+          type: selectize
+          label: Moyens de paiement de la boutique
+          help: "Identifiants de passerelles (stripe, test_gateway…). Vide = toutes celles disponibles."
+          validate: { type: commalist }
+        payments.methods.manual:
+          type: selectize
+          label: Moyens de paiement des factures manuelles
+          help: "Ex. bank_transfer, stripe, test_gateway. Vide = toutes celles disponibles."
+          validate: { type: commalist }
+        payments.bank_transfer.enabled:
+          type: toggle
+          label: Paiement par virement
+          default: 0
+          options: { 1: PLUGIN_ADMIN.ENABLED, 0: PLUGIN_ADMIN.DISABLED }
+          validate: { type: bool }
+        payments.bank_transfer.holder:
+          type: text
+          label: Titulaire du compte
+        payments.bank_transfer.iban:
+          type: text
+          label: IBAN
+        payments.bank_transfer.bic:
+          type: text
+          label: BIC
+        payments.bank_transfer.instructions:
+          type: text
+          label: Consigne affichée au client
+          default: "Merci d’indiquer le numéro du document en référence du virement."

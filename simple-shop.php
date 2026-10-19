@@ -39,7 +39,8 @@ class SimpleShopPlugin extends Plugin
             'onApiPluginPageInfo'      => [['onApiPluginPageInfo', 0]],
             'onTwigInitialized'        => [['onTwigInitialized', 0]],
             'onTwigTemplatePaths'      => [['onTwigTemplatePaths', 0]],
-            'onTwigSiteVariables'      => [['onTwigSiteVariables', 0]]
+            'onTwigSiteVariables'      => [['onTwigSiteVariables', 0]],
+            'onSimpleShopRegisterGateways' => [['registerCoreGateways', 100]],
         ];
     }
 
@@ -233,6 +234,18 @@ class SimpleShopPlugin extends Plugin
     public function addMessage(string $message, string $scope = 'info'): void
     {
         NoJs::addMessage($message, $scope);
+    }
+
+    /** Passerelles fournies par simple-shop lui-même : virement bancaire (hors ligne), si activé. */
+    public function registerCoreGateways(Event $event): void
+    {
+        if (!$this->grav['config']->get('plugins.simple-shop.payments.bank_transfer.enabled')) {
+            return;
+        }
+        $gateways = $event['gateways'] ?? [];
+        $transfer = new \Grav\Plugin\SimpleShop\Gateways\BankTransferGateway();
+        $gateways[$transfer->getId()] = $transfer;
+        $event['gateways'] = $gateways;
     }
 
     public function onTwigSiteVariables(): void

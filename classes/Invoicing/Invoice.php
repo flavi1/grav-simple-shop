@@ -76,12 +76,26 @@ class Invoice
      * @param array $invoiceRow Ligne de la table `invoice`.
      * @param array $seller     Informations légales du vendeur.
      */
-    public function __construct(array $order, array $orderItems, array $invoiceRow, array $seller)
+    /**
+     * Document (voir FacturXXmlBuilder::documentDefaults()) et éléments d'affichage propres au PDF :
+     *  - `title` (« FACTURE », « FACTURE D'ACOMPTE », « DEMANDE DE PAIEMENT »…), `number_label` ;
+     *  - `prices_ht` : colonnes HT (client professionnel) au lieu de TTC ;
+     *  - `info_lines` : lignes d'en-tête supplémentaires (échéance, référence client…) ;
+     *  - `deductions` : [['label', 'cents']] affichées sous le total (acomptes déjà facturés) ;
+     *  - `footer` : textes de bas de page (conditions, moyens de paiement, IBAN, mentions) ;
+     *  - `stamp` : mention en travers (« ACQUITTÉE le … ») ; `watermark` : « APERÇU » (brouillon, sans valeur) ;
+     *  - `no_xml` : PDF simple, sans Factur-X (demande de paiement, aperçu) ;
+     *  - `amounts` : montants déjà calculés (lignes figées d'un document), sinon ceux de la commande.
+     */
+    private array $doc;
+
+    public function __construct(array $order, array $orderItems, array $invoiceRow, array $seller, array $doc = [])
     {
         $this->order = $order;
         $this->orderItems = $orderItems;
         $this->invoiceRow = $invoiceRow;
         $this->seller = $seller;
+        $this->doc = $doc;
     }
 
     /**
@@ -91,16 +105,30 @@ class Invoice
      */
     public function build(): string
     {
+        return $this->buildParts()['pdf'];
+    }
+
+    /**
+     * PDF Factur-X et son XML (le XML est conservé à l'émission : la copie « acquittée » embarque exactement le même,
+     * voir {@see self::withStoredXml()}).
+     *
+     * @return array{pdf: string, xml: ?string}
+     */
+    public function buildParts(): array
+    {
         $computed = $this->computeLines();
 
         $basePdf = $this->buildBasePdf($computed['amounts'], $computed['totals']);
+        if (!empty($this->doc['no_xml'])) {
+            return ['pdf' => $basePdf, 'xml' => null];
+        }
         if (!$computed['totals']['en16931']) {
             // Plusieurs taxes sur une même ligne (taxes cumulées, hors TVA française) : non exprimable en EN 16931.
             InvoiceLogger::warning('Facture ' . ($this->invoiceRow['invoice_number'] ?? '?') . ' : plusieurs taxes sur une ligne, PDF sans XML Factur-X.');
 
-            return $basePdf;
+            return ['pdf' => $basePdf, 'xml' => null];
         }
-        $xml = (new FacturXXmlBuilder($this->order, $this->invoiceRow, $this->seller, $computed['amounts'], $computed['totals']))->build();
+        $xml = (new FacturXXmlBuilder($this->order, $this->invoiceRow, $this->seller, $computed['amounts'], $computed['totals'], $this->doc))->build();
 
         $validator = new XsdValidator();
         if (!$validator->validate($xml)) {
@@ -114,7 +142,16 @@ class Invoice
 
         $writer = new Writer();
 
-        return $writer->generate($basePdf, $xml);
+        return ['pdf' => $writer->generate($basePdf, $xml), 'xml' => $xml];
+    }
+
+    /** Même facture, autre présentation (ex. copie acquittée) : nouveau PDF visible, XML d'origine embarqué tel quel. */
+    public function withStoredXml(?string $xml): string
+    {
+        $computed = $this->computeLines();
+        $basePdf = $this->buildBasePdf($computed['amounts'], $computed['totals']);
+
+        return $xml !== null && $xml !== '' ? (new Writer())->generate($basePdf, $xml) : $basePdf;
     }
 
     /**
@@ -126,8 +163,12 @@ class Invoice
      */
     private function computeLines(): array
     {
-        $rate = isset($this->invoiceRow['vat_rate']) ? (float) $this->invoiceRow['vat_rate'] : null;
-        $amounts = OrderAmounts::forStoredOrder($this->order, $this->orderItems, $rate);
+        if (isset($this->doc['amounts']) && is_array($this->doc['amounts'])) {
+            $amounts = $this->doc['amounts'];
+        } else {
+            $rate = isset($this->invoiceRow['vat_rate']) ? (float) $this->invoiceRow['vat_rate'] : null;
+            $amounts = OrderAmounts::forStoredOrder($this->order, $this->orderItems, $rate);
+        }
 
         return ['amounts' => $amounts, 'totals' => OrderAmounts::invoiceTotals($amounts)];
     }
@@ -164,6 +205,18 @@ class Invoice
             {
                 $this->fontpath = rtrim($dir, '/') . '/';
             }
+
+            /** Revient sur une page déjà écrite (mention en travers posée après le contenu). */
+            public function gotoPage(int $n): void
+            {
+                $this->page = max(1, min($n, count($this->pages)));
+            }
+
+            /** Page courante (restaurée après la mention). */
+            public function lastPage(): int
+            {
+                return count($this->pages);
+            }
         };
         $pdf->useFontDir(dirname(__DIR__, 2) . '/fonts');
         $pdf->AddFont('LiberationSans', '', 'LiberationSans-Regular.php');
@@ -196,13 +249,23 @@ class Invoice
 
         $pdf->Ln(6);
 
+        $d = $this->doc;
+        $issue = isset($d['issue_date']) && preg_match('/^\d{8}$/', (string) $d['issue_date'])
+            ? substr((string) $d['issue_date'], 6, 2) . '/' . substr((string) $d['issue_date'], 4, 2) . '/' . substr((string) $d['issue_date'], 0, 4)
+            : date('d/m/Y', strtotime((string) ($this->order['created_at'] ?? 'now')) ?: time());
+        $ht = !empty($d['prices_ht']);
+
         // Titre + numéro + date + référence commande.
         $pdf->SetFont('LiberationSans', 'B', 16);
-        $pdf->Cell(0, 10, $this->t('FACTURE ' . (string) ($this->invoiceRow['invoice_number'] ?? '')), 0, 1, 'R');
+        $pdf->Cell(0, 10, $this->t(trim(((string) ($d['title'] ?? 'FACTURE')) . ' ' . (string) ($this->invoiceRow['invoice_number'] ?? ''))), 0, 1, 'R');
         $pdf->SetFont('LiberationSans', '', 10);
-        $createdAt = (string) ($this->order['created_at'] ?? 'now');
-        $pdf->Cell(0, 5, $this->t('Date : ' . date('d/m/Y', strtotime($createdAt) ?: time())), 0, 1, 'R');
+        $pdf->Cell(0, 5, $this->t('Date : ' . $issue), 0, 1, 'R');
         $pdf->Cell(0, 5, $this->t('Commande : ' . (string) ($this->order['order_reference'] ?? '')), 0, 1, 'R');
+        foreach ((array) ($d['info_lines'] ?? []) as $info) {
+            if (trim((string) $info) !== '') {
+                $pdf->Cell(0, 5, $this->t((string) $info), 0, 1, 'R');
+            }
+        }
 
         $pdf->Ln(6);
 
@@ -211,14 +274,28 @@ class Invoice
         $pdf->Cell(0, 6, $this->t('Facturé à :'), 0, 1);
         $pdf->SetFont('LiberationSans', '', 10);
 
-        $billingName = (string) ($billing['name'] ?? trim(((string) ($customer['firstname'] ?? '')) . ' ' . ((string) ($customer['lastname'] ?? ''))));
-        $addressLines = [
-            $billingName,
-            (string) ($billing['street'] ?? ($customer['street'] ?? '')),
-            (string) ($billing['address-complement'] ?? ($customer['address-complement'] ?? '')),
-            trim(((string) ($billing['postal-code'] ?? ($customer['postal-code'] ?? ''))) . ' ' . ((string) ($billing['city'] ?? ($customer['city'] ?? '')))),
-            (string) ($customer['country'] ?? ''),
-        ];
+        if (isset($d['buyer']) && is_array($d['buyer'])) {
+            $by = $d['buyer'];
+            $addressLines = [
+                (string) ($by['name'] ?? ''),
+                (string) ($by['contact'] ?? ''),
+                (string) ($by['street'] ?? ''),
+                (string) ($by['complement'] ?? ''),
+                trim(((string) ($by['postal_code'] ?? '')) . ' ' . ((string) ($by['city'] ?? ''))),
+                (string) ($by['country'] ?? '') !== 'FR' ? (string) ($by['country'] ?? '') : '',
+                trim((string) ($by['siren'] ?? '')) !== '' ? 'SIREN : ' . $by['siren'] : '',
+                trim((string) ($by['vat'] ?? '')) !== '' ? 'TVA intracommunautaire : ' . $by['vat'] : '',
+            ];
+        } else {
+            $billingName = (string) ($billing['name'] ?? trim(((string) ($customer['firstname'] ?? '')) . ' ' . ((string) ($customer['lastname'] ?? ''))));
+            $addressLines = [
+                $billingName,
+                (string) ($billing['street'] ?? ($customer['street'] ?? '')),
+                (string) ($billing['address-complement'] ?? ($customer['address-complement'] ?? '')),
+                trim(((string) ($billing['postal-code'] ?? ($customer['postal-code'] ?? ''))) . ' ' . ((string) ($billing['city'] ?? ($customer['city'] ?? '')))),
+                (string) ($customer['country'] ?? ''),
+            ];
+        }
         foreach ($addressLines as $line) {
             if (trim($line) !== '') {
                 $pdf->Cell(0, 5, $this->t($line), 0, 1);
@@ -227,29 +304,38 @@ class Invoice
 
         $pdf->Ln(8);
 
-        // Tableau des lignes.
+        // Tableau des lignes : TTC (particulier) ou HT avec taux (professionnel).
         $pdf->SetFont('LiberationSans', 'B', 10);
         $pdf->SetFillColor(230, 230, 230);
-        $pdf->Cell(90, 7, $this->t('Désignation'), 1, 0, 'L', true);
-        $pdf->Cell(20, 7, $this->t('Qté'), 1, 0, 'C', true);
-        $pdf->Cell(35, 7, $this->t('PU TTC'), 1, 0, 'R', true);
-        $pdf->Cell(35, 7, $this->t('Total TTC'), 1, 1, 'R', true);
+        $pdf->Cell($ht ? 80 : 90, 7, $this->t('Désignation'), 1, 0, 'L', true);
+        $pdf->Cell($ht ? 15 : 20, 7, $this->t('Qté'), 1, 0, 'C', true);
+        $pdf->Cell($ht ? 30 : 35, 7, $this->t($ht ? 'PU HT' : 'PU TTC'), 1, 0, 'R', true);
+        if ($ht) {
+            $pdf->Cell(20, 7, $this->t('TVA'), 1, 0, 'R', true);
+        }
+        $pdf->Cell($ht ? 35 : 35, 7, $this->t($ht ? 'Total HT' : 'Total TTC'), 1, 1, 'R', true);
 
         $pdf->SetFont('LiberationSans', '', 10);
         foreach ($amounts['lines'] as $line) {
             // Désignation sur plusieurs lignes si besoin (un libellé long débordait sur la colonne Qté).
-            $wrapped = $this->wrap($pdf, $this->t($line['title']), 88);
+            $wrapped = $this->wrap($pdf, $this->t($line['title']), $ht ? 78 : 88);
             $h = 7 * max(1, count($wrapped));
             if ($pdf->GetY() + $h > $pdf->GetPageHeight() - 25) {
                 $pdf->AddPage();
             }
             $x = $pdf->GetX();
             $y = $pdf->GetY();
-            $pdf->MultiCell(90, 7, implode("\n", $wrapped), 1, 'L');
-            $pdf->SetXY($x + 90, $y);
-            $pdf->Cell(20, $h, (string) $line['quantity'], 1, 0, 'C');
-            $pdf->Cell(35, $h, $fmt($line['unit_ttc_cents']) . $cur, 1, 0, 'R');
-            $pdf->Cell(35, $h, $fmt($line['line_ttc_cents']) . $cur, 1, 1, 'R');
+            $pdf->MultiCell($ht ? 80 : 90, 7, implode("\n", $wrapped), 1, 'L');
+            $pdf->SetXY($x + ($ht ? 80 : 90), $y);
+            $pdf->Cell($ht ? 15 : 20, $h, (string) $line['quantity'], 1, 0, 'C');
+            if ($ht) {
+                $pdf->Cell(30, $h, $fmt($line['unit_ht_cents']) . $cur, 1, 0, 'R');
+                $pdf->Cell(20, $h, $this->t(rtrim(rtrim(number_format(((int) $line['tax_bp']) / 100, 2, ',', ''), '0'), ',') . ' %'), 1, 0, 'R');
+                $pdf->Cell(35, $h, $fmt($line['line_ht_cents']) . $cur, 1, 1, 'R');
+            } else {
+                $pdf->Cell(35, $h, $fmt($line['unit_ttc_cents']) . $cur, 1, 0, 'R');
+                $pdf->Cell(35, $h, $fmt($line['line_ttc_cents']) . $cur, 1, 1, 'R');
+            }
         }
 
         $pdf->Ln(4);
@@ -270,15 +356,53 @@ class Invoice
         $pdf->Cell(145, 8, $this->t('Total TTC'), 0, 0, 'R');
         $pdf->Cell(35, 8, $fmt($totals['due_cents']) . $cur, 0, 1, 'R');
 
-        $pdf->Ln(10);
+        // Acomptes déjà facturés et réglés, puis reste à payer (factures à régler seulement).
+        $prepaid = isset($d['prepaid_cents']) ? (int) $d['prepaid_cents'] : null;
+        if ($prepaid !== null) {
+            $pdf->SetFont('LiberationSans', '', 10);
+            foreach ((array) ($d['deductions'] ?? []) as $ded) {
+                $pdf->Cell(145, 6, $this->t((string) $ded['label']), 0, 0, 'R');
+                $pdf->Cell(35, 6, '-' . $fmt((int) $ded['cents']) . $cur, 0, 1, 'R');
+            }
+            $pdf->SetFont('LiberationSans', 'B', 11);
+            $pdf->Cell(145, 8, $this->t('Net à payer'), 0, 0, 'R');
+            $pdf->Cell(35, 8, $fmt($totals['grand_total_cents'] - $prepaid + $totals['rounding_cents']) . $cur, 0, 1, 'R');
+        }
+
+        $pdf->Ln(8);
         $pdf->SetFont('LiberationSans', '', 8);
-        $pdf->MultiCell(0, 4, $this->t('Facture électronique au format Factur-X (norme EN 16931). Client particulier (B2C). Facture payée le ' . date('d/m/Y', strtotime($createdAt) ?: time()) . ' (à la commande).'));
+        if (isset($d['footer'])) {
+            foreach ((array) $d['footer'] as $text) {
+                if (trim((string) $text) !== '') {
+                    $pdf->MultiCell(0, 4, $this->t((string) $text));
+                }
+            }
+        } else {
+            $pdf->MultiCell(0, 4, $this->t('Facture électronique au format Factur-X (norme EN 16931). Client particulier (B2C). Facture payée le ' . $issue . ' (à la commande).'));
+            foreach ((array) ($this->seller['notes'] ?? []) as $note) {
+                $pdf->MultiCell(0, 4, $this->t((string) $note));
+            }
+        }
         // Mentions d'exonération (ex. « TVA non applicable, art. 261-4-4°-a du CGI », franchise en base).
         foreach ($totals['mentions'] ?? [] as $mention) {
             $pdf->MultiCell(0, 4, $this->t((string) $mention));
         }
-        foreach ((array) ($this->seller['notes'] ?? []) as $note) {
-            $pdf->MultiCell(0, 4, $this->t((string) $note));
+
+        // Mention en travers : copie acquittée, ou aperçu sans valeur.
+        foreach (['stamp' => [0, 128, 0], 'watermark' => [200, 200, 200]] as $key => $rgb) {
+            if (trim((string) ($d[$key] ?? '')) === '') {
+                continue;
+            }
+            $last = $pdf->lastPage();
+            $pdf->SetAutoPageBreak(false);
+            $pdf->gotoPage(1);
+            $pdf->SetFont('LiberationSans', 'B', $key === 'stamp' ? 20 : 48);
+            $pdf->SetTextColor($rgb[0], $rgb[1], $rgb[2]);
+            $pdf->SetXY(15, $key === 'stamp' ? 112 : 150);
+            $pdf->Cell(0, 14, $this->t((string) $d[$key]), $key === 'stamp' ? 1 : 0, 1, 'C');
+            $pdf->SetTextColor(0, 0, 0);
+            $pdf->gotoPage($last);
+            $pdf->SetAutoPageBreak(true, 20);
         }
 
         return $pdf->Output('S');

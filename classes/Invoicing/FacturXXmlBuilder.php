@@ -56,13 +56,49 @@ class FacturXXmlBuilder
     /** Totaux de facture (voir OrderAmounts::invoiceTotals()). */
     private array $totals;
 
-    public function __construct(array $order, array $invoiceRow, array $seller, array $amounts, array $totals)
+    /**
+     * Données propres au document (facture manuelle, acompte, facture à régler…), voir {@see self::documentDefaults()} ;
+     * vide = facture d'une commande de la boutique, payée à la commande (comportement historique).
+     */
+    private array $doc;
+
+    public function __construct(array $order, array $invoiceRow, array $seller, array $amounts, array $totals, array $doc = [])
     {
         $this->order = $order;
         $this->invoiceRow = $invoiceRow;
         $this->seller = $seller;
         $this->amounts = $amounts;
         $this->totals = $totals;
+        $this->doc = $doc;
+    }
+
+    /**
+     * Valeurs par défaut d'un document :
+     *  - `type_code` : 380 facture, 386 facture d'acompte, 381 avoir ;
+     *  - `issue_date`, `due_date` : AAAAMMJJ ; `payment_terms` : conditions en clair (BT-20) ;
+     *  - `prepaid_cents` : déjà payé (BT-113) ; reste dû (BT-115) = total − déjà payé + arrondi ;
+     *  - `payment_means` : [['code' => '30' (virement) | '48' (carte) | '58' (virement SEPA)…, 'iban', 'bic', 'holder']] ;
+     *  - `billing_mode` : cadre de facturation BT-23 ; `notes` : mentions BT-22 (AAB, PMD, PMT) ; `free_notes` : autres notes ;
+     *  - `buyer` : acheteur (`name`, `street`, `complement`, `postal_code`, `city`, `country`, `siren`, `vat`, `email`) ;
+     *  - `referenced` : facture précédente (BG-3 : `number`, `date` AAAAMMJJ), ex. facture d'origine d'un avoir.
+     */
+    private function documentDefaults(): array
+    {
+        $issue = date('Ymd', strtotime((string) ($this->order['created_at'] ?? 'now')) ?: time());
+
+        return $this->doc + [
+            'type_code'     => '380',
+            'issue_date'    => $issue,
+            'due_date'      => $issue,
+            'payment_terms' => '',
+            'prepaid_cents' => $this->totals['due_cents'],
+            'payment_means' => [],
+            'billing_mode'  => (string) ($this->seller['billing_mode'] ?? 'B2'),
+            'notes'         => (array) ($this->seller['notes'] ?? []),
+            'free_notes'    => [],
+            'buyer'         => null,
+            'referenced'    => null,
+        ];
     }
 
     /**
@@ -77,7 +113,8 @@ class FacturXXmlBuilder
         $currency = $this->esc((string) $this->amounts['currency']);
         $t = $this->totals;
 
-        $issueDate = date('Ymd', strtotime((string) ($this->order['created_at'] ?? 'now')) ?: time());
+        $d = $this->documentDefaults();
+        $issueDate = (string) $d['issue_date'];
 
         $linesXml = '';
         foreach ($this->amounts['lines'] as $i => $line) {
@@ -100,7 +137,21 @@ class FacturXXmlBuilder
             self::siren((string) ($this->seller['siret'] ?? '')) !== '' ? ['0225', self::siren((string) $this->seller['siret'])] : null
         );
 
-        $buyerXml = $this->buildTradePartyXml(
+        $buyer = is_array($d['buyer']) ? $d['buyer'] : null;
+        $buyerXml = $buyer !== null ? $this->buildTradePartyXml(
+            'BuyerTradeParty',
+            (string) ($buyer['name'] ?? ''),
+            (string) ($buyer['street'] ?? ''),
+            (string) ($buyer['complement'] ?? ''),
+            (string) ($buyer['postal_code'] ?? ''),
+            (string) ($buyer['city'] ?? ''),
+            (string) (($buyer['country'] ?? '') ?: 'FR'),
+            self::siren((string) ($buyer['siren'] ?? '')),
+            (string) ($buyer['vat'] ?? ''),
+            // Adresse électronique de l'acheteur (BT-49) : SIREN (schéma 0225) pour une entreprise, sinon son e-mail.
+            self::siren((string) ($buyer['siren'] ?? '')) !== '' ? ['0225', self::siren((string) $buyer['siren'])]
+                : (trim((string) ($buyer['email'] ?? '')) !== '' ? ['EM', trim((string) $buyer['email'])] : null)
+        ) : $this->buildTradePartyXml(
             'BuyerTradeParty',
             $billingName,
             (string) ($billing['street'] ?? ($customer['street'] ?? '')),
@@ -114,10 +165,12 @@ class FacturXXmlBuilder
             trim((string) ($customer['email'] ?? '')) !== '' ? ['EM', trim((string) $customer['email'])] : null
         );
 
-        // Livré à (BG-13) : point de retrait choisi, sinon l'adresse du client.
+        // Livré à (BG-13) : point de retrait choisi, sinon l'adresse du client (pour un document saisi : l'acheteur).
         $shipping = json_decode((string) ($this->order['shipping_data'] ?? '{}'), true) ?: [];
         $point = is_array($shipping['pickup_point'] ?? null) ? $shipping['pickup_point'] : null;
-        $shipToXml = $this->buildTradePartyXml(
+        $shipToXml = $buyer !== null ? $this->buildTradePartyXml('ShipToTradeParty', (string) ($buyer['name'] ?? ''), (string) ($buyer['street'] ?? ''),
+            (string) ($buyer['complement'] ?? ''), (string) ($buyer['postal_code'] ?? ''), (string) ($buyer['city'] ?? ''),
+            (string) (($buyer['country'] ?? '') ?: 'FR'), '', '') : $this->buildTradePartyXml(
             'ShipToTradeParty',
             $point ? (string) ($point['name'] ?? $billingName) : trim(((string) ($customer['firstname'] ?? '')) . ' ' . ((string) ($customer['lastname'] ?? ''))),
             (string) ($point['street'] ?? ($customer['street'] ?? '')),
@@ -131,14 +184,19 @@ class FacturXXmlBuilder
 
         // Mentions (BT-22) : escompte, pénalités de retard, frais de recouvrement (règle BR-FR-05).
         $notesXml = '';
-        foreach ((array) ($this->seller['notes'] ?? []) as $code => $text) {
+        foreach ((array) $d['free_notes'] as $text) {
+            if (trim((string) $text) !== '') {
+                $notesXml .= '<ram:IncludedNote><ram:Content>' . $this->esc(trim((string) $text)) . '</ram:Content></ram:IncludedNote>';
+            }
+        }
+        foreach ((array) $d['notes'] as $code => $text) {
             if (in_array($code, ['AAB', 'PMD', 'PMT'], true) && trim((string) $text) !== '') {
                 $notesXml .= '<ram:IncludedNote><ram:Content>' . $this->esc(trim((string) $text)) . '</ram:Content>'
                     . '<ram:SubjectCode>' . $code . '</ram:SubjectCode></ram:IncludedNote>';
             }
         }
         // Cadre de facturation (BT-23, règle BR-FR-08) : B2 = biens, facture déjà payée.
-        $billingMode = (string) ($this->seller['billing_mode'] ?? 'B2');
+        $billingMode = (string) $d['billing_mode'];
         $billingMode = preg_match('/^[BSM][1-9]$/', $billingMode) ? $billingMode : 'B2';
 
         $xml = '<?xml version="1.0" encoding="UTF-8"?>' . "\n";
@@ -157,7 +215,7 @@ class FacturXXmlBuilder
 
         $xml .= '<rsm:ExchangedDocument>'
             . '<ram:ID>' . $this->esc((string) ($this->invoiceRow['invoice_number'] ?? '')) . '</ram:ID>'
-            . '<ram:TypeCode>380</ram:TypeCode>'
+            . '<ram:TypeCode>' . (in_array((string) $d['type_code'], ['380', '381', '384', '386', '389'], true) ? (string) $d['type_code'] : '380') . '</ram:TypeCode>'
             . '<ram:IssueDateTime><udt:DateTimeString format="102">' . $issueDate . '</udt:DateTimeString></ram:IssueDateTime>'
             . $notesXml
             . '</rsm:ExchangedDocument>';
@@ -170,6 +228,22 @@ class FacturXXmlBuilder
 
         $xml .= '<ram:ApplicableHeaderTradeSettlement>';
         $xml .= '<ram:InvoiceCurrencyCode>' . $currency . '</ram:InvoiceCurrencyCode>';
+        // Moyens de paiement (BG-16) : virement avec IBAN (BT-84) et BIC (BT-86), carte…
+        foreach ((array) $d['payment_means'] as $means) {
+            $code = preg_match('/^\d{1,3}$/', (string) ($means['code'] ?? '')) ? (string) $means['code'] : '1';
+            $iban = strtoupper(preg_replace('/\s+/', '', (string) ($means['iban'] ?? '')));
+            $bic = strtoupper(preg_replace('/\s+/', '', (string) ($means['bic'] ?? '')));
+            $xml .= '<ram:SpecifiedTradeSettlementPaymentMeans><ram:TypeCode>' . $code . '</ram:TypeCode>';
+            if ($iban !== '') {
+                $xml .= '<ram:PayeePartyCreditorFinancialAccount><ram:IBANID>' . $this->esc($iban) . '</ram:IBANID>'
+                    . (trim((string) ($means['holder'] ?? '')) !== '' ? '<ram:AccountName>' . $this->esc(trim((string) $means['holder'])) . '</ram:AccountName>' : '')
+                    . '</ram:PayeePartyCreditorFinancialAccount>';
+                if ($bic !== '') {
+                    $xml .= '<ram:PayeeSpecifiedCreditorFinancialInstitution><ram:BICID>' . $this->esc($bic) . '</ram:BICID></ram:PayeeSpecifiedCreditorFinancialInstitution>';
+                }
+            }
+            $xml .= '</ram:SpecifiedTradeSettlementPaymentMeans>';
+        }
         foreach ($t['taxes'] as $tax) {
             $xml .= '<ram:ApplicableTradeTax>'
                 . '<ram:CalculatedAmount>' . self::amount($tax['tax_cents']) . '</ram:CalculatedAmount>'
@@ -181,18 +255,29 @@ class FacturXXmlBuilder
                 . '<ram:RateApplicablePercent>' . self::percent($tax['bp']) . '</ram:RateApplicablePercent>'
                 . '</ram:ApplicableTradeTax>';
         }
-        // Échéance (BT-9) = date du paiement : commande payée en ligne à sa création (règle BR-FR-CO-09 pour B2/S2/M2).
-        $xml .= '<ram:SpecifiedTradePaymentTerms><ram:DueDateDateTime><udt:DateTimeString format="102">' . $issueDate
-            . '</udt:DateTimeString></ram:DueDateDateTime></ram:SpecifiedTradePaymentTerms>';
+        // Conditions (BT-20) et échéance (BT-9). Commande payée en ligne : échéance = date du paiement (BR-FR-CO-09, B2/S2/M2).
+        $dueDate = preg_match('/^\d{8}$/', (string) $d['due_date']) ? (string) $d['due_date'] : $issueDate;
+        $xml .= '<ram:SpecifiedTradePaymentTerms>'
+            . (trim((string) $d['payment_terms']) !== '' ? '<ram:Description>' . $this->esc(trim((string) $d['payment_terms'])) . '</ram:Description>' : '')
+            . '<ram:DueDateDateTime><udt:DateTimeString format="102">' . $dueDate . '</udt:DateTimeString></ram:DueDateDateTime></ram:SpecifiedTradePaymentTerms>';
+        $prepaid = (int) $d['prepaid_cents'];
+        $payable = $t['grand_total_cents'] - $prepaid + $t['rounding_cents'];
         $xml .= '<ram:SpecifiedTradeSettlementHeaderMonetarySummation>'
             . '<ram:LineTotalAmount>' . self::amount($t['line_total_ht_cents']) . '</ram:LineTotalAmount>'
             . '<ram:TaxBasisTotalAmount>' . self::amount($t['line_total_ht_cents']) . '</ram:TaxBasisTotalAmount>'
             . '<ram:TaxTotalAmount currencyID="' . $currency . '">' . self::amount($t['tax_total_cents']) . '</ram:TaxTotalAmount>'
             . ($t['rounding_cents'] !== 0 ? '<ram:RoundingAmount>' . self::amount($t['rounding_cents']) . '</ram:RoundingAmount>' : '')
             . '<ram:GrandTotalAmount>' . self::amount($t['grand_total_cents']) . '</ram:GrandTotalAmount>'
-            . '<ram:TotalPrepaidAmount>' . self::amount($t['due_cents']) . '</ram:TotalPrepaidAmount>'
-            . '<ram:DuePayableAmount>0.00</ram:DuePayableAmount>'
+            . ($prepaid !== 0 ? '<ram:TotalPrepaidAmount>' . self::amount($prepaid) . '</ram:TotalPrepaidAmount>' : '')
+            . '<ram:DuePayableAmount>' . self::amount($payable) . '</ram:DuePayableAmount>'
             . '</ram:SpecifiedTradeSettlementHeaderMonetarySummation>';
+        // Facture précédente (BG-3), ex. facture d'origine d'un avoir.
+        if (is_array($d['referenced']) && trim((string) ($d['referenced']['number'] ?? '')) !== '') {
+            $xml .= '<ram:InvoiceReferencedDocument><ram:IssuerAssignedID>' . $this->esc((string) $d['referenced']['number']) . '</ram:IssuerAssignedID>'
+                . (preg_match('/^\d{8}$/', (string) ($d['referenced']['date'] ?? '')) ? '<ram:FormattedIssueDateTime><qdt:DateTimeString format="102">'
+                    . $d['referenced']['date'] . '</qdt:DateTimeString></ram:FormattedIssueDateTime>' : '')
+                . '</ram:InvoiceReferencedDocument>';
+        }
         $xml .= '</ram:ApplicableHeaderTradeSettlement>';
 
         $xml .= '</rsm:SupplyChainTradeTransaction>';

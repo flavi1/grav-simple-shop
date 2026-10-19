@@ -84,7 +84,10 @@ class ShopApiController extends AbstractApiController
             throw new NotFoundException("Commande introuvable : {$reference}.");
         }
 
-        $invoice = InvoiceManager::getOrCreateInvoice($reference);
+        // Facture d'une commande de la boutique : créée à la première consultation (comportement historique). Une commande
+        // manuelle a ses documents, émis explicitement (DocumentManager).
+        $manual = ($order['source'] ?? 'shop') === 'manual';
+        $invoice = $manual ? [] : InvoiceManager::getOrCreateInvoice($reference);
 
         return ApiResponse::create($this->orderSummary($order) + [
             'created_at'      => $order['created_at'],

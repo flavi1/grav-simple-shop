@@ -248,6 +248,7 @@ class InventoryManager
     private const ADDED_COLUMNS = [
         'order' => [
             'source'             => "TEXT DEFAULT 'shop'",   // shop (boutique) | manual (saisie dans l'administration)
+            'payload'            => 'TEXT',                  // commande manuelle : client, conditions, moyens, commentaire (JSON)
             'currency'           => 'TEXT',
             'total_cents'        => 'INTEGER',
             'shipping_ht_cents'  => 'INTEGER',

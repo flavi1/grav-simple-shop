@@ -111,6 +111,23 @@ class OrderMailer
     }
 
     /**
+     * E-mail à partir d'un gabarit (documents, reçus de paiement) : même expéditeur et même gestion d'erreurs que les
+     * e-mails de commande. Non bloquant : faux en cas d'échec (journalisé).
+     */
+    public function sendTemplate(string $template, array $vars, string $subject, string $toEmail, ?string $attachmentPath = null): bool
+    {
+        $siteName = $this->siteName();
+
+        return $this->sendTemplatedEmail($template, $vars + ['site_name' => $siteName], '[' . $siteName . '] ' . $subject, $toEmail, $siteName, $attachmentPath);
+    }
+
+    /** Adresse de notification du vendeur (null si aucune). */
+    public function sellerEmail(): ?string
+    {
+        return $this->resolveSellerEmail();
+    }
+
+    /**
      * Prévient le client d'un changement de statut de sa commande (ex.
      * « Expédiée »). Appelé par le listener de l'événement
      * `onSimpleShopOrderStatusChanged` (voir SimpleShopPlugin::onOrderStatusChanged()),

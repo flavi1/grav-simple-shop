@@ -253,8 +253,7 @@ class CartController extends AbstractController
             return $this->redirect($cartUrl, 303);
         }
 
-        $gateways = [];
-        $this->grav->fireEvent('onSimpleShopRegisterGateways', new Event(['gateways' => &$gateways]));
+        $gateways = \Grav\Plugin\SimpleShop\Gateways\GatewayRegistry::forShop();
         $gateway = $gateways[$order->selected_gateway] ?? null;
 
         if (!$gateway instanceof RedirectPaymentGatewayInterface) {
@@ -723,8 +722,8 @@ class CartController extends AbstractController
 		}
 
 		// Récupération des passerelles via l'infrastructure Event de Grav
-		$gateways = [];
-		$this->grav->fireEvent('onSimpleShopRegisterGateways', new Event(['gateways' => &$gateways]));
+		// Passerelles de la boutique (payments.methods.shop ; vide = toutes celles du tunnel d'achat).
+		$gateways = \Grav\Plugin\SimpleShop\Gateways\GatewayRegistry::forShop();
 
 		// Fallback d'interface si aucune passerelle n'est enregistrée
 		if (empty($gateways)) {

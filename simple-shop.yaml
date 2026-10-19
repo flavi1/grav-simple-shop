@@ -1,6 +1,25 @@
 # Désactivé par défaut : le dossier des plugins est partagé par tous les sites ; chaque site l'active dans
 # sa configuration (user/config/plugins/simple-shop.yaml : enabled: true, ou Admin2 > Plugins).
 enabled: false
+# Boutique publique (catalogue, panier, tunnel d'achat). false = site sans boutique : seules restent les pages de paiement
+# des documents envoyés depuis l'administration (factures manuelles, demandes de paiement : route `document`).
+shop:
+  public: true
+# Moyens de paiement proposés au client, par origine de la commande : identifiants de passerelles (stripe, test_gateway,
+# bank_transfer…). Liste vide = toutes les passerelles disponibles pour cet usage. Une passerelle n'apparaît que si son plugin
+# est activé (ex. simple-shop-payment-test). Le client choisit s'il y en a plusieurs.
+payments:
+  methods:
+    shop: []              # tunnel d'achat de la boutique (ex. [stripe, test_gateway])
+    manual: []            # factures et demandes de paiement saisies dans l'administration (ex. [bank_transfer, stripe, test_gateway])
+  # Virement bancaire (passerelle hors ligne `bank_transfer` : le client voit l'IBAN, le vendeur enregistre le paiement
+  # à réception). Coordonnées reprises sur les factures à régler.
+  bank_transfer:
+    enabled: false
+    holder: ''
+    iban: ''
+    bic: ''
+    instructions: 'Merci d’indiquer le numéro du document en référence du virement.'
 # Anti-spam des codes de connexion (OTP), vérifié côté serveur
 otp:
   resend_delay: 60        # secondes entre deux envois pour une même session
@@ -17,6 +36,7 @@ routes:
   account: '/mon-compte'
   logout: '/mon-compte/deconnexion'
   newsletter_unsubscribe: '/newsletter/unsubscribe'
+  document: '/document'     # page de paiement d'un document : /document/<jeton> (jeton aléatoire, sans compte client)
 
 # Titres et descriptions des pages de la boutique (onglet du navigateur, <meta name="description">). Valeurs par défaut :
 # classes/Config/PageMeta.php ; à remplacer page par page si besoin. Ces pages ne sont jamais indexées (noindex).
@@ -111,6 +131,18 @@ seller:
   vat_number: ''
 # Mentions des factures électroniques (règles françaises BR-FR, réforme 2026-2027).
 invoicing:
+  # Factures et demandes de paiement saisies dans l'administration (Admin2 > Ventes > Factures). Désactivé par défaut.
+  manual: false
+  # Nature des opérations facturées à la main (mention obligatoire de la réforme ; cadre de facturation BT-23) :
+  # services (prestations de services), goods (livraison de biens), mixed (les deux).
+  operation_nature: services
+  # Conditions de paiement des documents à régler (valeurs par défaut : auto-entrepreneur, à faire valider).
+  payment_terms_days: 30  # échéance : nombre de jours après la date d'émission (délai légal par défaut entre professionnels)
+  late_penalty: "Pénalités de retard : trois fois le taux d'intérêt légal en vigueur."
+  recovery_fee: 40        # indemnité forfaitaire pour frais de recouvrement (euros, clients professionnels uniquement)
+  discount: "Pas d'escompte pour paiement anticipé."
+  vat_on_debits: false    # option pour le paiement de la TVA d'après les débits (mention sur la facture)
+  legal_mention: ''       # ex. « Entrepreneur individuel (EI) », RCS, capital… (sous le nom du vendeur)
   # Cadre de facturation (BT-23) : B2 = livraison de biens, facture déjà payée (vente en ligne payée à la commande).
   # S2 = prestations de services déjà payées, M2 = mixte déjà payée.
   billing_mode: B2

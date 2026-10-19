@@ -210,7 +210,7 @@ namespace SimpleShopTest {
         $grav['simple_shop_customer'] = new \Grav\Plugin\SimpleShop\Services\CustomerManager($grav['session'], $grav);
         $grav->listeners['onSimpleShopRegisterGateways'][] = function ($event) {
             $gateways = $event['gateways'] ?? [];
-            $g = new \Grav\Plugin\SimpleShopPaymentTest\Gateways\PaymentGatewayTest();
+            $g = new \Grav\Plugin\SimpleShopPaymentTest\Gateways\DocumentGatewayTest();
             $gateways[$g->getId()] = $g;
             $event['gateways'] = $gateways;
         };

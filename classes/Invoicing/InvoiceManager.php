@@ -91,6 +91,7 @@ class InvoiceManager
         'refused'       => 'Refusée / rejetée',
         'collected'     => 'Encaissée',
         'disabled'      => 'Désactivée (avant obligation e-reporting B2C)',
+        'not_applicable' => 'Sans objet (pas une facture)',
     ];
 
     /**
@@ -304,8 +305,17 @@ class InvoiceManager
      */
     private static function generateInvoiceNumber(\PDO $db): string
     {
+        return self::nextNumber($db, self::INVOICE_NUMBER_PREFIX);
+    }
+
+    /**
+     * Prochain numéro d'une suite (`FACT` : factures, acomptes et avoirs ; `DP` : demandes de paiement), séquentiel par
+     * année civile : `{préfixe}-{année}-{compteur sur 5 chiffres}`.
+     */
+    public static function nextNumber(\PDO $db, string $prefix): string
+    {
         $year = date('Y');
-        $prefixLike = self::INVOICE_NUMBER_PREFIX . '-' . $year . '-%';
+        $prefixLike = $prefix . '-' . $year . '-%';
 
         $stmt = $db->prepare('
             SELECT invoice_number FROM invoice
@@ -324,7 +334,7 @@ class InvoiceManager
             $nextCounter = $lastCounter + 1;
         }
 
-        return sprintf('%s-%s-%05d', self::INVOICE_NUMBER_PREFIX, $year, $nextCounter);
+        return sprintf('%s-%s-%05d', $prefix, $year, $nextCounter);
     }
 
     /**
