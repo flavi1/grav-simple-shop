@@ -88,6 +88,21 @@ class CustomerManager
     }
 
     /**
+     * Commande en session (`shop_order`), créée si absente : écrire `shop_order->x` sans elle échoue
+     * (« Indirect modification of overloaded property »), par exemple juste après un renouvellement de session.
+     */
+    private function order(): \stdClass
+    {
+        $order = $this->session->shop_order ?? null;
+        if (!$order instanceof \stdClass) {
+            $order = new \stdClass();
+            $this->session->shop_order = $order;
+        }
+
+        return $order;
+    }
+
+    /**
      * Récupère les données client en session.
      */
     public function getCustomerData(): array
@@ -103,7 +118,7 @@ class CustomerManager
     public function setCustomerData(array $data): void
     {
         $current = AddressFields::normalize((array) ($this->session->shop_order->customer ?? []));
-        $this->session->shop_order->customer = array_merge($current, AddressFields::normalize($data));
+        $this->order()->customer = array_merge($current, AddressFields::normalize($data));
     }
 
     /**
@@ -328,7 +343,7 @@ class CustomerManager
      */
     public function markOtpSent(): void
     {
-        $this->session->shop_order->email_verification_last_sent = time();
+        $this->order()->email_verification_last_sent = time();
     }
 
     /**
@@ -362,11 +377,11 @@ class CustomerManager
                 $code = (string) mt_rand(100000, 999999);
             }
 
-            $this->session->shop_order->email_verification_code = $code;
-            $this->session->shop_order->email_verification_target = $targetEmail;
-            $this->session->shop_order->email_verified = false;
-            $this->session->shop_order->email_verification_attempts = 0;
-            $this->session->shop_order->email_verification_expires_at = time() + 600; // TTL 10 minutes
+            $this->order()->email_verification_code = $code;
+            $this->order()->email_verification_target = $targetEmail;
+            $this->order()->email_verified = false;
+            $this->order()->email_verification_attempts = 0;
+            $this->order()->email_verification_expires_at = time() + 600; // TTL 10 minutes
 
             return $code;
         }
@@ -387,7 +402,7 @@ class CustomerManager
         }
 
         $attempts = ($this->session->shop_order->email_verification_attempts ?? 0) + 1;
-        $this->session->shop_order->email_verification_attempts = $attempts;
+        $this->order()->email_verification_attempts = $attempts;
 
         if ($attempts > 5) {
             $this->resetEmailVerification();
@@ -397,7 +412,7 @@ class CustomerManager
         $sessionCode = $this->session->shop_order->email_verification_code ?? null;
 
         if ($sessionCode && hash_equals((string) $sessionCode, (string) $inputCode)) {
-            $this->session->shop_order->email_verified = true;
+            $this->order()->email_verified = true;
             $this->regenerateSessionId();
             
             // Nettoyage complet de l'état OTP au succès (Dette #6)
@@ -425,7 +440,7 @@ class CustomerManager
             $this->session->shop_order->email_verification_expires_at,
             $this->session->shop_order->email_verification_attempts
         );
-        $this->session->shop_order->email_verified = false;
+        $this->order()->email_verified = false;
     }
 
     /**
@@ -539,7 +554,7 @@ class CustomerManager
         unset($customerData['persistent_token'], $customerData['updated_at'], $customerData['cart_id']);
 
         $this->setCustomerData($customerData);
-        $this->session->shop_order->email_verified = true;
+        $this->order()->email_verified = true;
         $this->regenerateSessionId();
 
         // Restauration conditionnelle de l'ancien panier (uniquement si le
@@ -730,12 +745,23 @@ class CustomerManager
      * Nouvel identifiant de session (données conservées) à chaque changement d'identité : client identifié (code OTP,
      * cookie « Se souvenir de moi ») ou déconnecté. Empêche la fixation de session (un identifiant imposé avant
      * l'identification ne donne pas accès au compte ensuite).
+     *
+     * ATTENTION (bug du 19/10/2026) : sous Grav 2, `Session::regenerateId()` démarre une session NEUVE et VIDE (l'ancienne
+     * ne garde qu'un pointeur vers la nouvelle). Les données (profil, vérification de l'e-mail, panier, messages) sont donc
+     * recopiées ici. Sans cela, la reconnexion par cookie « Se souvenir de moi » perdait tout à chaque page et
+     * recommençait à la suivante : identification impossible, messages jamais affichés.
      */
     private function regenerateSessionId(): void
     {
         try {
             if (method_exists($this->session, 'regenerateId') && session_status() === PHP_SESSION_ACTIVE && !headers_sent()) {
+                $saved = $_SESSION ?? [];
                 $this->session->regenerateId();
+                foreach ($saved as $key => $value) {
+                    if ($key !== 'session_destroyed' && $key !== 'session_new_id' && !array_key_exists($key, $_SESSION)) {
+                        $_SESSION[$key] = $value;
+                    }
+                }
             }
         } catch (\Throwable $e) {
             $this->grav['log']->warning('[SimpleShop] Renouvellement de session impossible : ' . $e->getMessage());

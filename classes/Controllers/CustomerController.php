@@ -217,23 +217,6 @@ class CustomerController extends AbstractController
      *
      * @return void
      */
-    /**
-     * DIAGNOSTIC TEMPORAIRE (messages perdus après l'échec d'envoi du code, 19/10/2026) : trace dans grav.log la
-     * session vue par la requête (empreinte courte de l'identifiant, cookie reçu, messages publics en attente).
-     * À retirer une fois la cause trouvée.
-     */
-    private function traceSession(string $where): void
-    {
-        $sid = session_id();
-        $name = session_name();
-        $this->log('info', sprintf('[TRACE] %s | %s %s | session %s (statut %d) | cookie « %s » reçu : %s | messages en attente : %d | https : %s',
-            $where, $_SERVER['REQUEST_METHOD'] ?? '?', $_SERVER['REQUEST_URI'] ?? '?',
-            $sid !== '' ? substr(hash('sha256', $sid), 0, 8) : 'aucune', session_status(), $name,
-            isset($_COOKIE[$name]) ? 'oui (' . substr(hash('sha256', (string) $_COOKIE[$name]), 0, 8) . ')' : 'non',
-            count((array) ($this->grav['session']->public_messages ?? [])),
-            (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') ? 'oui' : 'non'));
-    }
-
     private function log(string $level, string $message): void
     {
         $prefix = '[SimpleShop][CustomerController][OTP] ';
@@ -434,7 +417,6 @@ class CustomerController extends AbstractController
      */
     public function identify(): Response
     {
-        $this->traceSession('identify:début');
         $backUrlRaw = (string) $this->post('back_url', FILTER_DEFAULT, '');
         if ($backUrlRaw === '') {
             $backUrlRaw = (string) $this->get('back_url', FILTER_DEFAULT, '');
@@ -833,7 +815,6 @@ class CustomerController extends AbstractController
         if (!$this->sendOtpEmail($email, $code)) {
             $this->addMessage("Le code n'a pas pu vous être envoyé par e-mail (erreur technique). "
                 . "Merci de prévenir l'administrateur du site.", 'error');
-            $this->traceSession('envoi échoué, message posé');
 
             return false;
         }

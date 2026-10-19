@@ -39,11 +39,19 @@ namespace Grav\Common {
         public static function verifyNonce($nonce, string $action): bool { return $nonce === 'nonce-' . $action; }
     }
 
-    #[\AllowDynamicProperties]
+    /**
+     * Comme la session de Grav 2 : données dans $_SESSION (propriétés magiques : `->a->b = …` n'écrit rien si `a`
+     * n'existe pas) ; regenerateId() démarre une session NEUVE et VIDE (comportement réel de Grav 2).
+     */
     class Session
     {
         public function getId(): string { return 'test-session'; }
         public function isStarted(): bool { return true; }
+        public function __get($name) { return $_SESSION[$name] ?? null; }
+        public function __set($name, $value): void { $_SESSION[$name] = $value; }
+        public function __isset($name): bool { return isset($_SESSION[$name]); }
+        public function __unset($name): void { unset($_SESSION[$name]); }
+        public function regenerateId(): self { $_SESSION = []; return $this; }
     }
 }
 
