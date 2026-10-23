@@ -101,7 +101,7 @@ for t in tests/*.php; do YAML=$YAML php -d zend.assertions=1 -d assert.exception
 
 Chaque script affiche `OK`. `tests/checkout-flow.php` (tunnel complet avec doublures de Grav, `tests/support/bootstrap.php`) **doit
 rester vert**. Les autres : `pricing`, `product-types`, `price-basis`, `invoice` (XSD Factur-X officiel), `cart-options`, `taxes`,
-`constraints`, `carriers-pricing`, `local-pickup`, `mode-editor`, `security`, `page-meta`, `migrations` (mise à jour d'une base de
+`constraints`, `carriers-pricing`, `local-pickup`, `mode-editor`, `security`, `page-meta`, `catalog-table`, `migrations` (mise à jour d'une base de
 chaque version publiée), `payments`, `documents`, `session`. Le plugin Colissimo a ses propres tests (variable `SS` = dossier de
 simple-shop).
 
@@ -145,8 +145,9 @@ simple-shop).
   sur un document). `classes/Invoicing/DocumentManager.php` : ventes manuelles (brouillon, émission, acomptes, demande de
   paiement → facture, recherche, PDF/XML, copie acquittée). `Controllers/DocumentController.php` : page publique `/document?t=`.
   `Services/DocumentMailer.php` : e-mails du document et du reçu.
-- `classes/Api/ShopApiController.php` + `admin-next/pages/simple-shop.js` : administration (onglets Commandes, Factures, Transporteurs,
-  Taxes, Adresses bannies).
+- `classes/Api/ShopApiController.php` + `admin-next/pages/simple-shop.js` : administration (onglets Commandes, Factures, Catalogue,
+  Transporteurs, Taxes, Adresses bannies). `classes/Catalog/CatalogTable.php` : tableau d'édition rapide (colonnes = `shop.admin_table`
+  du blueprint du type, champs et contraintes repris du blueprint).
 - `shop.sql` : schéma ; colonnes ajoutées par `InventoryManager::ADDED_COLUMNS` (migration additive, repère = mtime + empreinte).
 - Événements publiés : `onSimpleShopRegisterGateways`, `onSimpleShopRegisterCarriers`, `onSimpleShopOrderStatusChanged`,
   `onSimpleShopInvoiceStatusChanged`, `onSimpleShopTaxRates`.

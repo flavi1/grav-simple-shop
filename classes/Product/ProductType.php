@@ -36,12 +36,15 @@ final class ProductType
     /**
      * @param array<string, string> $handlers    clé => « Classe::méthode » (déjà vérifiés).
      * @param string[]              $priceFields Champs de la fiche contenant un prix saisi (HT ou TTC).
+     * @param array                 $adminTable  Tableau d'édition rapide (Admin2 > Ventes > Catalogue) : `shop.admin_table`
+     *                                           du blueprint, `columns` = noms de champs (ou listes de champs empilés).
      */
     public function __construct(
         public readonly string $name,
         private array $handlers = [],
         public readonly ?string $taxCode = null,
-        public readonly array $priceFields = ['product_price']
+        public readonly array $priceFields = ['product_price'],
+        public readonly array $adminTable = []
     ) {
     }
 

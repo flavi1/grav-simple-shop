@@ -160,6 +160,14 @@
         '.ss tr.ss-row{cursor:pointer}',
         '.ss tr.ss-row:hover{background:var(--accent,#f9fafb)}',
         '.ss-num{text-align:right;white-space:nowrap}',
+        '.ss-cat td{vertical-align:top}.ss-cat .ss-stack{display:flex;flex-direction:column;gap:.3rem}',
+        '.ss-cat .ss-cell{display:flex;flex-direction:column;gap:.1rem}.ss-cat .ss-cell small{opacity:.75;font-size:.72rem}',
+        '.ss-cat input,.ss-cat select,.ss-cat textarea{font:inherit;padding:.25rem .4rem;border:1px solid var(--border,#d1d5db);border-radius:.3rem;background:transparent;color:inherit}',
+        '.ss-cat input:invalid,.ss-cat [aria-invalid=true]{border-color:#dc2626;outline-color:#dc2626}',
+        '.ss-cat .ss-unit{display:flex;align-items:center;gap:.25rem}.ss-cat tr.ss-dirty{background:var(--ss-warn-bg)}.ss-cat tr.ss-dirty td{color:var(--ss-warn-fg)}',
+        '.ss-cat .ss-ferr{color:#dc2626;font-size:.75rem}.ss-cat th{position:sticky;top:0;background:var(--background,#fff);z-index:1}',
+        '.ss-cat td:first-child,.ss-cat th:first-child{position:sticky;left:0;background:var(--background,#fff);z-index:2}.ss-cat th:first-child{z-index:3}',
+        '.ss-cat tr.ss-dirty td:first-child{background:var(--ss-warn-bg)}',
         '.ss-badge{display:inline-block;padding:.1rem .5rem;border-radius:999px;font-size:.75rem;background:var(--ss-info-bg);color:var(--ss-info-fg)}',
         '.ss-badge.paid{background:var(--ss-blue-bg);color:var(--ss-blue-fg)}.ss-badge.processing{background:var(--ss-warn-bg);color:var(--ss-warn-fg)}',
         '.ss-badge.shipped,.ss-badge.delivered{background:var(--ss-ok-bg);color:var(--ss-ok-fg)}',
@@ -242,6 +250,13 @@
                 self.invoicing = res.data || null;
                 if (self.invoicing && self.invoicing.enabled) { self.draw(); }
             }).catch(function () { self.invoicing = null; });
+            // Catalogue : onglet affiché si un type de produit déclare un tableau (shop.admin_table de son blueprint).
+            this.catalogTypes = [];
+            this.catalogType = '';
+            api('GET', '/catalog?types_only=1').then(function (res) {
+                self.catalogTypes = (res.data && res.data.types) || [];
+                if (self.catalogTypes.length) { self.draw(); }
+            }).catch(function () { self.catalogTypes = []; });
         }
 
         disconnectedCallback() {
@@ -303,6 +318,9 @@
             if (this.invoicing && this.invoicing.enabled) {
                 tabs.splice(1, 0, ['invoices', 'Factures']);
             }
+            if (this.catalogTypes && this.catalogTypes.length) {
+                tabs.splice(tabs.length - 3, 0, ['catalog', 'Catalogue']);
+            }
 
             this.root.innerHTML = '';
             this.messageBox = h('div');
@@ -332,6 +350,7 @@
 
             if (this.tab === 'orders') { this.showOrders(); }
             if (this.tab === 'invoices') { this.showInvoices(); }
+            if (this.tab === 'catalog') { this.showCatalog(); }
             if (this.tab === 'carriers') { this.showCarriers(); }
             if (this.tab === 'taxes') { this.showTaxes(); }
             if (this.tab === 'bans') { this.showBans(); }
@@ -935,6 +954,195 @@
                     return h('th', { class: i === 2 ? 'ss-num' : '' }, c);
                 }))), h('tbody', {}, rows))) : h('p', { class: 'ss-muted' }, 'Aucun document émis : brouillon.'),
                 issueBox);
+        }
+
+        // ---------------- Catalogue (édition rapide des fiches produit) ----------------
+
+        showCatalog() {
+            var self = this;
+            if (!this.catalogType && this.catalogTypes.length) { this.catalogType = this.catalogTypes[0].name; }
+            var bar = h('div', { class: 'ss-bar' });
+            if (this.catalogTypes.length > 1) {
+                var sel = h('select', { id: 'ss-cat-type' }, this.catalogTypes.map(function (t) {
+                    return h('option', { value: t.name, selected: t.name === self.catalogType }, t.label);
+                }));
+                sel.addEventListener('change', function () { self.catalogType = sel.value; self.loadCatalog(); });
+                bar.appendChild(h('label', { class: 'ss-field', for: 'ss-cat-type' }, 'Type de produit', sel));
+            }
+            this.saveAllBtn = h('button', { class: 'ss-btn ss-primary', type: 'button', disabled: true, onclick: function () { self.saveAllCatalog(); } }, 'Enregistrer les modifications');
+            bar.appendChild(this.saveAllBtn);
+            bar.appendChild(h('span', { class: 'ss-muted' }, 'Champs et contraintes repris du blueprint du type de produit. Une ligne modifiée est surlignée.'));
+            this.body.appendChild(bar);
+            this.list = h('div');
+            this.body.appendChild(this.list);
+            this.loadCatalog();
+        }
+
+        loadCatalog() {
+            var self = this;
+            this.list.innerHTML = '';
+            this.list.appendChild(h('p', { class: 'ss-muted' }, 'Chargement…'));
+            api('GET', '/catalog?type=' + encodeURIComponent(this.catalogType)).then(function (res) {
+                self.catalog = res.data;
+                self.catalogRows = [];
+                self.drawCatalog();
+            }).catch(function (e) { self.list.innerHTML = ''; self.fail(e); });
+        }
+
+        drawCatalog() {
+            var self = this;
+            var c = this.catalog;
+            this.list.innerHTML = '';
+            (c.errors || []).forEach(function (err) { self.list.appendChild(h('p', { class: 'ss-ferr' }, 'Blueprint : ' + err)); });
+            if (!c.rows.length) {
+                this.list.appendChild(h('p', { class: 'ss-muted' }, 'Aucune fiche de ce type.'));
+                return;
+            }
+            var basisLabel = function (b) { return b === 'ttc' ? 'TTC' : 'HT'; };
+            var head = h('tr', {}, c.columns.map(function (col) {
+                return h('th', {}, col.fields.map(function (f) {
+                    return f.label + (f.price_basis ? ' (' + basisLabel(f.price_basis) + ')' : '');
+                }).join(' / '));
+            }).concat([h('th', {}, '')]));
+            var body = h('tbody');
+            c.rows.forEach(function (row, ri) {
+                var state = { row: row, original: Object.assign({}, row.values), inputs: {}, errs: {} };
+                self.catalogRows.push(state);
+                var saveBtn = h('button', { class: 'ss-btn', type: 'button', disabled: true, onclick: function () { self.saveCatalogRow(state); } }, 'Enregistrer');
+                state.saveBtn = saveBtn;
+                var tr = h('tr', {});
+                state.tr = tr;
+                c.columns.forEach(function (col, ci) {
+                    var stacked = col.fields.length > 1;
+                    tr.appendChild(h('td', {}, h('div', { class: 'ss-stack' }, col.fields.map(function (f) {
+                        var input = self.catalogInput(f, row.values[f.name], ri, ci === 0);
+                        state.inputs[f.name] = input;
+                        var onChange = function () { self.markCatalogRow(state); };
+                        input.addEventListener('input', onChange);
+                        input.addEventListener('change', onChange);
+                        var err = h('span', { class: 'ss-ferr', id: input.id + '-err', 'aria-live': 'polite' });
+                        state.errs[f.name] = err;
+                        input.setAttribute('aria-describedby', err.id);
+                        var own = f.price_basis && row.price_entered_as && row.price_entered_as !== f.price_basis
+                            ? h('span', { class: 'ss-badge', title: 'Base de prix propre à cette fiche' }, basisLabel(row.price_entered_as)) : null;
+                        return h('div', { class: 'ss-cell' },
+                            stacked ? h('small', { 'aria-hidden': 'true' }, f.label) : null,
+                            f.append || own ? h('span', { class: 'ss-unit' }, input, f.append ? h('span', { class: 'ss-muted' }, f.append) : null, own) : input,
+                            err);
+                    }))));
+                });
+                tr.appendChild(h('td', {}, saveBtn, row.published ? null : h('div', { class: 'ss-muted' }, 'non publiée'),
+                    h('div', { class: 'ss-muted', style: 'word-break:break-all' }, row.route)));
+                body.appendChild(tr);
+            });
+            this.list.appendChild(h('div', { class: 'ss-table-scroll', style: 'max-height:75vh;overflow:auto' },
+                h('table', { class: 'ss-cat' }, h('thead', {}, head), body)));
+        }
+
+        /** Champ d'une cellule, d'après la définition du blueprint (type, obligatoire, motif, bornes, options). */
+        catalogInput(f, value, ri, wide) {
+            var id = 'ss-cat-' + ri + '-' + f.name;
+            var el;
+            if (f.type === 'select') {
+                el = h('select', { id: id }, f.options.map(function (o) { return h('option', { value: o.value, selected: o.value === value }, o.label); }));
+                if (value && !f.options.some(function (o) { return o.value === value; })) {
+                    el.appendChild(h('option', { value: value, selected: true }, value + ' (hors liste)'));
+                }
+            } else if (f.type === 'toggle') {
+                el = h('input', { id: id, type: 'checkbox', checked: value === '1' });
+            } else if (f.type === 'textarea') {
+                el = h('textarea', { id: id, rows: '2', style: 'min-width:14rem' });
+                el.value = value || '';
+            } else {
+                var type = { number: 'number', date: 'date', email: 'email', url: 'url' }[f.type] || 'text';
+                var narrow = f.inputmode === 'numeric' || f.inputmode === 'decimal' || type === 'number';
+                el = h('input', { id: id, type: type, value: value || '', inputmode: f.inputmode, pattern: f.pattern, placeholder: f.placeholder,
+                    min: f.min, max: f.max, step: f.step, style: narrow ? 'width:6.5rem' : (type === 'date' ? '' : (wide ? 'width:20rem' : 'width:10rem')) });
+            }
+            if (f.required) { el.required = true; }
+            el.setAttribute('aria-label', f.label);
+            el.setAttribute('data-field', f.name);
+            return el;
+        }
+
+        catalogValue(input) {
+            return input.type === 'checkbox' ? (input.checked ? '1' : '0') : String(input.value).trim();
+        }
+
+        catalogChanges(state) {
+            var self = this;
+            var changes = {};
+            Object.keys(state.inputs).forEach(function (name) {
+                var v = self.catalogValue(state.inputs[name]);
+                if (v !== (state.original[name] || '')) { changes[name] = v; }
+            });
+            return changes;
+        }
+
+        markCatalogRow(state) {
+            var dirty = Object.keys(this.catalogChanges(state)).length > 0;
+            state.tr.classList.toggle('ss-dirty', dirty);
+            state.saveBtn.disabled = !dirty;
+            if (this.saveAllBtn) {
+                this.saveAllBtn.disabled = !this.catalogRows.some(function (s) { return s.tr.classList.contains('ss-dirty'); });
+            }
+        }
+
+        /** Enregistre une ligne : champs modifiés + valeurs affichées au chargement (conflit si la fiche a changé entre-temps). */
+        saveCatalogRow(state) {
+            var self = this;
+            var changes = this.catalogChanges(state);
+            var names = Object.keys(changes);
+            if (!names.length) { return Promise.resolve(true); }
+            Object.keys(state.errs).forEach(function (n) { state.errs[n].textContent = ''; state.inputs[n].removeAttribute('aria-invalid'); });
+            var invalid = names.filter(function (n) { return state.inputs[n].checkValidity && !state.inputs[n].checkValidity(); });
+            if (invalid.length) {
+                invalid.forEach(function (n) {
+                    state.inputs[n].setAttribute('aria-invalid', 'true');
+                    state.errs[n].textContent = state.inputs[n].validationMessage || 'Valeur invalide.';
+                });
+                state.inputs[invalid[0]].focus();
+                return Promise.resolve(false);
+            }
+            var original = {};
+            names.forEach(function (n) { original[n] = state.original[n] || ''; });
+            state.saveBtn.disabled = true;
+            return api('PATCH', '/catalog', { type: this.catalog.type, route: state.row.route, changes: changes, original: original }).then(function (res) {
+                var r = res.data;
+                if (r.ok) {
+                    Object.keys(r.values).forEach(function (n) {
+                        state.original[n] = r.values[n];
+                        if (state.inputs[n] && state.inputs[n].type !== 'checkbox') { state.inputs[n].value = r.values[n]; }
+                    });
+                    self.markCatalogRow(state);
+                    self.notify(state.row.title + ' : enregistré.', false);
+                    return true;
+                }
+                Object.keys(r.errors || {}).forEach(function (n) {
+                    if (state.errs[n]) { state.errs[n].textContent = r.errors[n].join(' '); state.inputs[n].setAttribute('aria-invalid', 'true'); }
+                });
+                Object.keys(r.conflicts || {}).forEach(function (n) {
+                    // La fiche a changé depuis l'affichage (commande déstockée, autre édition) : la valeur actuelle est montrée ;
+                    // un nouvel enregistrement la remplacera en connaissance de cause.
+                    state.original[n] = r.conflicts[n];
+                    state.errs[n].textContent = 'Modifié entre-temps : valeur actuelle « ' + r.conflicts[n] + ' ». Enregistrez à nouveau pour la remplacer.';
+                    state.inputs[n].setAttribute('aria-invalid', 'true');
+                });
+                self.markCatalogRow(state);
+                self.notify(state.row.title + ' : non enregistré, voir les champs signalés.', true);
+                return false;
+            }).catch(function (e) { self.markCatalogRow(state); self.fail(e); return false; });
+        }
+
+        saveAllCatalog() {
+            var self = this;
+            var dirty = this.catalogRows.filter(function (s) { return s.tr.classList.contains('ss-dirty'); });
+            var ok = 0;
+            var chain = Promise.resolve();
+            dirty.forEach(function (s) { chain = chain.then(function () { return self.saveCatalogRow(s).then(function (r) { if (r) { ok++; } }); }); });
+            chain.then(function () {
+                self.notify(ok + ' fiche(s) enregistrée(s)' + (ok < dirty.length ? ', ' + (dirty.length - ok) + ' à corriger.' : '.'), ok < dirty.length);
+            });
         }
 
         // ---------------- Transporteurs ----------------

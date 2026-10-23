@@ -280,6 +280,31 @@ public function onOrderStatusChanged(Event $event): void
 }
 ```
 
+## Catalogue : tableau d'édition rapide (Admin2 > Ventes > Catalogue)
+
+Facultatif, un tableau par type de produit : le blueprint du type le déclare dans son bloc `shop:` ; sans déclaration,
+pas d'onglet.
+
+```yaml
+shop:
+  price_calculation: '…'
+  admin_table:
+    label: Livres              # nom du type dans l'écran (titre du blueprint par défaut)
+    columns:
+      - [title, subtitle, author]   # champs empilés dans une même cellule
+      - isbn
+      - product_price
+      - product_quantity
+```
+
+Chaque nom désigne un champ `header.<nom>` du MÊME blueprint : type (texte, nombre, date, liste, case à cocher…), libellé,
+unité (`append`), `validate` (obligatoire, motif, bornes) et options sont repris tels quels — une contrainte ajoutée au
+blueprint vaut aussitôt dans le tableau (attributs HTML) et à l'enregistrement (validation de Grav). Les champs de prix
+(`price_fields`) indiquent la base HT/TTC du site ; une fiche à base propre (`price_entered_as`) le signale.
+Enregistrement ligne par ligne (ou toutes les lignes modifiées) : seuls les champs modifiés sont écrits, sous le verrou du
+déstockage ; si la fiche a changé depuis l'affichage (commande déstockée…), rien n'est écrit et la valeur actuelle est
+montrée. API : `GET /simple-shop/catalog?type=<type>`, `PATCH /simple-shop/catalog` (`type`, `route`, `changes`, `original`).
+
 ## Thème sombre (pages publiques)
 
 Les couleurs des pages publiques (panier, tunnel, confirmation : `css/cart.css` et gabarits) passent par des variables CSS

@@ -9,6 +9,7 @@ use Grav\Plugin\Api\Controllers\AbstractApiController;
 use Grav\Plugin\Api\Exceptions\NotFoundException;
 use Grav\Plugin\Api\Exceptions\ValidationException;
 use Grav\Plugin\Api\Response\ApiResponse;
+use Grav\Plugin\SimpleShop\Catalog\CatalogTable;
 use Grav\Plugin\SimpleShop\Delivery\CarrierConfig;
 use Grav\Plugin\SimpleShop\Delivery\ModeEditor;
 use Grav\Plugin\SimpleShop\Delivery\Geocoder;
@@ -492,6 +493,126 @@ class ShopApiController extends AbstractApiController
             'public_url'        => $d['access_token'] ? DocumentMailer::documentUrl($d) : null,
             'source_number'     => $d['payload']['source_number'] ?? null,
         ];
+    }
+
+    // ------------------------------------------------------------------
+    // Catalogue : tableau d'édition rapide des fiches (colonnes déclarées par le blueprint du type de produit)
+    // ------------------------------------------------------------------
+
+    /**
+     * GET /simple-shop/catalog?type=<type> — types qui déclarent un tableau (`shop.admin_table`), colonnes du type choisi
+     * (champs décrits par le blueprint), une ligne par fiche.
+     */
+    public function catalog(ServerRequestInterface $request): ResponseInterface
+    {
+        $this->requirePermission($request, self::PERM_READ);
+        $types = CatalogTable::types();
+        $list = [];
+        foreach ($types as $name => $t) {
+            $list[] = ['name' => $name, 'label' => (string) ($t->adminTable['label'] ?? $this->blueprintTitle($name) ?? $name)];
+        }
+        if (!empty($request->getQueryParams()['types_only'])) {
+            return ApiResponse::create(['types' => $list]);
+        }
+        $wanted = (string) ($request->getQueryParams()['type'] ?? '');
+        $type = $types[$wanted] ?? ($types ? reset($types) : null);
+        if ($type === null) {
+            return ApiResponse::create(['types' => [], 'type' => null, 'columns' => [], 'rows' => [], 'errors' => [], 'price_basis' => null]);
+        }
+        $basis = $this->priceBasis();
+        $cols = CatalogTable::columns($type, $this->fieldDefinitions($type->name), $basis);
+        $pages = $this->grav['pages'];
+        $pages->enablePages();
+        $rows = CatalogTable::rows($pages->all(), $type, $cols['columns']);
+        $columns = array_map(static fn ($c) => ['fields' => array_map(static function ($f) {
+            unset($f['definition']);
+
+            return $f;
+        }, $c['fields'])], $cols['columns']);
+
+        return ApiResponse::create(['types' => $list, 'type' => $type->name, 'columns' => $columns, 'rows' => $rows,
+            'errors' => $cols['errors'], 'price_basis' => $basis]);
+    }
+
+    /**
+     * PATCH /simple-shop/catalog — corps : {"type": "book", "route": "/livres/x", "changes": {"isbn": "…"},
+     * "original": {"isbn": "valeur affichée"}}. Réponse : {ok, errors (par champ), conflicts (champ => valeur actuelle), values}.
+     */
+    public function saveCatalogRow(ServerRequestInterface $request): ResponseInterface
+    {
+        $this->requirePermission($request, self::PERM_WRITE);
+        $body = $this->getRequestBody($request);
+        $types = CatalogTable::types();
+        $type = $types[(string) ($body['type'] ?? '')] ?? null;
+        if ($type === null) {
+            throw new ValidationException('Type de produit sans tableau de catalogue.');
+        }
+        $changes = is_array($body['changes'] ?? null) ? $body['changes'] : [];
+        $original = is_array($body['original'] ?? null) ? $body['original'] : [];
+        $route = '/' . trim((string) ($body['route'] ?? ''), '/');
+        $pages = $this->grav['pages'];
+        $pages->enablePages();
+        $page = $pages->find($route);
+        if (!$page || (string) $page->template() !== $type->name || !$page->filePath() || !is_file($page->filePath())) {
+            throw new NotFoundException('Fiche introuvable : ' . $route);
+        }
+        $cols = CatalogTable::columns($type, $this->fieldDefinitions($type->name), $this->priceBasis());
+        $lockDir = $this->grav['locator']->findResource('user://data/simple-shop', true, true);
+        if (!is_dir($lockDir)) {
+            @mkdir($lockDir, 0755, true);
+        }
+        $validate = static function (string $value, array $definition): array {
+            $messages = [];
+            foreach (\Grav\Common\Data\Validation::validate($value, $definition) as $list) {
+                foreach ((array) $list as $m) {
+                    $messages[] = (string) $m;
+                }
+            }
+
+            return $messages;
+        };
+        $result = CatalogTable::save($page->filePath(), $changes, $original, $cols['columns'], $validate, $lockDir . '/stock.lock');
+        if ($result['ok'] && $result['values'] !== []) {
+            \Grav\Common\Cache::clearCache('cache-only');
+            $this->grav['log']->info('[SimpleShop] Catalogue : ' . $route . ' modifiée (' . implode(', ', array_keys($changes)) . ') par '
+                . (string) ($this->getUser($request)->username ?? '?'));
+        }
+
+        return ApiResponse::create($result);
+    }
+
+    /** Base de saisie des prix des fiches du site (`taxes.prices_entered`). */
+    private function priceBasis(): string
+    {
+        return ((string) $this->grav['config']->get('plugins.simple-shop.taxes.prices_entered', 'ht')) === 'ttc' ? 'ttc' : 'ht';
+    }
+
+    /** fn(nom) → définition du champ `header.<nom>` dans le blueprint de pages résolu (héritages compris). */
+    private function fieldDefinitions(string $type): callable
+    {
+        $schema = null;
+        try {
+            $schema = $this->grav['pages']->blueprints($type)->schema();
+        } catch (\Throwable $e) {
+            $this->grav['log']->warning("[SimpleShop] Blueprint « {$type} » illisible : " . $e->getMessage());
+        }
+
+        return static function (string $name) use ($schema): ?array {
+            $def = $schema ? $schema->getProperty('header.' . $name) : null;
+
+            return is_array($def) ? $def : null;
+        };
+    }
+
+    private function blueprintTitle(string $type): ?string
+    {
+        try {
+            $title = $this->grav['pages']->blueprints($type)->get('title');
+
+            return is_string($title) && $title !== '' ? $title : null;
+        } catch (\Throwable $e) {
+            return null;
+        }
     }
 
     // ------------------------------------------------------------------
