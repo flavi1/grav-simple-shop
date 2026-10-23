@@ -29,7 +29,7 @@
 			
 			<table class="cart-summary-table" style="width: 100%; border-collapse: collapse; margin-bottom: 1.5rem;">
 				<thead>
-					<tr style="border-bottom: 2px solid #ddd; text-align: left;">
+					<tr style="border-bottom: 2px solid var(--shop-border-strong, #ddd); text-align: left;">
 						<th>Article</th>
 						<th style="text-align: center;">Qté</th>
 						<th style="text-align: right;">Prix</th>
@@ -40,7 +40,7 @@
 					{% for line_id, item in cart %}
 					{% set item_total = item.price * item.quantity %}
 					{% set subtotal = subtotal + item_total %}
-						<tr style="border-bottom: 1px solid #eee;">
+						<tr style="border-bottom: 1px solid var(--shop-border, #eee);">
 							<td style="padding: 0.5rem 0;">
 								<strong>{{ item.title }}</strong> {% include 'partials/simple-shop/line-options.html.twig' with {'options': item.options} %}
 							</td>
@@ -51,16 +51,16 @@
 					
 					{# Lignes de totalisation #}
 					<tr style="font-size: 0.95rem;">
-						<td colspan="2" style="padding-top: 1rem; text-align: right; color: #666;">Sous-total :</td>
-						<td style="padding-top: 1rem; text-align: right; color: #666;">{{ subtotal|number_format(2, ',', ' ') }} € <small class="price-tax">TTC</small></td>
+						<td colspan="2" style="padding-top: 1rem; text-align: right; color: var(--shop-muted, #666);">Sous-total :</td>
+						<td style="padding-top: 1rem; text-align: right; color: var(--shop-muted, #666);">{{ subtotal|number_format(2, ',', ' ') }} € <small class="price-tax">TTC</small></td>
 					</tr>
 					<tr style="font-size: 0.95rem;">
-						<td colspan="2" style="padding: 0.25rem 0; text-align: right; color: #666;">Frais de port ({{ shipping.label }}) :</td>
-						<td style="padding: 0.25rem 0; text-align: right; color: #666;">{{ shipping.price == 0 ? 'Gratuit' : shipping.price|number_format(2, ',', ' ') ~ ' €' }}{% if shipping.price != 0 %} <small class="price-tax">TTC</small>{% endif %}</td>
+						<td colspan="2" style="padding: 0.25rem 0; text-align: right; color: var(--shop-muted, #666);">Frais de port ({{ shipping.label }}) :</td>
+						<td style="padding: 0.25rem 0; text-align: right; color: var(--shop-muted, #666);">{{ shipping.price == 0 ? 'Gratuit' : shipping.price|number_format(2, ',', ' ') ~ ' €' }}{% if shipping.price != 0 %} <small class="price-tax">TTC</small>{% endif %}</td>
 					</tr>
 					<tr style="font-size: 1.2rem; font-weight: bold;">
 						<td colspan="2" style="padding-top: 0.5rem; text-align: right;">Total TTC :</td>
-						<td style="padding-top: 0.5rem; text-align: right; color: #e74c3c;">{{ (subtotal + shipping.price)|number_format(2, ',', ' ') }} € <small class="price-tax">TTC</small></td>
+						<td style="padding-top: 0.5rem; text-align: right; color: var(--shop-danger, #e74c3c);">{{ (subtotal + shipping.price)|number_format(2, ',', ' ') }} € <small class="price-tax">TTC</small></td>
 					</tr>
 				</tbody>
 			</table>
@@ -137,8 +137,8 @@
 
 <style>
 .summary-box {
-    background: #f9f9f9;
-    border: 1px solid #eaeaea;
+    background: var(--shop-surface, #f9f9f9);
+    border: 1px solid var(--shop-border, #eaeaea);
     padding: 1.5rem;
     border-radius: 4px;
 }
@@ -170,13 +170,13 @@
     align-items: center;
     gap: 0.5rem;
     padding: 0.75rem;
-    border: 1px solid #ddd;
+    border: 1px solid var(--shop-border-strong, #ddd);
     border-radius: 4px;
     cursor: pointer;
 }
 .gateway-option:hover {
-    background: #fafafa;
+    background: var(--shop-surface, #fafafa);
 }
-.error-text { color: #cc0000; }
+.error-text { color: var(--shop-danger, #cc0000); }
 </style>
 {% endblock %}

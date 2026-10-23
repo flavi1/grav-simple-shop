@@ -19,14 +19,14 @@
 
 .cart-empty-message {
     font-size: 1.2rem;
-    color: #666;
+    color: var(--shop-muted, #666);
 }
 
 .btn-back-shop {
     display: inline-block;
     margin-top: 1rem;
-    background: #333;
-    color: #fff;
+    background: var(--shop-inverse-bg, #333);
+    color: var(--shop-on-inverse, #fff);
     padding: 0.5rem 1rem;
     text-decoration: none;
     border-radius: 4px;
@@ -42,7 +42,7 @@
     gap: 1.5rem;
     align-items: center;
     padding: 1rem 0;
-    border-bottom: 1px solid #eee;
+    border-bottom: 1px solid var(--shop-border, #eee);
 }
 
 .cart-item-image {
@@ -70,7 +70,7 @@
 }
 
 .cart-item-price {
-    color: #666;
+    color: var(--shop-muted, #666);
     font-size: 0.9rem;
 }
 
@@ -88,14 +88,14 @@
 }
 
 .btn {
-    border: 1px solid #ccc;
+    border: 1px solid var(--shop-border-strong, #ccc);
     cursor: pointer;
     border-radius: 3px;
 }
 
 .btn-update {
     font-size: 0.8rem;
-    background: #e7e7e7;
+    background: var(--shop-surface, #e7e7e7);
     padding: 0.25rem 0.5rem;
 }
 
@@ -112,7 +112,7 @@
 .btn-remove-link {
     background: none;
     border: none;
-    color: #d9534f;
+    color: var(--shop-danger, #d9534f);
     cursor: pointer;
     font-size: 1.2rem;
 }
@@ -126,21 +126,21 @@
 
 .cart-separator {
     border: 0;
-    border-top: 1px solid #ccc;
+    border-top: 1px solid var(--shop-border-strong, #ccc);
     margin: 2rem 0;
 }
 
 /* Checkout Formulaire */
 .checkout-section {
     margin-top: 2rem;
-    background: #f9f9f9;
+    background: var(--shop-surface, #f9f9f9);
     padding: 1.5rem;
     border-radius: 4px;
 }
 
 .checkout-notice {
     font-size: 0.85rem;
-    color: #666;
+    color: var(--shop-muted, #666);
     margin-bottom: 1.5rem;
 }
 
@@ -170,7 +170,7 @@
 .checkout-form input[type="email"] {
     width: 100%;
     padding: 0.5rem;
-    border: 1px solid #ccc;
+    border: 1px solid var(--shop-border-strong, #ccc);
     border-radius: 4px;
     box-sizing: border-box;
 }
@@ -184,7 +184,7 @@
 .billing-summary-title {
     cursor: pointer;
     font-weight: bold;
-    color: #333;
+    color: var(--shop-text, #333);
     outline: none;
     user-select: none;
 }
@@ -196,15 +196,15 @@
 .billing-fields-container {
     margin-top: 1rem;
     padding: 1rem;
-    background: #f0f0f0;
-    border-left: 3px solid #ccc;
+    background: var(--shop-surface, #f0f0f0);
+    border-left: 3px solid var(--shop-border-strong, #ccc);
     border-radius: 0 4px 4px 0;
 }
 
 .btn-submit-checkout {
     width: 100%;
-    background: #000;
-    color: #fff;
+    background: var(--shop-inverse-bg, #000);
+    color: var(--shop-on-inverse, #fff);
     border: none;
     padding: 1rem;
     font-size: 1.1rem;
@@ -215,7 +215,7 @@
 }
 
 .btn-submit-checkout:hover {
-    background: #222;
+    background: var(--shop-inverse-bg, #222);
 }
 
 /* Mention « TTC » discrète après les prix du site public */

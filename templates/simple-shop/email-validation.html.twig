@@ -37,7 +37,7 @@
                 <input type="hidden" name="action" value="resend_code" />
                 <input type="hidden" name="back_url" value="{{ back_url }}" />
                 {{ nonce_field('shop-email-verification', 'nonce')|raw }}
-                <p style="font-size: 0.85rem; color: #777;">
+                <p style="font-size: 0.85rem; color: var(--shop-muted, #777);">
                     Ce n'est pas le bon e-mail ? 
                     <button type="submit" class="btn-link" style="display:inline; font-size: inherit;">
                         Changer ou renvoyer un code
@@ -119,7 +119,7 @@
 .btn-link {
     background: none;
     border: none;
-    color: #0074d9;
+    color: var(--shop-accent, #0074d9);
     text-decoration: underline;
     cursor: pointer;
     padding: 0;
@@ -127,13 +127,13 @@
 .verified-container {
     text-align: center;
     padding: 2rem 1rem;
-    background: #f4f9f4;
+    background: var(--shop-success-bg, #f4f9f4);
     border-radius: 6px;
-    border: 1px solid #d4ebd4;
+    border: 1px solid var(--shop-border, #d4ebd4);
 }
 .verified-icon {
     font-size: 3rem;
-    color: #2ecc71;
+    color: var(--shop-success, #2ecc71);
     margin-bottom: 1rem;
 }
 </style>

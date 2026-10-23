@@ -280,6 +280,14 @@ public function onOrderStatusChanged(Event $event): void
 }
 ```
 
+## Thème sombre (pages publiques)
+
+Les couleurs des pages publiques (panier, tunnel, confirmation : `css/cart.css` et gabarits) passent par des variables CSS
+avec la couleur claire en valeur par défaut : `--shop-card-bg`, `--shop-surface`, `--shop-border`, `--shop-border-strong`,
+`--shop-text`, `--shop-muted`, `--shop-danger`, `--shop-success`, `--shop-success-bg`, `--shop-accent`, `--shop-inverse-bg`,
+`--shop-on-inverse`. Un thème sombre les redéfinit sur `:root` (exemple : `css/custom-dark.css` du thème bookstore).
+Les e-mails gardent leurs couleurs fixes.
+
 ## Administration (Admin2)
 
 Le plugin s'appuie sur le plugin `api` et `admin2` (l'ancienne administration
