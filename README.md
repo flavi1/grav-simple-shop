@@ -280,6 +280,15 @@ public function onOrderStatusChanged(Event $event): void
 }
 ```
 
+## Ventes actives par type de produit
+
+Plugins > Simple Shop > Ventes : une case par type de produit déclaré (`sales.types`, type => true/false). Décoché : les
+fiches de ce type n'ont plus de prix (`shop_price` → null), ni données d'achat (`get_product_shop_data`), ni ajout au
+panier (`Catalog::resolve()` les écarte). Réglage jamais enregistré : tous les types sont en vente (comportement antérieur).
+Variable Twig pour les thèmes : `shop_sales` (type => bool), ex. `{% if shop_sales.book ?? false %}` (sûr même si le plugin
+est désactivé). Attention : Admin2 affiche la case décochée tant que le réglage n'a jamais été enregistré ; la cocher puis
+enregistrer une première fois.
+
 ## Catalogue : tableau d'édition rapide (Admin2 > Ventes > Catalogue)
 
 Facultatif, un tableau par type de produit : le blueprint du type le déclare dans son bloc `shop:` ; sans déclaration,

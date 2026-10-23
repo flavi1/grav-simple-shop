@@ -47,7 +47,7 @@ final class ProductTypes
                 }
                 $shop = is_array($yaml['shop'] ?? null) ? $yaml['shop'] : null;
                 if ($shop !== null && !empty($shop['price_calculation'])) {
-                    $defs[$name] = $shop;
+                    $defs[$name] = $shop + ['_title' => is_string($yaml['title'] ?? null) ? $yaml['title'] : (string) $name];
                 }
             }
 
@@ -94,6 +94,62 @@ final class ProductTypes
         }
 
         return self::$types;
+    }
+
+    /**
+     * Ventes actives pour ce type de produit (case « Ventes actives » de la configuration : `sales.types`).
+     * Réglage jamais enregistré : tous les types sont en vente (comportement antérieur). Sinon, seuls les types cochés.
+     * Un type hors vente n'a ni prix, ni zone d'achat, ni ajout au panier (voir Catalog::resolve()).
+     */
+    public static function salesEnabled(string $type, ?array $config = null): bool
+    {
+        $config ??= self::siteConfig();
+        $sales = $config['sales']['types'] ?? null;
+        if (!is_array($sales)) {
+            return true;
+        }
+        if (array_is_list($sales)) {   // liste de noms (format possible des cases à cocher)
+            return in_array($type, array_map('strval', $sales), true);
+        }
+
+        return !empty($sales[$type]) && !in_array($sales[$type], ['0', 'false'], true);
+    }
+
+    /** @return array<string, bool> type => ventes actives, pour tous les types déclarés (variable Twig `shop_sales`). */
+    public static function salesMap(?array $config = null): array
+    {
+        $out = [];
+        foreach (array_keys(self::all()) as $name) {
+            $out[$name] = self::salesEnabled($name, $config);
+        }
+
+        return $out;
+    }
+
+    /** Options des cases « Ventes actives » (blueprint `data-options@`) : type => titre de son blueprint. */
+    public static function salesOptions(): array
+    {
+        $out = [];
+        foreach (self::all() as $name => $type) {
+            $out[$name] = $type->label . ' (' . $name . ')';
+        }
+
+        return $out;
+    }
+
+    /** Valeur par défaut des cases (`data-default@`) : tous les types cochés, comme avant l'existence du réglage. */
+    public static function salesDefault(): array
+    {
+        return array_fill_keys(array_keys(self::all()), true);
+    }
+
+    private static function siteConfig(): array
+    {
+        try {
+            return (array) \Grav\Common\Grav::instance()['config']->get('plugins.simple-shop', []);
+        } catch (\Throwable $e) {
+            return [];
+        }
     }
 
     /** @return string[] Erreurs de déclaration (méthode introuvable…), pour le journal et l'administration. */
@@ -143,7 +199,7 @@ final class ProductTypes
             static fn ($f) => is_string($f) && preg_match('/^[A-Za-z0-9_]+$/', $f)));
 
         return new ProductType($name, $handlers, isset($shop['tax']) && $shop['tax'] !== '' ? (string) $shop['tax'] : null, $fields ?: ['product_price'],
-            is_array($shop['admin_table'] ?? null) ? $shop['admin_table'] : []);
+            is_array($shop['admin_table'] ?? null) ? $shop['admin_table'] : [], (string) ($shop['_title'] ?? $name));
     }
 
     /** Dossiers de blueprints de pages de Grav (flux `blueprints://pages` et blueprints du thème actif). */

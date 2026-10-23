@@ -330,6 +330,13 @@ form:
       title: Ventes — boutique publique, factures manuelles, moyens de paiement
       help: "Voir docs/CONCEPTION-FACTURATION.md."
       fields:
+        sales.types:
+          type: checkboxes
+          label: Ventes actives par type de produit
+          help: "Types de produits déclarés par les blueprints des pages (bloc shop:). Décoché : les fiches de ce type n'ont ni prix affiché, ni zone d'achat, ni ajout au panier ; le thème peut tester shop_sales.<type>. Jamais enregistré : tous les types sont en vente."
+          use: keys
+          data-options@: '\Grav\Plugin\SimpleShop\Product\ProductTypes::salesOptions'
+          data-default@: '\Grav\Plugin\SimpleShop\Product\ProductTypes::salesDefault'
         shop.public:
           type: toggle
           label: Boutique publique

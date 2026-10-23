@@ -57,6 +57,12 @@ class SimpleShopPlugin extends Plugin
                     // Version de Grav sans liste autorisée : les listes gardent leurs options fixes.
                 }
             }
+            foreach (['salesOptions', 'salesDefault'] as $m) {
+                try {
+                    \Grav\Common\Data\Blueprint::addAllowedDynamicCallable('Grav\\Plugin\\SimpleShop\\Product\\ProductTypes::' . $m);
+                } catch (\Throwable $e) {
+                }
+            }
         }
 
         $this->grav['session']->init();
@@ -314,6 +320,12 @@ class SimpleShopPlugin extends Plugin
         $twig->twig_vars['shop_cart_count'] = $totalItemsCount;
         $twig->twig_vars['shop_routes'] = Routes::all($config);
         $twig->twig_vars['shop_public'] = (bool) ($config['shop']['public'] ?? true);
+        // Ventes actives par type de produit (type => bool) : {% if shop_sales.book ?? false %} dans un thème.
+        try {
+            $twig->twig_vars['shop_sales'] = \Grav\Plugin\SimpleShop\Product\ProductTypes::salesMap($config);
+        } catch (\Throwable $e) {
+            $twig->twig_vars['shop_sales'] = [];
+        }
 
         if (isset($this->grav['simple_shop_customer'])) {
             /** @var CustomerManager $customerManager */

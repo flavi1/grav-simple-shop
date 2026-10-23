@@ -44,7 +44,8 @@ final class ProductType
         private array $handlers = [],
         public readonly ?string $taxCode = null,
         public readonly array $priceFields = ['product_price'],
-        public readonly array $adminTable = []
+        public readonly array $adminTable = [],
+        public readonly string $label = ''
     ) {
     }
 

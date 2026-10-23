@@ -274,3 +274,11 @@ BIC, `enabled: true`), `payments.methods.manual` (ex. `[bank_transfer, stripe]`)
    « Modifié entre-temps : valeur actuelle … » ; enregistrer à nouveau pour remplacer.
 5. Ajouter une contrainte au blueprint (ex. `validate: { required: true }` sur l’ISBN), recharger : l’ISBN devient obligatoire dans le tableau.
 6. « Exporter en CSV » : le fichier s'ouvre dans un tableur (colonnes du tableau, accents corrects, décimales avec la virgule).
+
+## 27. Ventes actives par type de produit (lot du 2026-10-23)
+
+1. Plugins > Simple Shop > Ventes : cocher « Livre (book) », enregistrer (première fois : la case apparaît décochée tant que
+   le réglage n'a jamais été enregistré, les livres restent pourtant en vente).
+2. Décocher, enregistrer : plus de « Mon Panier / S'identifier » dans l'en-tête, plus de prix sur les cartes, plus de zone
+   d'achat sur les fiches ; un ajout au panier (formulaire rejoué) est refusé.
+3. Recocher : tout revient.

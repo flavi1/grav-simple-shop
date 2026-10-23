@@ -64,8 +64,11 @@ final class Catalog
             return null;
         }
         $type = ProductTypes::forPage($page);
+        if ($type === null || !ProductTypes::salesEnabled($type->name)) {
+            return null;   // type hors vente (configuration « Ventes actives ») : ni prix, ni achat
+        }
 
-        return $type ? [$page, $type] : null;
+        return [$page, $type];
     }
 
     /** Prix unitaire d'un produit (null = pas vendable maintenant). */
