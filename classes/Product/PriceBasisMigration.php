@@ -13,8 +13,11 @@ use Grav\Plugin\SimpleShop\Pricing\Price;
  *  - HT → TTC : le prix TTC payé jusque-là, à 2 décimales (12.2749 HT à 5,5 % → 12.95) — prix public inchangé ;
  *  - TTC → HT : le HT au centime (le TTC peut alors bouger d'un centime, voir tests/pricing.php).
  *
- * La base déjà appliquée aux fiches est mémorisée dans `user://data/simple-shop/.prices-basis` (absente = `ht`,
- * réglage historique du plugin). Tant qu'elle égale le réglage, rien n'est fait (une lecture de fichier par requête).
+ * La base déjà appliquée aux fiches est mémorisée dans `user://data/simple-shop/.prices-basis`. Tant qu'elle égale le
+ * réglage, rien n'est fait (une lecture de fichier par requête). **Repère absent** (nouveau site, ou dossier de données
+ * supprimé avec la base) : les fiches sont réputées déjà saisies dans la base du réglage ; le repère est créé et RIEN n'est
+ * converti — supprimer `user://data/simple-shop` ne doit jamais modifier les fiches (avant le 23/10/2026, un repère absent
+ * valait `ht` et un site en TTC aurait vu ses prix reconvertis).
  * Écriture : ligne du front-matter réécrite en place (pas de Page::save(), qui reformaterait l'en-tête), sous le même
  * verrou que le déstockage, fichier temporaire + rename.
  */
@@ -34,12 +37,20 @@ final class PriceBasisMigration
     {
         $target = (($config['taxes']['prices_entered'] ?? 'ht') === Price::TTC) ? Price::TTC : Price::HT;
         $marker = rtrim($dataDir, '/') . '/' . self::MARKER;
-        $current = is_file($marker) ? trim((string) @file_get_contents($marker)) : Price::HT;
-        if ($current === $target) {
+        if (!is_file($marker)) {
+            if (!is_dir($dataDir)) {
+                @mkdir($dataDir, 0755, true);
+            }
+            @file_put_contents($marker, $target);
+            if ($log) {
+                $log('info', "[SimpleShop] Base de saisie des prix des fiches mémorisée : {$target} (aucune conversion).");
+            }
+
             return null;
         }
-        if (!is_dir($dataDir)) {
-            @mkdir($dataDir, 0755, true);
+        $current = trim((string) @file_get_contents($marker));
+        if ($current === $target) {
+            return null;
         }
         $lock = @fopen(rtrim($dataDir, '/') . '/stock.lock', 'c');
         if ($lock === false || !flock($lock, LOCK_EX | LOCK_NB)) {
@@ -49,8 +60,8 @@ final class PriceBasisMigration
         $result = ['from' => $current, 'to' => $target, 'pages' => 0, 'fields' => 0];
         try {
             // Relu sous verrou : une requête concurrente a pu terminer la conversion.
-            $current = is_file($marker) ? trim((string) file_get_contents($marker)) : Price::HT;
-            if ($current === $target) {
+            $current = trim((string) @file_get_contents($marker));
+            if ($current === $target || !in_array($current, [Price::HT, Price::TTC], true)) {
                 return null;
             }
             foreach ($pages as $page) {

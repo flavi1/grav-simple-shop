@@ -23,6 +23,7 @@ assert($before === [1295, 1500, 1055, 1200], json_encode($before));   // affiche
 $dataDir = $grav['locator']->findResource('user://data/simple-shop', true, true);
 $config = (array) $grav['config']->get('plugins.simple-shop');
 assert(PriceBasisMigration::run($grav['pages']->all(), $dataDir, $config) === null, 'site toujours en HT : rien à faire');
+assert(trim(file_get_contents($dataDir . '/' . PriceBasisMigration::MARKER)) === 'ht', 'premier passage : repère créé, sans conversion');
 
 // Le site passe en TTC
 $grav['config']->set('plugins.simple-shop.taxes.prices_entered', 'ttc');
@@ -52,5 +53,20 @@ assert(PriceBasisMigration::run($grav['pages']->all(), $dataDir, $config) === nu
 $grav['config']->set('plugins.simple-shop.taxes.prices_entered', 'ht');
 $r = PriceBasisMigration::run($grav['pages']->all(), $dataDir, (array) $grav['config']->get('plugins.simple-shop'));
 assert($r['to'] === 'ht' && strpos(file_get_contents($pages['paru']->file), "product_price: '12.27'") !== false, 'TTC 12.95 → HT 12.27');
+
+// Dossier de données supprimé (base effacée…) alors que le site est en HT : AUCUNE conversion, repère recréé
+unlink($dataDir . '/' . PriceBasisMigration::MARKER);
+$snapshot = array_map(fn ($p) => file_get_contents($p->file), array_filter($pages, fn ($p) => isset($p->file)));
+assert(PriceBasisMigration::run($grav['pages']->all(), $dataDir, (array) $grav['config']->get('plugins.simple-shop')) === null);
+assert($snapshot === array_map(fn ($p) => file_get_contents($p->file), array_filter($pages, fn ($p) => isset($p->file))), 'fiches intactes');
+// … et en TTC : pas de double conversion
+$grav['config']->set('plugins.simple-shop.taxes.prices_entered', 'ttc');
+file_put_contents($dataDir . '/' . PriceBasisMigration::MARKER, 'ttc');
+$ttcFiles = array_map(fn ($p) => file_get_contents($p->file), array_filter($pages, fn ($p) => isset($p->file)));
+@unlink($dataDir . '/' . PriceBasisMigration::MARKER);   // dossier de données vidé (repère perdu)
+@unlink($dataDir . '/shop.db');
+assert(PriceBasisMigration::run($grav['pages']->all(), $dataDir, (array) $grav['config']->get('plugins.simple-shop')) === null);
+assert($ttcFiles === array_map(fn ($p) => file_get_contents($p->file), array_filter($pages, fn ($p) => isset($p->file))), 'dossier supprimé : fiches intactes');
+assert(trim(file_get_contents($dataDir . '/' . PriceBasisMigration::MARKER)) === 'ttc');
 
 echo "OK\n";

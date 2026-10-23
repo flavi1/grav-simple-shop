@@ -101,7 +101,8 @@ for t in tests/*.php; do YAML=$YAML php -d zend.assertions=1 -d assert.exception
 
 Chaque script affiche `OK`. `tests/checkout-flow.php` (tunnel complet avec doublures de Grav, `tests/support/bootstrap.php`) **doit
 rester vert**. Les autres : `pricing`, `product-types`, `price-basis`, `invoice` (XSD Factur-X officiel), `cart-options`, `taxes`,
-`constraints`, `carriers-pricing`, `local-pickup`, `mode-editor`, `security`, `page-meta`. Le plugin Colissimo a ses propres tests (variable `SS` = dossier de
+`constraints`, `carriers-pricing`, `local-pickup`, `mode-editor`, `security`, `page-meta`, `migrations` (mise à jour d'une base de
+chaque version publiée), `payments`, `documents`, `session`. Le plugin Colissimo a ses propres tests (variable `SS` = dossier de
 simple-shop).
 
 ## Conventions (reprises du site d'origine)
@@ -149,6 +150,19 @@ simple-shop).
 - `shop.sql` : schéma ; colonnes ajoutées par `InventoryManager::ADDED_COLUMNS` (migration additive, repère = mtime + empreinte).
 - Événements publiés : `onSimpleShopRegisterGateways`, `onSimpleShopRegisterCarriers`, `onSimpleShopOrderStatusChanged`,
   `onSimpleShopInvoiceStatusChanged`, `onSimpleShopTaxRates`.
+
+## Mises à jour sans perte (règle du propriétaire, 23/10/2026)
+Une mise à jour ne doit **jamais** exiger de supprimer la base (`shop.db`) ni de retoucher les fiches (`.md`) :
+- Base : migrations **additives et rejouables** seulement (`shop.sql` en `IF NOT EXISTS`, `InventoryManager::ADDED_COLUMNS`,
+  reprises idempotentes). Jamais de `DROP COLUMN` ni de renommage ; une contrainte à retirer passe par une reconstruction qui
+  garde toutes les colonnes existantes (`tableWithoutUnique()`). Migration sous verrou, copie de la base avant migration
+  (`data/simple-shop/backups/`, 5 dernières), repère écrit seulement si tout a réussi (sinon nouvel essai à la requête suivante).
+- **Tout changement de structure** ajoute dans `tests/fixtures/schemas/` le schéma de la version précédente (`shop.sql` +
+  `ALTER` des colonnes ajoutées, voir les fichiers existants) : `tests/migrations.php` remplit une base à chaque schéma publié,
+  la migre et vérifie données, écrans d'administration, nouvelles fonctions et rejeu.
+- Fiches : seule `PriceBasisMigration` les réécrit, une fois, quand `taxes.prices_entered` change ; repère absent = aucune
+  conversion (supprimer `data/simple-shop` ne touche jamais aux prix).
+- Admin2 : tester l'écran avec les options désactivées **et** activées (`invoicing.manual`, `shop.public`).
 
 ## Pièges connus
 - Une lecture SQLite d'une ligne (`fetch`, `fetchColumn`) libère son curseur (`closeCursor()`) : `InventoryManager::getDatabase()` ouvre

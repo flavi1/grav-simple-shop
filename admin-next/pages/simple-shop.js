@@ -438,7 +438,7 @@
         newManualButton() {
             var self = this;
             if (!this.invoicing || !this.invoicing.enabled) {
-                return null;
+                return document.createDocumentFragment(); // rien à afficher (appendChild refuse null)
             }
             return h('div', { class: 'ss-bar', style: 'margin-top:.4rem' },
                 h('button', { class: 'ss-btn ss-primary', type: 'button', onclick: function () { self.openEditor(null, null); } },

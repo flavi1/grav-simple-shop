@@ -321,27 +321,7 @@ class InventoryManager
         $db->exec('PRAGMA foreign_keys = OFF');
         $db->beginTransaction();
         try {
-            $db->exec("CREATE TABLE invoice_new (
-                id INTEGER PRIMARY KEY,
-                order_reference TEXT NOT NULL,
-                invoice_number TEXT NOT NULL UNIQUE,
-                customer_type TEXT NOT NULL DEFAULT 'b2c',
-                ereporting_status TEXT NOT NULL DEFAULT 'not_submitted',
-                vat_rate REAL NOT NULL DEFAULT 0,
-                pdf_path TEXT,
-                created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-                updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-                kind TEXT DEFAULT 'invoice',
-                total_cents INTEGER,
-                due_cents INTEGER,
-                issued_at DATETIME,
-                due_date TEXT,
-                access_token TEXT,
-                source_invoice_id INTEGER,
-                related_invoice_id INTEGER,
-                payload TEXT,
-                FOREIGN KEY(order_reference) REFERENCES \"order\"(order_reference) ON DELETE CASCADE
-            )");
+            $db->exec(self::tableWithoutUnique($db, 'invoice', 'invoice_new', 'order_reference'));
             $db->exec("INSERT INTO invoice_new ({$list}) SELECT {$list} FROM invoice");
             $db->exec('DROP TABLE invoice');
             $db->exec('ALTER TABLE invoice_new RENAME TO invoice');
@@ -353,6 +333,69 @@ class InventoryManager
         } finally {
             $db->exec('PRAGMA foreign_keys = ON');
         }
+    }
+
+    /**
+     * CREATE TABLE de `$new` reprenant TOUTES les colonnes actuelles de `$table` (types, NOT NULL, valeurs par défaut, clé
+     * primaire — y compris des colonnes inconnues de cette version du plugin), ses autres contraintes d'unicité, ses clés
+     * étrangères, mais sans l'unicité de `$column`.
+     */
+    private static function tableWithoutUnique(\PDO $db, string $table, string $new, string $column): string
+    {
+        $q = static fn (string $n): string => '"' . str_replace('"', '""', $n) . '"';
+        $cols = $db->query('PRAGMA table_info(' . $q($table) . ')')->fetchAll(\PDO::FETCH_ASSOC);
+        $uniqueSingles = [];
+        $uniqueGroups = [];
+        foreach ($db->query('PRAGMA index_list(' . $q($table) . ')')->fetchAll(\PDO::FETCH_ASSOC) as $index) {
+            if ((int) $index['unique'] !== 1 || ($index['origin'] ?? 'u') === 'pk') {
+                continue;
+            }
+            $names = array_column($db->query('PRAGMA index_info(' . $q((string) $index['name']) . ')')->fetchAll(\PDO::FETCH_ASSOC), 'name');
+            if ($names === [$column]) {
+                continue;
+            }
+            if (count($names) === 1) {
+                $uniqueSingles[$names[0]] = true;
+            } else {
+                $uniqueGroups[] = 'UNIQUE (' . implode(', ', array_map($q, $names)) . ')';
+            }
+        }
+        $pk = array_values(array_filter($cols, static fn ($c) => (int) $c['pk'] > 0));
+        usort($pk, static fn ($a, $b) => (int) $a['pk'] <=> (int) $b['pk']);
+        $defs = [];
+        foreach ($cols as $c) {
+            $d = $q((string) $c['name']) . ($c['type'] !== '' ? ' ' . $c['type'] : '');
+            if (count($pk) === 1 && (int) $c['pk'] === 1) {
+                $d .= ' PRIMARY KEY';
+            }
+            if ((int) $c['notnull'] === 1) {
+                $d .= ' NOT NULL';
+            }
+            if ($c['dflt_value'] !== null) {
+                $d .= ' DEFAULT ' . $c['dflt_value'];
+            }
+            if (isset($uniqueSingles[$c['name']])) {
+                $d .= ' UNIQUE';
+            }
+            $defs[] = $d;
+        }
+        if (count($pk) > 1) {
+            $defs[] = 'PRIMARY KEY (' . implode(', ', array_map(static fn ($c) => $q((string) $c['name']), $pk)) . ')';
+        }
+        $defs = array_merge($defs, $uniqueGroups);
+        $fks = [];
+        foreach ($db->query('PRAGMA foreign_key_list(' . $q($table) . ')')->fetchAll(\PDO::FETCH_ASSOC) as $fk) {
+            $fks[(int) $fk['id']]['table'] = (string) $fk['table'];
+            $fks[(int) $fk['id']]['from'][] = $q((string) $fk['from']);
+            $fks[(int) $fk['id']]['to'][] = $q((string) $fk['to']);
+            $fks[(int) $fk['id']]['on_delete'] = (string) $fk['on_delete'];
+        }
+        foreach ($fks as $fk) {
+            $defs[] = 'FOREIGN KEY (' . implode(', ', $fk['from']) . ') REFERENCES ' . $q($fk['table']) . ' (' . implode(', ', $fk['to']) . ')'
+                . ($fk['on_delete'] !== '' && $fk['on_delete'] !== 'NO ACTION' ? ' ON DELETE ' . $fk['on_delete'] : '');
+        }
+
+        return 'CREATE TABLE ' . $q($new) . " (\n    " . implode(",\n    ", $defs) . "\n)";
     }
 
     private static function addMissingColumns(\PDO $db): void
@@ -429,6 +472,55 @@ class InventoryManager
             return $db;
         }
 
+        // Une seule requête migre à la fois (les autres attendent, puis voient le repère à jour).
+        $lock = @fopen(dirname($dbPath) . '/.shop-schema.lock', 'c');
+        if ($lock !== false) {
+            flock($lock, LOCK_EX);
+        }
+        try {
+            $raw = is_file($markerPath) ? trim((string) @file_get_contents($markerPath)) : null;
+            if ($dbExists && $raw === $sqlMtime) {
+                return $db;
+            }
+            if ($dbExists) {
+                self::backupBeforeMigration($dbPath);
+            }
+
+            return self::applySchema($db, $dbPath, $dbExists, $sqlSource, $markerPath, $sqlMtime);
+        } finally {
+            if ($lock !== false) {
+                flock($lock, LOCK_UN);
+                fclose($lock);
+            }
+        }
+    }
+
+    /**
+     * Copie de la base avant une migration (`user://data/simple-shop/backups/shop-<date>.db`, 5 dernières gardées) : une
+     * migration ratée ne doit jamais coûter les données.
+     */
+    private static function backupBeforeMigration(string $dbPath): void
+    {
+        $dir = dirname($dbPath) . '/backups';
+        if (!is_dir($dir) && !@mkdir($dir, 0755, true)) {
+            return;
+        }
+        $all = glob($dir . '/shop-*.db') ?: [];
+        if ($all !== [] && max(array_map('filemtime', $all)) > time() - 3600) {
+            return;   // migration qui échoue et se retente : une copie par heure suffit
+        }
+        @copy($dbPath, $dir . '/shop-' . gmdate('Ymd-His') . '-' . substr(bin2hex(random_bytes(2)), 0, 4) . '.db');
+        $all = glob($dir . '/shop-*.db') ?: [];
+        sort($all);
+        foreach (array_slice($all, 0, max(0, count($all) - 5)) as $old) {
+            @unlink($old);
+        }
+    }
+
+    /** Schéma (shop.sql, IF NOT EXISTS partout) puis migrations additives ; repère écrit seulement si tout a réussi. */
+    private static function applySchema(\PDO $db, string $dbPath, bool $dbExists, string $sqlSource, string $markerPath, string $sqlMtime): \PDO
+    {
+        $grav = Grav::instance();
         $sqlQueries = file_get_contents($sqlSource);
         try {
             $db->exec($sqlQueries);
