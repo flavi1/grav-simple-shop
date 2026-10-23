@@ -103,4 +103,34 @@ assert(InventoryManager::decrementStockInFile($file, 1, $lock) === ['old' => 20,
 $r = $save(['price_entered_as' => 'ht'], []);
 assert(!$r['ok'] && isset($r['errors']['price_entered_as']));
 
+// --- 4. Formulaire complet (envoi sans JavaScript) : seules les fiches modifiées sont réécrites
+$fileA = $pages[1]->file;
+$mtimeA = filemtime($fileA);
+$resolve = fn (string $route) => ['/affiches/b' => $file, '/affiches/a' => $fileA][$route] ?? null;
+$current = fn (string $f) => Symfony\Component\Yaml\Yaml::parse(explode('---', file_get_contents($f))[1]);
+$b = $current($file);
+$form = [   // ce que le navigateur envoie : toutes les lignes, toutes les valeurs, et les valeurs d'origine en champs cachés
+    ['route' => '/affiches/b', 'values' => ['title' => 'Bateau', 'subtitle' => $b['subtitle'], 'format' => 'A3', 'framed' => '1',
+        'product_price' => '13.00', 'product_quantity' => '19'],
+     'original' => ['title' => 'Bateau', 'subtitle' => $b['subtitle'], 'format' => 'A2', 'framed' => '1', 'product_price' => '13.00', 'product_quantity' => '19']],
+    ['route' => '/affiches/a', 'values' => ['title' => 'Éléphant', 'subtitle' => '', 'format' => '', 'framed' => '0', 'product_price' => '9', 'product_quantity' => '3'],
+     'original' => ['title' => 'Éléphant', 'subtitle' => '', 'format' => '', 'framed' => '0', 'product_price' => '9', 'product_quantity' => '3']],
+    ['route' => '/affiches/inconnue', 'values' => ['title' => 'X'], 'original' => ['title' => 'X']],   // inchangée : ignorée
+];
+clearstatcache();
+$r = CatalogTable::saveItems($form, $resolve, $cols['columns'], $validate, $lock);
+assert($r['saved'] === 1 && $r['unchanged'] === 2 && $r['failed'] === 0 && array_keys($r['items']) === ['/affiches/b'], json_encode($r));
+assert($current($file)['format'] === 'A3', 'fiche modifiée réécrite');
+clearstatcache();
+assert(filemtime($fileA) === $mtimeA && !isset($current($fileA)['format']), 'fiche inchangée : fichier non touché');
+
+// Envoi optimisé (JavaScript) : seulement la fiche et les champs modifiés, même format ; erreurs par fiche
+$r = CatalogTable::saveItems([
+    ['route' => '/affiches/a', 'values' => ['product_price' => '10.5'], 'original' => ['product_price' => '9']],
+    ['route' => '/affiches/b', 'values' => ['product_price' => 'abc'], 'original' => ['product_price' => '13.00']],
+    ['route' => '/affiches/zz', 'values' => ['title' => 'Y'], 'original' => ['title' => 'X']],
+], $resolve, $cols['columns'], $validate, $lock);
+assert($r['saved'] === 1 && $r['failed'] === 2 && $r['items']['/affiches/a']['ok'] && isset($r['items']['/affiches/b']['errors']['product_price'], $r['items']['/affiches/zz']), json_encode($r));
+assert($current($fileA)['product_price'] === '10.5' && $current($file)['product_price'] === '13.00');
+
 echo "OK\n";

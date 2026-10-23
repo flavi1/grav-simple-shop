@@ -535,10 +535,12 @@ class ShopApiController extends AbstractApiController
     }
 
     /**
-     * PATCH /simple-shop/catalog — corps : {"type": "book", "route": "/livres/x", "changes": {"isbn": "…"},
-     * "original": {"isbn": "valeur affichée"}}. Réponse : {ok, errors (par champ), conflicts (champ => valeur actuelle), values}.
+     * POST /simple-shop/catalog — enregistrement du formulaire du tableau. Corps (JSON ou formulaire classique) :
+     * `type`, `items[]` = {route, values: {champ: valeur}, original: {champ: valeur affichée}}. Le formulaire complet peut
+     * être envoyé : seules les fiches dont une valeur diffère de l'originale sont réécrites. Réponse : {saved, unchanged,
+     * failed, items: {route: {ok, errors, conflicts, values}}} (fiches traitées seulement).
      */
-    public function saveCatalogRow(ServerRequestInterface $request): ResponseInterface
+    public function saveCatalog(ServerRequestInterface $request): ResponseInterface
     {
         $this->requirePermission($request, self::PERM_WRITE);
         $body = $this->getRequestBody($request);
@@ -547,15 +549,14 @@ class ShopApiController extends AbstractApiController
         if ($type === null) {
             throw new ValidationException('Type de produit sans tableau de catalogue.');
         }
-        $changes = is_array($body['changes'] ?? null) ? $body['changes'] : [];
-        $original = is_array($body['original'] ?? null) ? $body['original'] : [];
-        $route = '/' . trim((string) ($body['route'] ?? ''), '/');
+        $items = is_array($body['items'] ?? null) ? array_values($body['items']) : [];
         $pages = $this->grav['pages'];
         $pages->enablePages();
-        $page = $pages->find($route);
-        if (!$page || (string) $page->template() !== $type->name || !$page->filePath() || !is_file($page->filePath())) {
-            throw new NotFoundException('Fiche introuvable : ' . $route);
-        }
+        $resolve = static function (string $route) use ($pages, $type): ?string {
+            $page = $pages->find($route);
+
+            return $page && (string) $page->template() === $type->name && $page->filePath() && is_file($page->filePath()) ? $page->filePath() : null;
+        };
         $cols = CatalogTable::columns($type, $this->fieldDefinitions($type->name), $this->priceBasis());
         $lockDir = $this->grav['locator']->findResource('user://data/simple-shop', true, true);
         if (!is_dir($lockDir)) {
@@ -571,10 +572,11 @@ class ShopApiController extends AbstractApiController
 
             return $messages;
         };
-        $result = CatalogTable::save($page->filePath(), $changes, $original, $cols['columns'], $validate, $lockDir . '/stock.lock');
-        if ($result['ok'] && $result['values'] !== []) {
+        $result = CatalogTable::saveItems($items, $resolve, $cols['columns'], $validate, $lockDir . '/stock.lock');
+        if ($result['saved'] > 0) {
             \Grav\Common\Cache::clearCache('cache-only');
-            $this->grav['log']->info('[SimpleShop] Catalogue : ' . $route . ' modifiée (' . implode(', ', array_keys($changes)) . ') par '
+            $this->grav['log']->info('[SimpleShop] Catalogue : ' . $result['saved'] . ' fiche(s) modifiée(s) ('
+                . implode(', ', array_keys(array_filter($result['items'], static fn ($r) => $r['ok']))) . ') par '
                 . (string) ($this->getUser($request)->username ?? '?'));
         }
 

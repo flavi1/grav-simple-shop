@@ -961,18 +961,13 @@
         showCatalog() {
             var self = this;
             if (!this.catalogType && this.catalogTypes.length) { this.catalogType = this.catalogTypes[0].name; }
-            var bar = h('div', { class: 'ss-bar' });
             if (this.catalogTypes.length > 1) {
                 var sel = h('select', { id: 'ss-cat-type' }, this.catalogTypes.map(function (t) {
                     return h('option', { value: t.name, selected: t.name === self.catalogType }, t.label);
                 }));
                 sel.addEventListener('change', function () { self.catalogType = sel.value; self.loadCatalog(); });
-                bar.appendChild(h('label', { class: 'ss-field', for: 'ss-cat-type' }, 'Type de produit', sel));
+                this.body.appendChild(h('div', { class: 'ss-bar' }, h('label', { class: 'ss-field', for: 'ss-cat-type' }, 'Type de produit', sel)));
             }
-            this.saveAllBtn = h('button', { class: 'ss-btn ss-primary', type: 'button', disabled: true, onclick: function () { self.saveAllCatalog(); } }, 'Enregistrer les modifications');
-            bar.appendChild(this.saveAllBtn);
-            bar.appendChild(h('span', { class: 'ss-muted' }, 'Champs et contraintes repris du blueprint du type de produit. Une ligne modifiée est surlignée.'));
-            this.body.appendChild(bar);
             this.list = h('div');
             this.body.appendChild(this.list);
             this.loadCatalog();
@@ -984,14 +979,19 @@
             this.list.appendChild(h('p', { class: 'ss-muted' }, 'Chargement…'));
             api('GET', '/catalog?type=' + encodeURIComponent(this.catalogType)).then(function (res) {
                 self.catalog = res.data;
-                self.catalogRows = [];
                 self.drawCatalog();
             }).catch(function (e) { self.list.innerHTML = ''; self.fail(e); });
         }
 
+        /**
+         * Le tableau est un vrai formulaire (POST /catalog) : chaque champ s'appelle items[i][values][champ] et sa valeur affichée
+         * au chargement voyage dans items[i][original][champ] ; le serveur ne réécrit que les fiches dont une valeur a changé.
+         * Le JavaScript intercepte l'envoi pour n'envoyer que les fiches modifiées (requête plus légère, même format).
+         */
         drawCatalog() {
             var self = this;
             var c = this.catalog;
+            this.catalogRows = [];
             this.list.innerHTML = '';
             (c.errors || []).forEach(function (err) { self.list.appendChild(h('p', { class: 'ss-ferr' }, 'Blueprint : ' + err)); });
             if (!c.rows.length) {
@@ -999,24 +999,33 @@
                 return;
             }
             var basisLabel = function (b) { return b === 'ttc' ? 'TTC' : 'HT'; };
+            this.catalogSubmit = h('button', { class: 'ss-btn ss-primary', type: 'submit', disabled: true }, 'Enregistrer');
+            var form = h('form', { method: 'post', action: apiUrl('/catalog'), class: 'ss-cat-form', novalidate: true });
+            form.appendChild(h('input', { type: 'hidden', name: 'type', value: c.type }));
+            form.appendChild(h('div', { class: 'ss-bar', style: 'justify-content:space-between;align-items:center' },
+                h('span', { class: 'ss-muted' }, 'Champs et contraintes repris du blueprint du type de produit. Une ligne modifiée est surlignée.'),
+                this.catalogSubmit));
             var head = h('tr', {}, c.columns.map(function (col) {
                 return h('th', {}, col.fields.map(function (f) {
                     return f.label + (f.price_basis ? ' (' + basisLabel(f.price_basis) + ')' : '');
                 }).join(' / '));
-            }).concat([h('th', {}, '')]));
+            }));
             var body = h('tbody');
             c.rows.forEach(function (row, ri) {
-                var state = { row: row, original: Object.assign({}, row.values), inputs: {}, errs: {} };
+                var state = { row: row, index: ri, original: Object.assign({}, row.values), inputs: {}, errs: {}, origInputs: {} };
                 self.catalogRows.push(state);
-                var saveBtn = h('button', { class: 'ss-btn', type: 'button', disabled: true, onclick: function () { self.saveCatalogRow(state); } }, 'Enregistrer');
-                state.saveBtn = saveBtn;
                 var tr = h('tr', {});
                 state.tr = tr;
                 c.columns.forEach(function (col, ci) {
                     var stacked = col.fields.length > 1;
                     tr.appendChild(h('td', {}, h('div', { class: 'ss-stack' }, col.fields.map(function (f) {
                         var input = self.catalogInput(f, row.values[f.name], ri, ci === 0);
+                        input.name = 'items[' + ri + '][values][' + f.name + ']';
                         state.inputs[f.name] = input;
+                        var orig = h('input', { type: 'hidden', name: 'items[' + ri + '][original][' + f.name + ']', value: row.values[f.name] || '' });
+                        state.origInputs[f.name] = orig;
+                        // Case à cocher décochée : rien n'est envoyé par le navigateur, d'où la valeur 0 qui la précède.
+                        var off = f.type === 'toggle' ? h('input', { type: 'hidden', name: input.name, value: '0' }) : null;
                         var onChange = function () { self.markCatalogRow(state); };
                         input.addEventListener('input', onChange);
                         input.addEventListener('change', onChange);
@@ -1027,16 +1036,20 @@
                             ? h('span', { class: 'ss-badge', title: 'Base de prix propre à cette fiche' }, basisLabel(row.price_entered_as)) : null;
                         return h('div', { class: 'ss-cell' },
                             stacked ? h('small', { 'aria-hidden': 'true' }, f.label) : null,
+                            orig, off,
                             f.append || own ? h('span', { class: 'ss-unit' }, input, f.append ? h('span', { class: 'ss-muted' }, f.append) : null, own) : input,
                             err);
                     }))));
                 });
-                tr.appendChild(h('td', {}, saveBtn, row.published ? null : h('div', { class: 'ss-muted' }, 'non publiée'),
-                    h('div', { class: 'ss-muted', style: 'word-break:break-all' }, row.route)));
+                // Route de la fiche (champ caché dans la première cellule), affichée sous le titre.
+                tr.firstChild.appendChild(h('input', { type: 'hidden', name: 'items[' + ri + '][route]', value: row.route }));
+                tr.firstChild.appendChild(h('div', { class: 'ss-muted', style: 'font-size:.72rem;word-break:break-all' }, row.route + (row.published ? '' : ' — non publiée')));
                 body.appendChild(tr);
             });
-            this.list.appendChild(h('div', { class: 'ss-table-scroll', style: 'max-height:75vh;overflow:auto' },
+            form.appendChild(h('div', { class: 'ss-table-scroll', style: 'max-height:75vh;overflow:auto' },
                 h('table', { class: 'ss-cat' }, h('thead', {}, head), body)));
+            form.addEventListener('submit', function (ev) { ev.preventDefault(); self.saveCatalog(); });
+            this.list.appendChild(form);
         }
 
         /** Champ d'une cellule, d'après la définition du blueprint (type, obligatoire, motif, bornes, options). */
@@ -1049,7 +1062,7 @@
                     el.appendChild(h('option', { value: value, selected: true }, value + ' (hors liste)'));
                 }
             } else if (f.type === 'toggle') {
-                el = h('input', { id: id, type: 'checkbox', checked: value === '1' });
+                el = h('input', { id: id, type: 'checkbox', value: '1', checked: value === '1' });
             } else if (f.type === 'textarea') {
                 el = h('textarea', { id: id, rows: '2', style: 'min-width:14rem' });
                 el.value = value || '';
@@ -1074,74 +1087,76 @@
             var changes = {};
             Object.keys(state.inputs).forEach(function (name) {
                 var v = self.catalogValue(state.inputs[name]);
-                if (v !== (state.original[name] || '')) { changes[name] = v; }
+                if (v !== String(state.original[name] || '').trim()) { changes[name] = v; }   // comme le serveur : espaces de bord ignorés
             });
             return changes;
         }
 
         markCatalogRow(state) {
-            var dirty = Object.keys(this.catalogChanges(state)).length > 0;
-            state.tr.classList.toggle('ss-dirty', dirty);
-            state.saveBtn.disabled = !dirty;
-            if (this.saveAllBtn) {
-                this.saveAllBtn.disabled = !this.catalogRows.some(function (s) { return s.tr.classList.contains('ss-dirty'); });
+            state.tr.classList.toggle('ss-dirty', Object.keys(this.catalogChanges(state)).length > 0);
+            if (this.catalogSubmit) {
+                this.catalogSubmit.disabled = !this.catalogRows.some(function (s) { return s.tr.classList.contains('ss-dirty'); });
             }
         }
 
-        /** Enregistre une ligne : champs modifiés + valeurs affichées au chargement (conflit si la fiche a changé entre-temps). */
-        saveCatalogRow(state) {
-            var self = this;
-            var changes = this.catalogChanges(state);
-            var names = Object.keys(changes);
-            if (!names.length) { return Promise.resolve(true); }
-            Object.keys(state.errs).forEach(function (n) { state.errs[n].textContent = ''; state.inputs[n].removeAttribute('aria-invalid'); });
-            var invalid = names.filter(function (n) { return state.inputs[n].checkValidity && !state.inputs[n].checkValidity(); });
-            if (invalid.length) {
-                invalid.forEach(function (n) {
-                    state.inputs[n].setAttribute('aria-invalid', 'true');
-                    state.errs[n].textContent = state.inputs[n].validationMessage || 'Valeur invalide.';
-                });
-                state.inputs[invalid[0]].focus();
-                return Promise.resolve(false);
-            }
-            var original = {};
-            names.forEach(function (n) { original[n] = state.original[n] || ''; });
-            state.saveBtn.disabled = true;
-            return api('PATCH', '/catalog', { type: this.catalog.type, route: state.row.route, changes: changes, original: original }).then(function (res) {
-                var r = res.data;
-                if (r.ok) {
-                    Object.keys(r.values).forEach(function (n) {
-                        state.original[n] = r.values[n];
-                        if (state.inputs[n] && state.inputs[n].type !== 'checkbox') { state.inputs[n].value = r.values[n]; }
-                    });
-                    self.markCatalogRow(state);
-                    self.notify(state.row.title + ' : enregistré.', false);
-                    return true;
-                }
-                Object.keys(r.errors || {}).forEach(function (n) {
-                    if (state.errs[n]) { state.errs[n].textContent = r.errors[n].join(' '); state.inputs[n].setAttribute('aria-invalid', 'true'); }
-                });
-                Object.keys(r.conflicts || {}).forEach(function (n) {
-                    // La fiche a changé depuis l'affichage (commande déstockée, autre édition) : la valeur actuelle est montrée ;
-                    // un nouvel enregistrement la remplacera en connaissance de cause.
-                    state.original[n] = r.conflicts[n];
-                    state.errs[n].textContent = 'Modifié entre-temps : valeur actuelle « ' + r.conflicts[n] + ' ». Enregistrez à nouveau pour la remplacer.';
-                    state.inputs[n].setAttribute('aria-invalid', 'true');
-                });
-                self.markCatalogRow(state);
-                self.notify(state.row.title + ' : non enregistré, voir les champs signalés.', true);
-                return false;
-            }).catch(function (e) { self.markCatalogRow(state); self.fail(e); return false; });
-        }
-
-        saveAllCatalog() {
+        /** Envoi optimisé : seules les fiches modifiées, et pour chacune ses champs modifiés avec leur valeur d'origine. */
+        saveCatalog() {
             var self = this;
             var dirty = this.catalogRows.filter(function (s) { return s.tr.classList.contains('ss-dirty'); });
-            var ok = 0;
-            var chain = Promise.resolve();
-            dirty.forEach(function (s) { chain = chain.then(function () { return self.saveCatalogRow(s).then(function (r) { if (r) { ok++; } }); }); });
-            chain.then(function () {
-                self.notify(ok + ' fiche(s) enregistrée(s)' + (ok < dirty.length ? ', ' + (dirty.length - ok) + ' à corriger.' : '.'), ok < dirty.length);
+            var invalid = [];
+            var items = [];
+            dirty.forEach(function (st) {
+                Object.keys(st.errs).forEach(function (n) { st.errs[n].textContent = ''; st.inputs[n].removeAttribute('aria-invalid'); });
+                var changes = self.catalogChanges(st);
+                var original = {};
+                Object.keys(changes).forEach(function (n) {
+                    original[n] = st.original[n] || '';
+                    var input = st.inputs[n];
+                    if (input.checkValidity && !input.checkValidity()) {
+                        input.setAttribute('aria-invalid', 'true');
+                        st.errs[n].textContent = input.validationMessage || 'Valeur invalide.';
+                        invalid.push(input);
+                    }
+                });
+                items.push({ route: st.row.route, values: changes, original: original });
+            });
+            if (invalid.length) {
+                invalid[0].focus();
+                this.notify('Corrigez les champs signalés avant d’enregistrer.', true);
+                return;
+            }
+            if (!items.length) { return; }
+            this.catalogSubmit.disabled = true;
+            api('POST', '/catalog', { type: this.catalog.type, items: items }).then(function (res) {
+                var r = res.data;
+                dirty.forEach(function (st) {
+                    var out = r.items[st.row.route];
+                    if (!out) { return; }
+                    if (out.ok) {
+                        Object.keys(out.values).forEach(function (n) {
+                            st.original[n] = out.values[n];
+                            if (st.origInputs[n]) { st.origInputs[n].value = out.values[n]; }
+                            if (st.inputs[n] && st.inputs[n].type !== 'checkbox') { st.inputs[n].value = out.values[n]; }
+                        });
+                        return;
+                    }
+                    Object.keys(out.errors || {}).forEach(function (n) {
+                        if (st.errs[n]) { st.errs[n].textContent = out.errors[n].join(' '); st.inputs[n].setAttribute('aria-invalid', 'true'); }
+                    });
+                    Object.keys(out.conflicts || {}).forEach(function (n) {
+                        // La fiche a changé depuis l'affichage (commande déstockée, autre édition) : valeur actuelle montrée ;
+                        // un nouvel enregistrement la remplacera en connaissance de cause.
+                        st.original[n] = out.conflicts[n];
+                        if (st.origInputs[n]) { st.origInputs[n].value = out.conflicts[n]; }
+                        st.errs[n].textContent = 'Modifié entre-temps : valeur actuelle « ' + out.conflicts[n] + ' ». Enregistrez à nouveau pour la remplacer.';
+                        st.inputs[n].setAttribute('aria-invalid', 'true');
+                    });
+                });
+                dirty.forEach(function (st) { self.markCatalogRow(st); });
+                self.notify(r.saved + ' fiche(s) enregistrée(s)' + (r.failed ? ', ' + r.failed + ' non enregistrée(s) : voir les champs signalés.' : '.'), r.failed > 0);
+            }).catch(function (e) {
+                dirty.forEach(function (st) { self.markCatalogRow(st); });
+                self.fail(e);
             });
         }
 

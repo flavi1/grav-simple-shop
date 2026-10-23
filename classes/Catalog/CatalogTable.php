@@ -167,6 +167,51 @@ final class CatalogTable
     }
 
     /**
+     * Enregistrement d'un formulaire de tableau : TOUT le formulaire (envoi classique, sans JavaScript) ou seulement les fiches
+     * modifiées (envoi optimisé par JavaScript), même format. Une fiche n'est réécrite que si l'une de ses valeurs diffère de
+     * celle affichée au chargement (`original`) ; les autres ne sont pas touchées.
+     *
+     * @param list<array{route?: string, values?: array, original?: array}> $items
+     * @param callable $file fn(string $route): ?string — fichier de la fiche (null : introuvable ou d'un autre type)
+     *
+     * @return array{saved: int, unchanged: int, failed: int, items: array<string, array>}
+     */
+    public static function saveItems(array $items, callable $file, array $columns, callable $validate, string $lockFile): array
+    {
+        $out = ['saved' => 0, 'unchanged' => 0, 'failed' => 0, 'items' => []];
+        foreach ($items as $item) {
+            if (!is_array($item)) {
+                continue;
+            }
+            $route = '/' . trim((string) ($item['route'] ?? ''), '/');
+            $values = is_array($item['values'] ?? null) ? $item['values'] : [];
+            $original = is_array($item['original'] ?? null) ? $item['original'] : [];
+            $changes = [];
+            foreach ($values as $name => $value) {
+                $value = is_scalar($value) || $value === null ? trim((string) $value) : $value;
+                if (!array_key_exists($name, $original) || $value !== trim((string) $original[$name])) {
+                    $changes[(string) $name] = $value;
+                }
+            }
+            if ($changes === []) {
+                $out['unchanged']++;
+                continue;
+            }
+            $path = $file($route);
+            if ($path === null) {
+                $out['failed']++;
+                $out['items'][$route] = ['ok' => false, 'errors' => ['_' => ['Fiche introuvable.']], 'conflicts' => [], 'values' => []];
+                continue;
+            }
+            $r = self::save($path, $changes, $original, $columns, $validate, $lockFile);
+            $out[$r['ok'] ? 'saved' : 'failed']++;
+            $out['items'][$route] = $r;
+        }
+
+        return $out;
+    }
+
+    /**
      * Enregistre les champs modifiés d'une fiche.
      *
      * @param array<string, string> $changes  champ => nouvelle valeur

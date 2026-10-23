@@ -301,9 +301,14 @@ Chaque nom désigne un champ `header.<nom>` du MÊME blueprint : type (texte, no
 unité (`append`), `validate` (obligatoire, motif, bornes) et options sont repris tels quels — une contrainte ajoutée au
 blueprint vaut aussitôt dans le tableau (attributs HTML) et à l'enregistrement (validation de Grav). Les champs de prix
 (`price_fields`) indiquent la base HT/TTC du site ; une fiche à base propre (`price_entered_as`) le signale.
-Enregistrement ligne par ligne (ou toutes les lignes modifiées) : seuls les champs modifiés sont écrits, sous le verrou du
-déstockage ; si la fiche a changé depuis l'affichage (commande déstockée…), rien n'est écrit et la valeur actuelle est
-montrée. API : `GET /simple-shop/catalog?type=<type>`, `PATCH /simple-shop/catalog` (`type`, `route`, `changes`, `original`).
+Le tableau est un formulaire, avec un seul bouton « Enregistrer » (en haut à droite, grisé tant que rien n'a changé).
+Sans JavaScript, le formulaire est envoyé en entier : chaque fiche porte ses valeurs (`items[i][values][champ]`) et celles
+affichées au chargement (`items[i][original][champ]`, champs cachés), et le serveur ne réécrit que les fiches dont une valeur
+diffère. Avec JavaScript, l'envoi est intercepté et ne contient que les fiches et champs modifiés (même format, en JSON).
+Les champs modifiés sont écrits sous le verrou du déstockage ; si la fiche a changé depuis l'affichage (commande
+déstockée…), rien n'est écrit pour elle et la valeur actuelle est montrée. API : `GET /simple-shop/catalog?type=<type>`,
+`POST /simple-shop/catalog` (`type`, `items[]` = `{route, values, original}` ; réponse `saved`, `unchanged`, `failed`,
+`items` par route).
 
 ## Thème sombre (pages publiques)
 

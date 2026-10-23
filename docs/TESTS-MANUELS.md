@@ -268,7 +268,8 @@ BIC, `enabled: true`), `payments.methods.manual` (ex. `[bank_transfer, stripe]`)
 1. Admin2 > Ventes > **Catalogue** : une ligne par livre ; colonnes titre / sous-titre / auteur(s), date, pages, ISBN, dimensions,
    poids, prix (HT ou TTC selon le réglage), stock.
 2. Prix « 22,555 » → refusé (motif du blueprint) ; titre vidé → refusé (obligatoire). Rien n'est écrit.
-3. Modifier deux champs, « Enregistrer » : la fiche (Admin2 > Pages) montre les nouvelles valeurs, le reste est inchangé.
+3. « Enregistrer » (en haut à droite) est grisé ; il s'active dès qu'une valeur change (et se regrise si on revient à la valeur
+   d'origine). Modifier deux livres, enregistrer : seules ces deux fiches sont réécrites (Admin2 > Pages), le bouton se regrise.
 4. Conflit : afficher le tableau, passer une commande du livre sur le site, modifier son stock dans le tableau → message
    « Modifié entre-temps : valeur actuelle … » ; enregistrer à nouveau pour remplacer.
 5. Ajouter une contrainte au blueprint (ex. `validate: { required: true }` sur l’ISBN), recharger : l’ISBN devient obligatoire dans le tableau.
