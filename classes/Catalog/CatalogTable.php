@@ -159,6 +159,50 @@ final class CatalogTable
         return $rows;
     }
 
+    /**
+     * Export CSV du tableau (Excel en français : `;`, UTF-8 avec BOM, fins de ligne CRLF) : une ligne par fiche, une colonne
+     * par champ (libellés du blueprint, base HT/TTC des prix), puis la base de prix propre à la fiche et sa route.
+     * Nombres décimaux (`inputmode: decimal`) avec la virgule ; cellules commençant par = + - @ neutralisées (sauf nombres).
+     */
+    public static function csv(array $columns, array $rows): string
+    {
+        $fields = array_merge(...array_map(static fn ($c) => $c['fields'], $columns ?: [['fields' => []]]));
+        $header = array_map(static fn ($f) => $f['label'] . ($f['price_basis'] ? ' (' . strtoupper($f['price_basis']) . ')' : '')
+            . ($f['append'] ? ' (' . $f['append'] . ')' : ''), $fields);
+        $header[] = 'Base de prix de la fiche';
+        $header[] = 'Route';
+        $out = "\xEF\xBB\xBF" . self::csvLine($header);
+        foreach ($rows as $row) {
+            $cells = [];
+            foreach ($fields as $f) {
+                $v = (string) ($row['values'][$f['name']] ?? '');
+                if ($f['inputmode'] === 'decimal' && preg_match('/^-?\d+\.\d+$/', $v)) {
+                    $v = str_replace('.', ',', $v);
+                }
+                $cells[] = $v;
+            }
+            $cells[] = $row['price_entered_as'] ? strtoupper($row['price_entered_as']) : '';
+            $cells[] = $row['route'];
+            $out .= self::csvLine($cells);
+        }
+
+        return $out;
+    }
+
+    private static function csvLine(array $cells): string
+    {
+        $line = [];
+        foreach ($cells as $v) {
+            $v = (string) $v;
+            if ($v !== '' && strpbrk($v[0], "=+-@\t\r") !== false && !preg_match('/^-?\d+([.,]\d+)?$/', $v)) {
+                $v = "'" . $v;
+            }
+            $line[] = strpbrk($v, ";\"\r\n") !== false ? '"' . str_replace('"', '""', $v) . '"' : $v;
+        }
+
+        return implode(';', $line) . "\r\n";
+    }
+
     private static function fold(string $s): string
     {
         $t = function_exists('iconv') ? @iconv('UTF-8', 'ASCII//TRANSLIT', $s) : false;

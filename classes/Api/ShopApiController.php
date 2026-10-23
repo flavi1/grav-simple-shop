@@ -583,6 +583,28 @@ class ShopApiController extends AbstractApiController
         return ApiResponse::create($result);
     }
 
+    /** GET /simple-shop/catalog/export?type=<type> — le tableau du type en CSV (mêmes colonnes que l'écran). */
+    public function exportCatalog(ServerRequestInterface $request): ResponseInterface
+    {
+        $this->requirePermission($request, self::PERM_READ);
+        $types = CatalogTable::types();
+        $name = (string) ($request->getQueryParams()['type'] ?? '');
+        $type = $types[$name] ?? null;
+        if ($type === null) {
+            throw new NotFoundException('Type de produit sans tableau de catalogue.');
+        }
+        $cols = CatalogTable::columns($type, $this->fieldDefinitions($type->name), $this->priceBasis());
+        $pages = $this->grav['pages'];
+        $pages->enablePages();
+        $rows = CatalogTable::rows($pages->all(), $type, $cols['columns']);
+
+        return new Response(200, [
+            'Content-Type'        => 'text/csv; charset=utf-8',
+            'Content-Disposition' => 'attachment; filename="catalogue-' . preg_replace('/[^A-Za-z0-9_-]/', '', $type->name) . '-' . date('Y-m-d') . '.csv"',
+            'Cache-Control'       => 'no-store',
+        ], CatalogTable::csv($cols['columns'], $rows));
+    }
+
     /** Base de saisie des prix des fiches du site (`taxes.prices_entered`). */
     private function priceBasis(): string
     {

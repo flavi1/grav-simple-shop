@@ -210,6 +210,7 @@ class SimpleShopPlugin extends Plugin
             $group->put('/taxes/rates', [$c, 'saveTaxTypes']);   // ancien nom (import CSV)
 
             $group->get('/catalog', [$c, 'catalog']);
+            $group->get('/catalog/export', [$c, 'exportCatalog']);
             $group->post('/catalog', [$c, 'saveCatalog']);
 
             $group->get('/bans', [$c, 'bans']);

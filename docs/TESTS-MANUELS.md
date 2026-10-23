@@ -272,4 +272,5 @@ BIC, `enabled: true`), `payments.methods.manual` (ex. `[bank_transfer, stripe]`)
    d'origine). Modifier deux livres, enregistrer : seules ces deux fiches sont réécrites (Admin2 > Pages), le bouton se regrise.
 4. Conflit : afficher le tableau, passer une commande du livre sur le site, modifier son stock dans le tableau → message
    « Modifié entre-temps : valeur actuelle … » ; enregistrer à nouveau pour remplacer.
+6. « Exporter en CSV » : le fichier s'ouvre dans un tableur (colonnes du tableau, accents corrects, décimales avec la virgule).
 5. Ajouter une contrainte au blueprint (ex. `validate: { required: true }` sur l’ISBN), recharger : l’ISBN devient obligatoire dans le tableau.

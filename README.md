@@ -308,7 +308,8 @@ diffère. Avec JavaScript, l'envoi est intercepté et ne contient que les fiches
 Les champs modifiés sont écrits sous le verrou du déstockage ; si la fiche a changé depuis l'affichage (commande
 déstockée…), rien n'est écrit pour elle et la valeur actuelle est montrée. API : `GET /simple-shop/catalog?type=<type>`,
 `POST /simple-shop/catalog` (`type`, `items[]` = `{route, values, original}` ; réponse `saved`, `unchanged`, `failed`,
-`items` par route).
+`items` par route). Export : bouton « Exporter en CSV » (type affiché), `GET /simple-shop/catalog/export?type=<type>` —
+mêmes colonnes que l'écran, `;`, UTF-8 avec BOM, décimales avec la virgule, base de prix propre à la fiche et route.
 
 ## Thème sombre (pages publiques)
 

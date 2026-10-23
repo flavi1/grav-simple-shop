@@ -1002,9 +1002,16 @@
             this.catalogSubmit = h('button', { class: 'ss-btn ss-primary', type: 'submit', disabled: true }, 'Enregistrer');
             var form = h('form', { method: 'post', action: apiUrl('/catalog'), class: 'ss-cat-form', novalidate: true });
             form.appendChild(h('input', { type: 'hidden', name: 'type', value: c.type }));
+            var exportBtn = h('button', { class: 'ss-btn', type: 'button', onclick: function () {
+                exportBtn.disabled = true;
+                api('GET', '/catalog/export?type=' + encodeURIComponent(c.type), undefined, { blob: true })
+                    .then(function (blob) { download(blob, 'catalogue-' + c.type + '-' + new Date().toISOString().slice(0, 10) + '.csv'); })
+                    .catch(function (e) { self.fail(e); })
+                    .then(function () { exportBtn.disabled = false; });
+            } }, 'Exporter en CSV');
             form.appendChild(h('div', { class: 'ss-bar', style: 'justify-content:space-between;align-items:center' },
                 h('span', { class: 'ss-muted' }, 'Champs et contraintes repris du blueprint du type de produit. Une ligne modifiée est surlignée.'),
-                this.catalogSubmit));
+                h('span', { class: 'ss-bar', style: 'margin:0' }, exportBtn, this.catalogSubmit)));
             var head = h('tr', {}, c.columns.map(function (col) {
                 return h('th', {}, col.fields.map(function (f) {
                     return f.label + (f.price_basis ? ' (' + basisLabel(f.price_basis) + ')' : '');

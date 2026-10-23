@@ -133,4 +133,15 @@ $r = CatalogTable::saveItems([
 assert($r['saved'] === 1 && $r['failed'] === 2 && $r['items']['/affiches/a']['ok'] && isset($r['items']['/affiches/b']['errors']['product_price'], $r['items']['/affiches/zz']), json_encode($r));
 assert($current($fileA)['product_price'] === '10.5' && $current($file)['product_price'] === '13.00');
 
+// --- 5. Export CSV (mêmes colonnes que l'écran)
+$csv = CatalogTable::csv($cols['columns'], CatalogTable::rows($grav['pages']->all(), $types['poster'], $cols['columns']));
+$lines = explode("\r\n", rtrim($csv, "\r\n"));
+assert(str_starts_with($csv, "\xEF\xBB\xBF"), 'BOM UTF-8');
+assert(substr($lines[0], 3) === 'Titre;Sous-titre;Format;Encadrée;Prix (TTC);Stock (ex.);Base de prix de la fiche;Route', $lines[0]);
+assert(count($lines) === 3 && str_starts_with($lines[1], 'Bateau;') && str_ends_with($lines[2], ';HT;/affiches/a'), $csv);
+$tricky = CatalogTable::csv($cols['columns'], [['route' => '/x', 'price_entered_as' => null,
+    'values' => ['title' => '=SOMME(A1)', 'subtitle' => 'a;b "c"', 'product_quantity' => '-1', 'product_price' => '12.5']]]);
+$l = explode("\r\n", $tricky)[1];
+assert(str_starts_with($l, "'=SOMME(A1);\"a;b \"\"c\"\"\";") && str_contains($l, ';-1;') && str_contains($l, ';12,5;'), $l);
+
 echo "OK\n";
